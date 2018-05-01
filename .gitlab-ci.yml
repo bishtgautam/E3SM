@@ -1,0 +1,15 @@
+before_script:
+  - apt-get update -qq
+  - apt-get install -y cmake gcc libopenmpi-dev openmpi-bin liblapack-dev gfortran mercurial git netcdf-bin libnetcdf-dev libnetcdff-dev python-dev
+  - apt-get install -y libxml2 libxml2-dev libxml2-utils libxml-perl xml-core gnulib
+
+tests:
+  script:
+    - gcc --version
+    - gfortran --version
+    - git submodule update --init
+    - ln -s /usr/lib/x86_64-linux-gnu/libnetcdf* /usr/lib
+    - export USER=gitlab-ci
+    - ./.ci-scripts/f19_g16.ICLM45.sh
+    - exit ${EXIT_CODE}
+

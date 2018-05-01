@@ -1577,4 +1577,15 @@ lude </CFLAGS>
 	<ADD_CFLAGS MODEL="csm_share"> -std=c99 </ADD_CFLAGS>
 </compiler>
 
+<compiler MACH="gitlab-ci-linux" COMPILER="gnu" >
+  <ADD_GPTL_CPPDEFS> -DHAVE_VPRINTF -DHAVE_GETTIMEOFDAY -DHAVE_BACKTRACE </ADD_GPTL_CPPDEFS>
+  <ADD_SLIBS> -L/usr/lib/x86_64-linux-gnu/lib/ -lnetcdff -lnetcdf -lcurl -llapack -lblas </ADD_SLIBS>
+  <SFC>/usr/bin/gfotran</SFC>
+  <SCC>/usr/bin/gcc</SCC>
+  <SCXX>/usr/bin/g++</SCXX>
+  <MPIFC>/usr/bin/mpif90</MPIFC>
+  <MPICC>/usr/bin/mpicc</MPICC>
+  <MPICXX>/usr/bin/mpicxx</MPICXX>
+  <NETCDF_PATH>/usr</NETCDF_PATH>
+</compiler>
 </config_compilers>
