@@ -98,7 +98,9 @@ contains
          u10              => frictionvel_vars%u10_patch        , & ! Output: [real(r8) (:) ] 10-m wind (m/s) (for dust model)
          u10_elm          => frictionvel_vars%u10_elm_patch    , & ! Output: [real(r8) (:) ] 10-m wind (m/s)
          va               => frictionvel_vars%va_patch         , & ! Output: [real(r8) (:) ] atmospheric wind speed plus convective velocity (m/s)
-         fv               => frictionvel_vars%fv_patch           & ! Output: [real(r8) (:) ] friction velocity (m/s) (for dust model)
+         fv               => frictionvel_vars%fv_patch         , & ! Output: [real(r8) (:) ] friction velocity (m/s) (for dust model)
+         zeta_patch       => frictionvel_vars%zeta_patch       , & ! Output: [real(r8) (:) ] dimensionless height used in Monin-Obukhov theory (m/s) for scalar variance calculation
+         ustar_patch      => frictionvel_vars%ustar_patch        & ! Output: [real(r8) (:) ] friction velocity (m/s) for scalar variance calculation
          )
 
       ! Adjustment factors for unstable (moz < 0) or stable (moz > 0) conditions.
@@ -382,8 +384,23 @@ contains
              u10(n) = ur(n) - ustar(n)/vkc * (tmp4 - fm(n) + fm10)
              fv(n)  = ustar(n)
           end if
+          
+          !!!! calculate zeta and ustar for scalar variance calculation
+          if (present(landunit_index)) then
+            do pp = pfti,pftf
+              zeta_patch(pp)  = zeta
+              ustar_patch(pp)  = ustar(n)
+            end do
+          else
+              zeta_patch(n)  = zeta
+              ustar_patch(n)  = ustar(n)
+          end if
+		 !!! end
+         
         end do !! do loop of fn
 
+
+         
      end associate
 
   end subroutine FrictionVelocity

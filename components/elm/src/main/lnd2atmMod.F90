@@ -31,9 +31,11 @@ module lnd2atmMod
   use GridcellDataType     , only : grc_ef, grc_ws, grc_wf
   use ColumnDataType       , only : col_ws, col_wf, col_cf, col_es
   use VegetationDataType   , only : veg_es, veg_ef, veg_ws, veg_wf
-  use SoilHydrologyType    , only : soilhydrology_type 
+  use SoilHydrologyType    , only : soilhydrology_type
+  use ScalarVarianceMod
   use spmdmod          , only: masterproc
   use elm_varctl     , only : iulog
+  
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -194,6 +196,16 @@ contains
       eflx_sh_tot_grc => lnd2atm_vars%eflx_sh_tot_grc      , &
       eflx_lh_tot => veg_ef%eflx_lh_tot , &
       eflx_lh_tot_grc => lnd2atm_vars%eflx_lh_tot_grc      , &
+      forc_rho_not_downscaled_grc => atm2lnd_vars%forc_rho_not_downscaled_grc      , &
+      forc_pbot_not_downscaled_grc => atm2lnd_vars%forc_pbot_not_downscaled_grc      , &
+      !!! scalar (co)-variance
+      thlp2_hom_grc => lnd2atm_vars%thlp2_hom_grc      , &
+      rtp2_hom_grc => lnd2atm_vars%rtp2_hom_grc      , &
+      rtpthlp_hom_grc => lnd2atm_vars%rtpthlp_hom_grc      , &
+      thlp2_het_grc => lnd2atm_vars%thlp2_het_grc      , &
+      rtp2_het_grc => lnd2atm_vars%rtp2_het_grc      , &
+      rtpthlp_het_grc => lnd2atm_vars%rtpthlp_het_grc      , &
+      !!! end
       nee             => col_cf%nee, &
       nee_grc         => lnd2atm_vars%nee_grc   , &
       velocity_patch  => drydepvel_vars%velocity_patch , &
@@ -296,6 +308,36 @@ contains
          eflx_lh_tot_grc(bounds%begg:bounds%endg)      , &
          p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
 
+    !!! scalar (co-)variance by Dalei Hao 09/08/2021
+    !!! HOM method
+    call calculate_scalar_covaiance_hom(bounds, &
+         eflx_sh_tot_grc     (bounds%begg:bounds%endg) , &
+         eflx_lh_tot_grc    (bounds%begg:bounds%endg), &
+         taux_grc   (bounds%begg:bounds%endg), &
+         tauy_grc   (bounds%begg:bounds%endg), &
+         forc_rho_not_downscaled_grc(bounds%begg:bounds%endg)      , &
+         thlp2_hom_grc(bounds%begg:bounds%endg)      , &
+         rtp2_hom_grc(bounds%begg:bounds%endg)      , &
+         rtpthlp_hom_grc(bounds%begg:bounds%endg))
+         
+    !!! HET method     
+    call calculate_scalar_covaiance_het(bounds, &
+         eflx_sh_tot     (bounds%begp:bounds%endp) , &
+         eflx_lh_tot    (bounds%begp:bounds%endp), &
+         q_ref2m    (bounds%begp:bounds%endp), &
+         t_ref2m    (bounds%begp:bounds%endp), &
+         taux   (bounds%begp:bounds%endp), &
+         tauy  (bounds%begp:bounds%endp), &
+         forc_pbot_not_downscaled_grc(bounds%begg:bounds%endg)      , &
+         forc_rho_not_downscaled_grc(bounds%begg:bounds%endg)      , &
+         q_ref2m_grc    (bounds%begg:bounds%endg), &
+         t_ref2m_grc    (bounds%begg:bounds%endg), &
+         thlp2_het_grc(bounds%begg:bounds%endg)      , &
+         rtp2_het_grc(bounds%begg:bounds%endg)      , &
+         rtpthlp_het_grc(bounds%begg:bounds%endg)      , &
+         p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
+    !!! end
+    
     if (use_cn .or. use_fates) then
        call c2g(bounds, &
             nee    (bounds%begc:bounds%endc)   , &
