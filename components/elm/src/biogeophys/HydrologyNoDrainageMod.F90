@@ -71,7 +71,7 @@ contains
     use elm_varpar           , only : nlevgrnd, nlevsno, nlevsoi, nlevurb
     use SnowHydrologyMod     , only : SnowCompaction, CombineSnowLayers, DivideSnowLayers, DivideExtraSnowLayers, SnowCapping
     use SnowHydrologyMod     , only : SnowWater, BuildSnowFilter 
-    use SoilHydrologyMod     , only : ELMVICMap, SurfaceRunoff, Infiltration, WaterTable
+    use SoilHydrologyMod     , only : ELMVICMap, SurfaceRunoff, Infiltration, WaterTable 
     use SoilWaterMovementMod , only : SoilWater
     use SoilWaterRetentionCurveMod, only : soil_water_retention_curve_type
     use elm_varctl           , only : use_vsfm
@@ -284,8 +284,11 @@ contains
       else
       !------------------------------------------------------------------------------------
 
-        call WaterTable(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
-           soilhydrology_vars, soilstate_vars, dtime)
+        !call WaterTable(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
+        !   soilhydrology_vars, soilstate_vars, dtime)
+        !call ThetaBasedWaterTable(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
+        !    soilhydrology_vars, soilstate_vars, dtime)
+
 
       !------------------------------------------------------------------------------------
       end if
@@ -460,7 +463,7 @@ contains
             if ((ctype(c) == icol_sunwall .or. ctype(c) == icol_shadewall &
                  .or. ctype(c) == icol_roof) .and. j > nlevurb) then
             else
-               h2osoi_vol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o) + h2osoi_ice(c,j)/(dz(c,j)*denice)
+               h2osoi_vol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o) ! + h2osoi_ice(c,j)/(dz(c,j)*denice)  ! Han qiu comment out
                h2osoi_liqvol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o)
                h2osoi_icevol(c,j) = h2osoi_ice(c,j)/(dz(c,j)*denice)
                air_vol(c,j)       = max(1.e-4_r8,watsat(c,j) - h2osoi_vol(c,j))

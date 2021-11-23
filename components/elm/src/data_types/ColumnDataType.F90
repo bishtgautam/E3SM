@@ -1493,6 +1493,11 @@ contains
           avgflag='A', long_name='volumetric soil water (vegetated landunits only)', &
            ptr_col=this%h2osoi_vol, l2g_scale_type='veg')
 
+    this%smp_l(begc:endc,:) = spval
+     call hist_addfld2d (fname='SMP_L',  units='mm h2o', type2d='levgrnd', &
+          avgflag='A', long_name='liquid phase soil matric potential (vegetated landunits only)', &
+           ptr_col=this%smp_l, l2g_scale_type='veg')
+
     this%bw(begc:endc,-nlevsno+1:0) = spval
     data2dptr => this%bw(:,-nlevsno+1:0)
      call hist_addfld2d (fname='SNO_BW', units='kg/m3', type2d='levsno', &
@@ -1692,12 +1697,25 @@ contains
              nlevs = nlevgrnd
              do j = 1, nlevs
                 if (j > nlevbed) then
-                   this%h2osoi_vol(c,j) = 0.0_r8
+                   !this%h2osoi_vol(c,j) = 0.0_r8
+                   this%h2osoi_vol(c,j) = 1.0_r8*watsat_input(c,j)
                 else
 		               if (use_fates .or. use_hydrstress) then
-                      this%h2osoi_vol(c,j) = 0.70_r8*watsat_input(c,j) !0.15_r8 to avoid very dry conditions that cause errors in FATES
+                      !this%h2osoi_vol(c,j) = 0.70_r8*watsat_input(c,j) !0.15_r8 to avoid very dry conditions that cause errors in FATES HYDRO
+                      this%h2osoi_vol(c,j) = 0.69_r8*watsat_input(c,j)   !Han Qiu for test
                    else
-                      this%h2osoi_vol(c,j) = 0.15_r8
+                      !this%h2osoi_vol(c,j) = 0.15_r8
+                       !this%h2osoi_vol(c,j) = 0.69_r8*watsat_input(c,j)
+                       this%h2osoi_vol(c,1) = 0.5539*watsat_input(c,j)
+                       this%h2osoi_vol(c,2) = 0.5675*watsat_input(c,j)
+                       this%h2osoi_vol(c,3) = 0.5840*watsat_input(c,j)
+                       this%h2osoi_vol(c,4) = 0.6048*watsat_input(c,j)
+                       this%h2osoi_vol(c,5) = 0.6327*watsat_input(c,j)
+                       this%h2osoi_vol(c,6) = 0.6743*watsat_input(c,j)
+                       this%h2osoi_vol(c,7) = 0.7519*watsat_input(c,j)
+                       this%h2osoi_vol(c,8:15) = 1.0*watsat_input(c,j)
+                       !this%h2osoi_vol(c,9) = 1.0*watsat_input(c,j)
+                       !this%h2osoi_vol(c,10) = 1.0*watsat_input(c,j)
                    endif
                 endif
              end do

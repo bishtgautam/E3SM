@@ -328,7 +328,8 @@ contains
                 this%frost_table_col(c) = spval
              else
                 this%wa_col(c)  = 4000._r8
-                this%zwt_col(c) = (25._r8 + col_pp%zi(c,nlevsoi)) - this%wa_col(c)/0.2_r8 /1000._r8  ! One meter below soil column
+                !this%zwt_col(c) = (25._r8 + col_pp%zi(c,nlevsoi)) - this%wa_col(c)/0.2_r8 /1000._r8  ! One meter below soil column
+                this%zwt_col(c) = (12.1_r8 + col_pp%zi(c,nlevsoi)) - this%wa_col(c)/0.2_r8 /1000._r8  ! Qiu modify 7.1m below ground
                 ! initialize frost_table, zwt_perched to bottom of soil column
                 this%zwt_perched_col(c) = col_pp%zi(c,nlevsoi)
                 this%frost_table_col(c) = col_pp%zi(c,nlevsoi)

@@ -118,7 +118,8 @@ contains
        ! dynamics are not lost due to an inability to resolve temperature, moisture, 
        ! and biogeochemical dynamics at the base of the active layer
        do j = 1, toplev_equalspace
-          zsoi(j) = scalez*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
+          !zsoi(j) = scalez*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
+          zsoi(j) = j*1.0_r8-0.5_r8  !Han Qiu test
        enddo
 
        do j = toplev_equalspace+1,toplev_equalspace + nlev_equalspace
@@ -131,8 +132,10 @@ contains
     else
 
        do j = 1, nlevgrnd
-          zsoi(j) = scalez*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
+          !zsoi(j) = scalez*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
+          zsoi(j) = j*1.0_r8-0.5_r8 !Han Qiu test
        enddo
+
     end if
 
     dzsoi(1) = 0.5_r8*(zsoi(1)+zsoi(2))             !thickness b/n two interfaces
