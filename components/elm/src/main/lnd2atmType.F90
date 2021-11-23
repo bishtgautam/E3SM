@@ -38,6 +38,14 @@ module lnd2atmType
      real(r8), pointer :: tauy_grc           (:)   => null() ! wind stress: n-s (kg/m/s**2)
      real(r8), pointer :: eflx_lh_tot_grc    (:)   => null() ! total latent HF (W/m**2)  [+ to atm]
      real(r8), pointer :: eflx_sh_tot_grc    (:)   => null() ! total sensible HF (W/m**2) [+ to atm]
+      !!! scalar-variance
+     real(r8), pointer :: thlp2_hom_grc    (:)   => null() !  temperature variance calculated by HOM method [+ to atm] 
+     real(r8), pointer :: rtp2_hom_grc    (:)   => null() !  humidity variance calculated by HOM method [+ to atm]
+     real(r8), pointer :: rtpthlp_hom_grc    (:)   => null() ! temperature-humidity co-variance calculated by HOM method [+ to atm]
+     real(r8), pointer :: thlp2_het_grc    (:)   => null() !  temperature variance calculated by HET method [+ to atm] 
+     real(r8), pointer :: rtp2_het_grc    (:)   => null() !  humidity variance calculated by HET method [+ to atm]
+     real(r8), pointer :: rtpthlp_het_grc    (:)   => null() ! temperature-humidity co-variance calculated by HET method [+ to atm]
+     !!! end
      real(r8), pointer :: eflx_lwrad_out_grc (:)   => null() ! IR (longwave) radiation (W/m**2)
      real(r8), pointer :: qflx_evap_tot_grc  (:)   => null() ! qflx_evap_soi + qflx_evap_can + qflx_tran_veg
      real(r8), pointer :: fsa_grc            (:)   => null() ! solar rad absorbed (total) (W/m**2)
@@ -124,6 +132,14 @@ contains
     allocate(this%eflx_sh_tot_grc      (begg:endg))            ; this%eflx_sh_tot_grc      (:) =ival
     allocate(this%eflx_lh_tot_grc      (begg:endg))            ; this%eflx_lh_tot_grc      (:) =ival
     allocate(this%qflx_evap_tot_grc    (begg:endg))            ; this%qflx_evap_tot_grc    (:) =ival
+    !!! scalar-variance
+    allocate(this%thlp2_hom_grc        (begg:endg))            ; this%thlp2_hom_grc        (:) =ival
+    allocate(this%rtp2_hom_grc         (begg:endg))            ; this%rtp2_hom_grc         (:) =ival
+    allocate(this%rtpthlp_hom_grc      (begg:endg))            ; this%rtpthlp_hom_grc      (:) =ival
+    allocate(this%thlp2_het_grc        (begg:endg))            ; this%thlp2_het_grc        (:) =ival
+    allocate(this%rtp2_het_grc         (begg:endg))            ; this%rtp2_het_grc         (:) =ival
+    allocate(this%rtpthlp_het_grc      (begg:endg))            ; this%rtpthlp_het_grc      (:) =ival
+    !!! end
     allocate(this%fsa_grc              (begg:endg))            ; this%fsa_grc              (:) =ival
     allocate(this%nee_grc              (begg:endg))            ; this%nee_grc              (:) =ival
     allocate(this%nem_grc              (begg:endg))            ; this%nem_grc              (:) =ival
@@ -182,6 +198,38 @@ contains
          avgflag='A', long_name='sensible heat', &
          ptr_lnd=this%eflx_sh_tot_grc)
        
+     !!! scalar-variance
+    this%thlp2_hom_grc(begg:endg) = 0._r8
+    call hist_addfld1d (fname='thlp2_hom', units='',  &
+         avgflag='A', long_name='temperature variance by HOM method', &
+         ptr_lnd=this%thlp2_hom_grc)
+         
+    this%rtp2_hom_grc(begg:endg) = 0._r8  
+    call hist_addfld1d (fname='rtp2_hom', units='',  &
+         avgflag='A', long_name='humidity variance by HOM method', &
+         ptr_lnd=this%rtp2_hom_grc)
+         
+    this%rtpthlp_hom_grc(begg:endg) = 0._r8
+    call hist_addfld1d (fname='rtpthlp_hom', units='',  &
+         avgflag='A', long_name='temperature-humidity co-variance by HOM method', &
+         ptr_lnd=this%rtpthlp_hom_grc)
+         
+    this%thlp2_het_grc(begg:endg) = 0._r8
+    call hist_addfld1d (fname='thlp2_het', units='',  &
+         avgflag='A', long_name='temperature variance by HET method', &
+         ptr_lnd=this%thlp2_het_grc)
+         
+    this%rtp2_het_grc(begg:endg) = 0._r8  
+    call hist_addfld1d (fname='rtp2_het', units='',  &
+         avgflag='A', long_name='humidity variance by HET method', &
+         ptr_lnd=this%rtp2_het_grc)
+         
+    this%rtpthlp_het_grc(begg:endg) = 0._r8
+    call hist_addfld1d (fname='rtpthlp_het', units='',  &
+         avgflag='A', long_name='temperature-humidity co-variance by HET method', &
+         ptr_lnd=this%rtpthlp_het_grc)
+    !!! end     
+
     this%qflx_rofliq_grc(begg:endg) = 0._r8
     call hist_addfld1d (fname='QRUNOFF',  units='mm/s',  &
          avgflag='A', long_name='total liquid runoff (does not include QSNWCPICE)', &

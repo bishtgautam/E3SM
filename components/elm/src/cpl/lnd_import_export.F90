@@ -1374,6 +1374,9 @@ contains
        l2x(index_l2x_Fall_tauy,i)   = -lnd2atm_vars%tauy_grc(g)
        l2x(index_l2x_Fall_lat,i)    = -lnd2atm_vars%eflx_lh_tot_grc(g)
        l2x(index_l2x_Fall_sen,i)    = -lnd2atm_vars%eflx_sh_tot_grc(g)
+       l2x(index_l2x_Sl_thlp2,i)    = lnd2atm_vars%thlp2_het_grc(g) ! scalar variance
+       l2x(index_l2x_Sl_rtp2,i)     = lnd2atm_vars%rtp2_het_grc(g) ! scalar variance
+       l2x(index_l2x_Sl_rtpthlp,i)  = lnd2atm_vars%rtpthlp_het_grc(g) ! scalar variance
        l2x(index_l2x_Fall_lwup,i)   = -lnd2atm_vars%eflx_lwrad_out_grc(g)
        l2x(index_l2x_Fall_evap,i)   = -lnd2atm_vars%qflx_evap_tot_grc(g)
        l2x(index_l2x_Fall_swnet,i)  =  lnd2atm_vars%fsa_grc(g)
