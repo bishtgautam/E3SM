@@ -31,6 +31,7 @@ module lnd2atmMod
   use ColumnDataType       , only : col_ws, col_wf, col_cf, col_es
   use VegetationDataType   , only : veg_es, veg_ef, veg_ws, veg_wf
   use SoilHydrologyType    , only : soilhydrology_type
+  use clm_time_manager     , only : get_nstep
   use ScalarVarianceMod    
 
   
@@ -157,6 +158,7 @@ contains
     real(r8), parameter :: amCO2 = amC + 2.0_r8*amO ! Atomic mass number for CO2
     ! The following converts g of C to kg of CO2
     real(r8), parameter :: convertgC2kgCO2 = 1.0e-3_r8 * (amCO2/amC)
+    integer :: nstep
     !------------------------------------------------------------------------
     associate( &
       t_ref2m     => veg_es%t_ref2m , &
@@ -190,6 +192,12 @@ contains
       thlp2_het_grc => lnd2atm_vars%thlp2_het_grc      , &
       rtp2_het_grc => lnd2atm_vars%rtp2_het_grc      , &
       rtpthlp_het_grc => lnd2atm_vars%rtpthlp_het_grc      , &
+      thlp2_hom_grc_hhour   => lnd2atm_vars%thlp2_hom_grc_hhour   , &
+      rtp2_hom_grc_hhour    => lnd2atm_vars%rtp2_hom_grc_hhour    , &
+      rtpthlp_hom_grc_hhour => lnd2atm_vars%rtpthlp_hom_grc_hhour , &
+      thlp2_het_grc_hhour   => lnd2atm_vars%thlp2_het_grc_hhour   , &
+      rtp2_het_grc_hhour    => lnd2atm_vars%rtp2_het_grc_hhour    , &
+      rtpthlp_het_grc_hhour => lnd2atm_vars%rtpthlp_het_grc_hhour , &
       !!! end
       nee             => col_cf%nee, &
       nee_grc         => lnd2atm_vars%nee_grc   , &
@@ -321,7 +329,14 @@ contains
          rtp2_het_grc(bounds%begg:bounds%endg)      , &
          rtpthlp_het_grc(bounds%begg:bounds%endg)      , &
          p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
-    !!! end
+!!! end
+    nstep = get_nstep()
+    thlp2_hom_grc_hhour(:,mod(nstep,48)+1)   = thlp2_hom_grc(:)
+    rtp2_hom_grc_hhour(:,mod(nstep,48)+1)    = rtp2_hom_grc(:)
+    rtpthlp_hom_grc_hhour(:,mod(nstep,48)+1) = rtpthlp_hom_grc(:)
+    thlp2_het_grc_hhour(:,mod(nstep,48)+1)   = thlp2_het_grc(:)
+    rtp2_het_grc_hhour(:,mod(nstep,48)+1)    = rtp2_het_grc(:)
+    rtpthlp_het_grc_hhour(:,mod(nstep,48)+1) = rtpthlp_het_grc(:)
     
     
     if (use_cn .or. use_fates) then
