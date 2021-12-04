@@ -82,6 +82,7 @@ module elm_driver
   use filterMod              , only : setFilters
   !
   use atm2lndMod             , only : downscale_forcings
+  use atm2lndMod             , only : topo_effects_on_shortwave
   use lnd2atmMod             , only : lnd2atm
   use lnd2glcMod             , only : lnd2glc_type
   !
@@ -150,6 +151,8 @@ module elm_driver
   use VegetationDataType     , only : veg_cs, c13_veg_cs, c14_veg_cs
   use VegetationDataType     , only : veg_ns, veg_nf
   use VegetationDataType     , only : veg_ps, veg_pf
+  use elm_varctl             , only : first_order_topo_effects_on_srad
+  use elm_varctl             , only : second_order_topo_effects_on_srad
 
   !----------------------------------------------------------------------------
   ! bgc interface & pflotran:
@@ -173,6 +176,8 @@ module elm_driver
   use CNPBudgetMod                , only : CNPBudget_SetBeginningMonthlyStates, CNPBudget_SetEndingMonthlyStates
   use elm_varctl                  , only : do_budgets, budget_inst, budget_daily, budget_month
   use elm_varctl                  , only : budget_ann, budget_ltann, budget_ltend
+  use elm_varctl             , only : first_order_topo_effects_on_srad
+  use elm_varctl             , only : second_order_topo_effects_on_srad
 
   use timeinfoMod
   !
@@ -648,6 +653,12 @@ contains
        call downscale_forcings(bounds_clump, &
             filter(nc)%num_do_smb_c, filter(nc)%do_smb_c, &
             atm2lnd_vars)
+
+       if (first_order_topo_effects_on_srad) then
+          call topo_effects_on_shortwave(bounds_clump, &
+               atm2lnd_vars, nextsw_cday, declinp1, &
+               second_order_topo_effects_on_srad)
+       end if
 
        call t_stopf('drvinit')
 

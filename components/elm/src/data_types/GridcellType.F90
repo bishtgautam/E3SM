@@ -16,6 +16,7 @@ module GridcellType
   use landunit_varcon, only : max_lunit
   use elm_varcon     , only : ispval, spval
   use topounit_varcon, only : max_topounits
+  use elm_varpar     , only : ndir_hrz_angle
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -68,6 +69,11 @@ module GridcellType
      ! this is for efficiency, since most loops will go over g in the outer loop, and
      ! landunit type in the inner loop)
      integer , pointer :: landunit_indices (:,:) => null()
+
+     real(r8), pointer :: slope_rad        (:)   ! gridcell slope in radians
+     real(r8), pointer :: aspect_rad       (:)   ! gridcell aspect in radians
+     real(r8), pointer :: sky_view_factor  (:)   ! sky view factor (unitless)
+     real(r8), pointer :: hangles_rad      (:,:) ! horizon angles in radians
 
    contains
 
@@ -129,6 +135,11 @@ contains
 	
    ! allocate(this%topounit_indices (begg:endg,1:max_topounits)) ; this%topounit_indices (:,:) = ispval
 
+    allocate(this%slope_rad       (begg:endg))                   ; this%slope_rad       (:)   = nan
+    allocate(this%aspect_rad      (begg:endg))                   ; this%aspect_rad      (:)   = nan
+    allocate(this%sky_view_factor (begg:endg))                   ; this%sky_view_factor (:)   = nan
+    allocate(this%hangles_rad     (begg:endg, 1:ndir_hrz_angle)) ; this%hangles_rad     (:,:) = nan
+
   end subroutine grc_pp_init
 
   !------------------------------------------------------------------------
@@ -168,7 +179,11 @@ contains
     deallocate(this%terrain_config   ) 
     deallocate(this%sinsl_cosas      )
     deallocate(this%sinsl_sinas      )
-    
+    deallocate(this%slope_rad        )
+    deallocate(this%aspect_rad       )
+    deallocate(this%sky_view_factor  )
+    deallocate(this%hangles_rad      )
+
   end subroutine grc_pp_clean
 
 end module GridcellType

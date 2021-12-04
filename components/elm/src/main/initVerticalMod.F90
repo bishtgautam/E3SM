@@ -24,10 +24,14 @@ module initVerticalMod
   use fileutils      , only : getfil
   use LandunitType   , only : lun_pp                
   use ColumnType     , only : col_pp                
+  use GridcellType   , only : grc_pp
   use SnowHydrologyMod, only : InitSnowLayers
   use ncdio_pio
   use topounit_varcon  , only : max_topounits
   use GridcellType     , only : grc_pp
+  use elm_varctl     , only : first_order_topo_effects_on_srad
+  use elm_varctl     , only : second_order_topo_effects_on_srad
+  use elm_varpar     , only : ndir_hrz_angle
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -78,10 +82,13 @@ contains
     real(r8)              :: depthratio        ! ratio of lake depth to standard deep lake depth 
     integer               :: begc, endc
     integer               :: begl, endl
+    integer               :: begg, endg
+    real(r8), pointer     :: hrz_angles(:,:)
     !------------------------------------------------------------------------
 
     begc = bounds%begc; endc= bounds%endc
     begl = bounds%begl; endl= bounds%endl
+    begg = bounds%begg; endg= bounds%endg
 
     SHR_ASSERT_ALL((ubound(snow_depth)  == (/endc/)), errMsg(__FILE__, __LINE__))
     SHR_ASSERT_ALL((ubound(thick_wall)  == (/endl/)), errMsg(__FILE__, __LINE__))
@@ -661,6 +668,62 @@ contains
             col_pp%nlevbed(c) = nlevsoi
 	    col_pp%zibed(c) = zisoi(nlevsoi)
 	 end do
+      end if
+
+      !-----------------------------------------------
+      ! Read in topographic index and slope
+      !-----------------------------------------------
+      if (first_order_topo_effects_on_srad) then
+         allocate(tslope(bounds%begg:bounds%endg))
+         call ncd_io(ncid=ncid, varname='slope_rad', flag='read', data=tslope, dim1name=grlnd, readvar=readvar)
+         if (.not. readvar) then
+            call shr_sys_abort(' ERROR: slope_rad NOT on surfdata file'//&
+                 errMsg(__FILE__, __LINE__))
+         end if
+         do g = begg,endg
+            grc_pp%slope_rad(g) = tslope(g)
+         end do
+         deallocate(tslope)
+
+         allocate(tslope(bounds%begg:bounds%endg))
+         call ncd_io(ncid=ncid, varname='aspect_rad', flag='read', data=tslope, dim1name=grlnd, readvar=readvar)
+         if (.not. readvar) then
+            call shr_sys_abort(' ERROR: slope_rad NOT on surfdata file'//&
+                 errMsg(__FILE__, __LINE__))
+         end if
+         do g = begg,endg
+            grc_pp%aspect_rad(g) = tslope(g)
+         end do
+         deallocate(tslope)
+
+         if (second_order_topo_effects_on_srad) then
+
+            ! Read horizon angles
+            call check_dim(ncid, 'ndir', ndir_hrz_angle)
+            allocate(hrz_angles(bounds%begg:bounds%endg,ndir_hrz_angle))
+            call ncd_io(ncid=ncid, varname='horizon_angles', flag='read', &
+                 data=hrz_angles, dim1name=grlnd, readvar=readvar)
+
+            do g = begg,endg
+               grc_pp%hangles_rad(g,:) = hrz_angles(g,:)
+            enddo
+            deallocate(hrz_angles)
+
+            ! Read sky view factor
+            allocate(tslope(bounds%begg:bounds%endg))
+            call ncd_io(ncid=ncid, varname='sky_view_factor', flag='read', &
+                 data=tslope, dim1name=grlnd, readvar=readvar)
+            if (.not. readvar) then
+               call shr_sys_abort(' ERROR: sky_view_factor NOT on surfdata file'//&
+                    errMsg(__FILE__, __LINE__))
+            end if
+            do g = begg,endg
+               grc_pp%sky_view_factor(g) = tslope(g)
+            end do
+            deallocate(tslope)
+
+         endif
+
       end if
 
       !-----------------------------------------------
