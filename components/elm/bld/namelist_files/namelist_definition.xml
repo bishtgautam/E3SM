@@ -1772,6 +1772,19 @@ Specifies the method for decomposing CLM grids across processors.
 </entry>
 
 <!-- ========================================================================================  -->
+<!-- namelist elements associated with the topographic effects on shortwave radiation          -->
+<!-- ========================================================================================  -->
+<entry id="first_order_topo_effects_on_srad" type="logical" category="default_settings"
+       group="clm_inparm" valid_values="">
+Runtime flag to account for first order (slope and topography) topographic effects on shortwave radiation.
+</entry>
+<entry id="second_order_topo_effects_on_srad" type="logical" category="default_settings"
+       group="clm_inparm" valid_values="">
+Runtime flag to account for second order topographic effects (i.e. sky view factor)
+on shortwave radiation.
+</entry>
+
+<!-- ========================================================================================  -->
 <!-- Namelist options related to Variably Saturated Flow Model (VSFM)                          -->
 <!-- ========================================================================================  -->
 

@@ -89,6 +89,12 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <atm_gustiness>.false.</atm_gustiness>
 
 <!-- ========================================================================================  -->
+<!-- Default for topographic effects on shortwave radiation -->
+<!-- ========================================================================================  -->
+<first_order_topo_effects_on_srad>.false.</first_order_topo_effects_on_srad>
+<second_order_topo_effects_on_srad>.false.</second_order_topo_effects_on_srad>
+
+<!-- ========================================================================================  -->
 <!-- VSFM default                                                                              -->
 <!-- ========================================================================================  -->
 <use_vsfm>.false.</use_vsfm>
