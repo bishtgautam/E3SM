@@ -836,12 +836,33 @@ contains
     call mpi_bcast (hist_fexcl4, max_namlen*size(hist_fexcl4), MPI_CHARACTER, 0, mpicom, ier)
     call mpi_bcast (hist_fexcl5, max_namlen*size(hist_fexcl5), MPI_CHARACTER, 0, mpicom, ier)
     call mpi_bcast (hist_fexcl6, max_namlen*size(hist_fexcl6), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl1, (max_namlen+2)*size(hist_fincl1), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl2, (max_namlen+2)*size(hist_fincl2), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl3, (max_namlen+2)*size(hist_fincl3), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl4, (max_namlen+2)*size(hist_fincl4), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl5, (max_namlen+2)*size(hist_fincl5), MPI_CHARACTER, 0, mpicom, ier)
-    call mpi_bcast (hist_fincl6, (max_namlen+2)*size(hist_fincl6), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl1, (max_namlen+2)*size(hist_fincl1), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl2, (max_namlen+2)*size(hist_fincl2), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl3, (max_namlen+2)*size(hist_fincl3), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl4, (max_namlen+2)*size(hist_fincl4), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl5, (max_namlen+2)*size(hist_fincl5), MPI_CHARACTER, 0, mpicom, ier)
+    !call mpi_bcast (hist_fincl6, (max_namlen+2)*size(hist_fincl6), MPI_CHARACTER, 0, mpicom, ier)
+    hist_empty_htapes = .true.
+    hist_fincl1(01) = 'FSA'
+    hist_fincl1(02) = 'FSR'
+    hist_fincl1(03) = 'FSDS'
+    hist_fincl1(04) = 'FLDS'
+    hist_fincl1(05) = 'FIRE'
+    hist_fincl1(06) = 'FGR'
+    hist_fincl1(07) = 'FSH'
+    hist_fincl1(08) = 'EFLX_LH_TOT'
+    hist_fincl1(09) = 'QSNOMELT'
+    hist_fincl1(10) = 'QRUNOFF'
+    hist_fincl1(11) = 'FSNO'
+    hist_fincl1(12) = 'SNOWDP'
+    hist_fincl1(13) = 'H2OSNO'
+    hist_fincl1(14) = 'TSOI_10CM'
+    hist_fincl1(15) = 'thlp2_hom_hhour'
+    hist_fincl1(16) = 'rtp2_hom_hhour'
+    hist_fincl1(17) = 'rtpthlp_hom_hhour'
+    hist_fincl1(18) = 'thlp2_het_hhour'
+    hist_fincl1(19) = 'rtp2_het_hhour'
+    hist_fincl1(20) = 'rtpthlp_het_hhour'
 
     ! restart file variables
 
