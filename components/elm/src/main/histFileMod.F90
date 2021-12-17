@@ -1903,6 +1903,7 @@ contains
     call ncd_defdim(lnfid, 'levsno' , nlevsno , dimid)
     call ncd_defdim(lnfid, 'ltype', max_lunit, dimid)
     call ncd_defdim(lnfid, 'nvegwcs',nvegwcs, dimid)
+    call ncd_defdim(lnfid, 'hhour   ',48, dimid)
     call htape_add_ltype_metadata(lnfid)
     call ncd_defdim(lnfid, 'natpft', natpft_size, dimid)
     if (cft_size > 0) then
@@ -4807,6 +4808,8 @@ contains
        num2d = nlevsclass_fates*nlevage_fates*numpft_fates
     case ('fates_levagepft')
        num2d = nlevage_fates*numpft_fates
+    case ('hhour')
+       num2d = 48
     case default
        write(iulog,*) trim(subname),' ERROR: unsupported 2d type ',type2d, &
           ' currently supported types for multi level fields are: ', &

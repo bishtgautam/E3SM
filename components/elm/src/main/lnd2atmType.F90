@@ -45,6 +45,12 @@ module lnd2atmType
      real(r8), pointer :: thlp2_het_grc    (:)   => null() !  temperature variance calculated by HET method [+ to atm] 
      real(r8), pointer :: rtp2_het_grc    (:)   => null() !  humidity variance calculated by HET method [+ to atm]
      real(r8), pointer :: rtpthlp_het_grc    (:)   => null() ! temperature-humidity co-variance calculated by HET method [+ to atm]
+     real(r8), pointer :: thlp2_hom_grc_hhour   (:,:)   => null() ! half-hourly temperature variance calculated by HOM method [+ to atm]
+     real(r8), pointer :: rtp2_hom_grc_hhour    (:,:)   => null() ! half-hourly humidity variance calculated by HOM method [+ to atm]
+     real(r8), pointer :: rtpthlp_hom_grc_hhour (:,:)   => null() ! half-hourly temperature-humidity co-variance calculated by HOM method [+ to atm]
+     real(r8), pointer :: thlp2_het_grc_hhour   (:,:)   => null() ! half-hourly temperature variance calculated by HET method [+ to atm]
+     real(r8), pointer :: rtp2_het_grc_hhour    (:,:)   => null() ! half-hourly humidity variance calculated by HET method [+ to atm]
+     real(r8), pointer :: rtpthlp_het_grc_hhour (:,:)   => null() ! half-hourly temperature-humidity co-variance calculated by HET method [+ to atm]
      !!! end
      real(r8), pointer :: eflx_lwrad_out_grc (:)   => null() ! IR (longwave) radiation (W/m**2)
      real(r8), pointer :: qflx_evap_tot_grc  (:)   => null() ! qflx_evap_soi + qflx_evap_can + qflx_tran_veg
@@ -140,6 +146,12 @@ contains
     allocate(this%thlp2_het_grc        (begg:endg))            ; this%thlp2_het_grc        (:) =ival
     allocate(this%rtp2_het_grc         (begg:endg))            ; this%rtp2_het_grc         (:) =ival
     allocate(this%rtpthlp_het_grc      (begg:endg))            ; this%rtpthlp_het_grc      (:) =ival
+    allocate(this%thlp2_hom_grc_hhour   (begg:endg,48))            ; this%thlp2_hom_grc_hhour        (:,:) =ival
+    allocate(this%rtp2_hom_grc_hhour    (begg:endg,48))            ; this%rtp2_hom_grc_hhour         (:,:) =ival
+    allocate(this%rtpthlp_hom_grc_hhour (begg:endg,48))            ; this%rtpthlp_hom_grc_hhour      (:,:) =ival
+    allocate(this%thlp2_het_grc_hhour   (begg:endg,48))            ; this%thlp2_het_grc_hhour        (:,:) =ival
+    allocate(this%rtp2_het_grc_hhour    (begg:endg,48))            ; this%rtp2_het_grc_hhour         (:,:) =ival
+    allocate(this%rtpthlp_het_grc_hhour (begg:endg,48))            ; this%rtpthlp_het_grc_hhour      (:,:) =ival
     !!! end
     allocate(this%fsa_grc              (begg:endg))            ; this%fsa_grc              (:) =ival
     allocate(this%nee_grc              (begg:endg))            ; this%nee_grc              (:) =ival
@@ -183,7 +195,7 @@ contains
   subroutine InitHistory(this, bounds)
     !
     ! !USES:
-    use histFileMod, only : hist_addfld1d
+    use histFileMod, only : hist_addfld1d, hist_addfld2d
     !
     ! !ARGUMENTS:
     class(lnd2atm_type) :: this
@@ -232,6 +244,35 @@ contains
          ptr_lnd=this%rtpthlp_het_grc)
     !!! end     
 
+    this%thlp2_hom_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='thlp2_hom_hhour', units='K^2', type2d='hhour', &
+         avgflag='A', long_name='Half-hourly temperature variance by HOM method', &
+         ptr_gcell=this%thlp2_hom_grc_hhour)
+
+    this%rtp2_hom_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='rtp2_hom_hhour', units='kg^2/kg^2', type2d='hhour',  &
+         avgflag='A', long_name='Half-hourly humidity variance by HOM method', &
+         ptr_gcell=this%rtp2_hom_grc_hhour)
+
+    this%rtpthlp_hom_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='rtpthlp_hom_hhour', units='Kkg/kg', type2d='hhour',  &
+         avgflag='A', long_name='Half-hourly temperature-humidity co-variance by HOM method', &
+         ptr_gcell=this%rtpthlp_hom_grc_hhour)
+
+    this%thlp2_het_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='thlp2_het_hhour', units='K^2', type2d='hhour',  &
+         avgflag='A', long_name='Half-hourly temperature variance by HET method', &
+         ptr_gcell=this%thlp2_het_grc_hhour)
+
+    this%rtp2_het_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='rtp2_het_hhour', units='kg^2/kg^2', type2d='hhour',  &
+         avgflag='A', long_name='Half-hourly humidity variance by HET method', &
+         ptr_gcell=this%rtp2_het_grc_hhour)
+
+    this%rtpthlp_het_grc_hhour(begg:endg,:) = 0._r8
+    call hist_addfld2d (fname='rtpthlp_het_hhour', units='Kkg/kg', type2d='hhour',  &
+         avgflag='A', long_name='Half-hourly temperature-humidity co-variance by HET method', &
+         ptr_gcell=this%rtpthlp_het_grc_hhour)
     this%qflx_rofliq_grc(begg:endg) = 0._r8
     call hist_addfld1d (fname='QRUNOFF',  units='mm/s',  &
          avgflag='A', long_name='total liquid runoff (does not include QSNWCPICE)', &
