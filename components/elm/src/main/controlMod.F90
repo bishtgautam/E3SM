@@ -51,6 +51,7 @@ module controlMod
   use elm_varctl              , only: startdate_add_temperature, startdate_add_co2
   use elm_varctl              , only: add_temperature, add_co2
   use elm_varctl              , only: const_climate_hist
+  use elm_varctl              , only : first_order_topo_effects_on_srad, second_order_topo_effects_on_srad
  !
   ! !PUBLIC TYPES:
   implicit none
@@ -301,6 +302,9 @@ contains
 
     namelist /elm_inparm/ &
          use_erosion, ero_ccycle
+
+    namelist /elm_inparm/ &
+         first_order_topo_effects_on_srad, second_order_topo_effects_on_srad
 
     ! ----------------------------------------------------------------------
     ! Default values
@@ -907,6 +911,9 @@ contains
     call mpi_bcast (budget_ann   , 1, MPI_INTEGER, 0, mpicom, ier)
     call mpi_bcast (budget_ltann , 1, MPI_INTEGER, 0, mpicom, ier)
     call mpi_bcast (budget_ltend , 1, MPI_INTEGER, 0, mpicom, ier)
+
+    call mpi_bcast (first_order_topo_effects_on_srad, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (second_order_topo_effects_on_srad, 1, MPI_LOGICAL, 0, mpicom, ier)
 
   end subroutine control_spmd
 
