@@ -454,12 +454,15 @@ contains
   end subroutine check_downscale_consistency
 
   !----------------------------------------------------------------------------
-  real(r8) function shr_orb_saz(jday,lat,lon,declin)
+  real(r8) function shr_orb_saz(jday,lat,lon,declin,zenith)
 
     !----------------------------------------------------------------------------
     !
     ! FUNCTION to return the solar azimuth angle in radians
     ! Assumes 365.0 days/year.
+    !
+    ! Sproul, A. B. (2007). Derivation of the solar geometric relationships
+    ! using vector analysis. Renewable energy, 32(7), 1187-1205.
     !
     !----------------------------------------------------------------------------
 
@@ -467,16 +470,31 @@ contains
     real   (r8),intent(in) :: lat    ! Centered latitude (radians)
     real   (r8),intent(in) :: lon    ! Centered longitude (radians)
     real   (r8),intent(in) :: declin ! Solar declination (radians)
+    real   (r8),intent(in) :: zenith ! Solar zenith angle (radians)
 
     real   (r8) :: omega
     real   (r8) :: num
     real   (r8) :: den
     !----------------------------------------------------------------------------
 
-    omega       = jday*2.0_r8*pi + lon
-    num         = sin(omega)
-    den         = sin(lat)*cos(omega) - tan(declin)*cos(lat)
-    shr_orb_saz = atan(num/den)
+    omega       = ((jday - floor(jday)) -0.5_r8)*2.0_r8*pi + lon
+
+    if (omega > pi) omega = omega - 2._r8 * pi
+
+    !num         = sin(omega)
+    !den         = sin(lat)*cos(omega) - tan(declin)*cos(lat)
+    !shr_orb_saz = atan(num/den)
+    num = sin(declin) * cos(lat) - cos(declin)*sin(lat)*cos(omega)
+    den = sin(zenith)
+
+    shr_orb_saz = num/den
+
+    shr_orb_saz = min(shr_orb_saz, 1._r8)
+    shr_orb_saz = min(-1._r8, shr_orb_saz)
+
+    if (omega > 0._r8) then
+       shr_orb_saz = 2._r8*pi - shr_orb_saz
+    end if
 
   end function shr_orb_saz
 
@@ -531,18 +549,24 @@ contains
       do g = bounds%begg, bounds%endg
 
          ! cosine of solar zenith angle
-         coszen = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin)
+         coszen = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin, acos(coszen))
 
          if (coszen > 0.01_r8) then
 
             ! solar zenith angle
             zen = acos(coszen)
 
-            saz = shr_orb_saz(nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin)
+            saz = shr_orb_saz(nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin, zen)
+
+            !
+            ! Olson, M., Rupper, S., & Shean, D. E. (2019). Terrain induced biases in
+            ! clear-sky shortwave radiation due to digital elevation model resolution
+            ! for glaciers in complex terrain. Frontiers in Earth Science, 7, 216.
+            !
 
             factor = cos(grc_pp%slope_rad(g))*coszen + &
                      sin(grc_pp%slope_rad(g))*sin(zen)*cos(grc_pp%aspect_rad(g) - saz)
-            factor = factor/coszen/cos(grc_pp%slope_rad(g))
+            !factor = factor/coszen/cos(grc_pp%slope_rad(g))
 
             if (factor < 0._r8) factor = 0._r8
 
