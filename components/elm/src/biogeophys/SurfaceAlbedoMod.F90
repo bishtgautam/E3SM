@@ -65,7 +65,8 @@ contains
         num_urbanp   , filter_urbanp,  &
         nextsw_cday  , declinp1,       &
         aerosol_vars, canopystate_vars, &
-        lakestate_vars, surfalb_vars &
+        lakestate_vars, atm2lnd_vars,  &
+        surfalb_vars &
         )
     ! !DESCRIPTION:
     ! Surface albedo and two-stream fluxes
@@ -94,7 +95,9 @@ contains
     ! !USES:
       !$acc routine seq
     use elm_varctl         , only : iulog, subgridflag, use_snicar_frc, use_fates, use_snicar_ad
+    use elm_varctl , only : first_order_topo_effects_on_srad
     use shr_orb_mod
+    use atm2lndType    , only : atm2lnd_type
 
     !
     ! !ARGUMENTS:
@@ -112,6 +115,7 @@ contains
     type(aerosol_type)     , intent(in)    :: aerosol_vars
     type(canopystate_type) , intent(in)    :: canopystate_vars
     type(lakestate_type)   , intent(in)    :: lakestate_vars
+    type(atm2lnd_type)     , intent(in)    :: atm2lnd_vars
     type(surfalb_type)     , intent(inout) :: surfalb_vars
     !
     ! !LOCAL VARIABLES:
@@ -167,6 +171,7 @@ contains
   !-----------------------------------------------------------------------
 
    associate(&
+          coszen_factor =>    atm2lnd_vars%coszen_factor      , &
           rhol          =>    veg_vp%rhol                     , & ! Input:  [real(r8)  (:,:) ]  leaf reflectance: 1=vis, 2=nir
           rhos          =>    veg_vp%rhos                     , & ! Input:  [real(r8)  (:,:) ]  stem reflectance: 1=vis, 2=nir
           taul          =>    veg_vp%taul                     , & ! Input:  [real(r8)  (:,:) ]  leaf transmittance: 1=vis, 2=nir
@@ -237,8 +242,16 @@ contains
 
     ! Cosine solar zenith angle for next time step
 
-    do g = bounds%begg,bounds%endg
-       coszen_gcell(g) = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declinp1)
+     do g = bounds%begg,bounds%endg
+        coszen_gcell(g) = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declinp1)
+
+        if (first_order_topo_effects_on_srad) then
+           if (coszen_gcell(g) > 0._r8 .and. coszen_factor(g) < 0._r8) then
+              coszen_gcell(g) = 0._r8
+           else
+              coszen_gcell(g) = coszen_factor(g)
+           end if
+        end if
     end do
     do c = bounds%begc,bounds%endc
        g = col_pp%gridcell(c)
