@@ -491,6 +491,7 @@ contains
 
     shr_orb_saz = min(shr_orb_saz, 1._r8)
     shr_orb_saz = max(-1._r8, shr_orb_saz)
+    shr_orb_saz = acos(shr_orb_saz)
 
     if (omega > 0._r8) then
        shr_orb_saz = 2._r8*pi - shr_orb_saz
@@ -532,13 +533,13 @@ contains
     real(r8) :: svf
     real(r8) :: dtheta
     real(r8) :: hrz_angle_twd_sun
-    real(r8) :: aspect_wrt_south
 
     character(len=*), parameter :: subname = 'topo_effects_on_shortwave'
     !-----------------------------------------------------------------------
 
     associate(&
          ! Gridcell-level fields:
+         coszen_factor      => atm2lnd_vars%coszen_factor                 , &
          forc_solad_grc     => atm2lnd_vars%forc_solad_grc                , &
          forc_solai_grc     => atm2lnd_vars%forc_solai_grc                , &
          forc_solar_grc     => atm2lnd_vars%forc_solar_grc                , &
@@ -565,10 +566,8 @@ contains
             ! for glaciers in complex terrain. Frontiers in Earth Science, 7, 216.
             !
 
-            aspect_wrt_south = (grc_pp%aspect_rad(g) - pi)
             factor = cos(grc_pp%slope_rad(g))*coszen + &
-                     sin(grc_pp%slope_rad(g))*sin(zen)*cos(aspect_wrt_south - saz)
-            factor = factor/coszen
+                     sin(grc_pp%slope_rad(g))*sin(zen)*cos(grc_pp%aspect_rad(g) - saz)
 
             if (factor < 0._r8) factor = 0._r8
 
@@ -595,10 +594,10 @@ contains
             horizon_mask = 1._r8
             svf          = 1._r8
          end if
+         coszen_factor(g) = factor*horizon_mask
 
-         ! scale direct solar radiation: vis & nir
-         forc_solad_grc(g,1) = forc_solad_grc(g,1)*factor*horizon_mask
-         forc_solad_grc(g,2) = forc_solad_grc(g,2)*factor*horizon_mask
+         forc_solad_grc(g,1) = forc_solad_grc(g,1)
+         forc_solad_grc(g,2) = forc_solad_grc(g,2)
 
          ! scale diffuse solar radiation: vis & nir
          forc_solai_grc(g,1) = forc_solai_grc(g,1)*svf

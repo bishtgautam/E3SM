@@ -1334,7 +1334,7 @@ contains
                filter_inactive_and_active(nc)%urbanp,           &
                nextsw_cday, declinp1,                           &
                aerosol_vars, canopystate_vars, &
-               lakestate_vars, surfalb_vars )
+               lakestate_vars, atm2lnd_vars, surfalb_vars )
           call t_stopf('surfalb')
 
           ! Albedos for urban columns
