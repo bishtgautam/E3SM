@@ -568,7 +568,7 @@ contains
             aspect_wrt_south = (grc_pp%aspect_rad(g) - pi)
             factor = cos(grc_pp%slope_rad(g))*coszen + &
                      sin(grc_pp%slope_rad(g))*sin(zen)*cos(aspect_wrt_south - saz)
-            !factor = factor/coszen/cos(grc_pp%slope_rad(g))
+            factor = factor/coszen
 
             if (factor < 0._r8) factor = 0._r8
 
