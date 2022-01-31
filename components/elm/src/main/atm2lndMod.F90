@@ -532,6 +532,7 @@ contains
     real(r8) :: svf
     real(r8) :: dtheta
     real(r8) :: hrz_angle_twd_sun
+    real(r8) :: aspect_wrt_south
 
     character(len=*), parameter :: subname = 'topo_effects_on_shortwave'
     !-----------------------------------------------------------------------
@@ -549,7 +550,7 @@ contains
       do g = bounds%begg, bounds%endg
 
          ! cosine of solar zenith angle
-         coszen = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin, acos(coszen))
+         coszen = shr_orb_cosz (nextsw_cday, grc_pp%lat(g), grc_pp%lon(g), declin)
 
          if (coszen > 0.01_r8) then
 
@@ -564,8 +565,9 @@ contains
             ! for glaciers in complex terrain. Frontiers in Earth Science, 7, 216.
             !
 
+            aspect_wrt_south = (grc_pp%aspect_rad(g) - pi)
             factor = cos(grc_pp%slope_rad(g))*coszen + &
-                     sin(grc_pp%slope_rad(g))*sin(zen)*cos(grc_pp%aspect_rad(g) - saz)
+                     sin(grc_pp%slope_rad(g))*sin(zen)*cos(aspect_wrt_south - saz)
             !factor = factor/coszen/cos(grc_pp%slope_rad(g))
 
             if (factor < 0._r8) factor = 0._r8
