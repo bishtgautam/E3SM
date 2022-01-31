@@ -490,7 +490,7 @@ contains
     shr_orb_saz = num/den
 
     shr_orb_saz = min(shr_orb_saz, 1._r8)
-    shr_orb_saz = min(-1._r8, shr_orb_saz)
+    shr_orb_saz = max(-1._r8, shr_orb_saz)
 
     if (omega > 0._r8) then
        shr_orb_saz = 2._r8*pi - shr_orb_saz
