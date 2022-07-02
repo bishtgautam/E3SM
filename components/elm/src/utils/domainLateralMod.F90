@@ -89,7 +89,7 @@ contains
 
     call get_proc_bounds(begg, endg)
 
-    call create_ugrid(domain_l%ugrid, mpicom, begg, endg, ldecomp%gdc2glo, &
+    call create_ugrid(domain_l%ugrid, mpicom, begg, endg, ldecomp%gdc2glo (begg:endg), &
          cellsOnCell_old, ncells_loc_old, maxEdges)
 
     call create_ugdm(domain_l%ugrid, domain_l%dm_1dof, 1)

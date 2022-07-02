@@ -96,6 +96,7 @@ contains
     use SoilStateType              , only : soilstate_type
     use elm_varcon                 , only : denh2o, denice, watmin
     use ColumnType                 , only : col_pp
+    use clm_time_manager           , only : get_step_size, get_nstep
     !
     ! !ARGUMENTS:
     implicit none
