@@ -1570,6 +1570,7 @@ contains
     procinfo%nclumps   = clump_pproc
     procinfo%cid(:)    = -1
     procinfo%ncells    = 0
+    procinfo%ntunits   = 0
     procinfo%nlunits   = 0
     procinfo%ncols     = 0
     procinfo%npfts     = 0
@@ -1592,6 +1593,7 @@ contains
     end if
     clumps(:)%owner     = -1
     clumps(:)%ncells    = 0
+    clumps(:)%ntunits   = 0
     clumps(:)%nlunits   = 0
     clumps(:)%ncols     = 0
     clumps(:)%npfts     = 0
