@@ -2216,12 +2216,12 @@ contains
        procinfo%begCohort_all   = procinfo%begCohort
 
        ! Set 'end' index for subgrid categories
-       procinfo%endg_all        = procinfo%endg      + procinfo%ncells_ghost
-       procinfo%endt_all        = procinfo%endt      + procinfo%ntunits_ghost
-       procinfo%endl_all        = procinfo%endl      + procinfo%nlunits_ghost
-       procinfo%endc_all        = procinfo%endc      + procinfo%ncols_ghost
-       procinfo%endp_all        = procinfo%endp      + procinfo%npfts_ghost
-       procinfo%endCohort_all   = procinfo%endCohort + procinfo%nCohorts_ghost
+       procinfo%endg_all        = procinfo%endg
+       procinfo%endt_all        = procinfo%endt
+       procinfo%endl_all        = procinfo%endl
+       procinfo%endc_all        = procinfo%endc
+       procinfo%endp_all        = procinfo%endp
+       procinfo%endCohort_all   = procinfo%endCohort
 
 #endif
 
