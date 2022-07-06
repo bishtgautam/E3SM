@@ -709,18 +709,13 @@ contains
             den    = (zmm(c,j) - zmm(c,j-1))
             dzq    = (zq(c,j)-zq(c,j-1))
             num    = (smp(c,j)-smp(c,j-1)) - dzq
-            if(c==10) then
-             print *,'dzq',dzq
-             print *,'smp1',smp(c,j-1)
-             print *,'smp2',smp(c,j)
-             print *,'hk',hk(c,j-1)
-            endif
+
             qin(c,j)    = -hk(c,j-1)*num/den
             dqidw0(c,j) = -(-hk(c,j-1)*dsmpdw(c,j-1) + num*dhkdw(c,j-1))/den
             dqidw1(c,j) = -( hk(c,j-1)*dsmpdw(c,j)   + num*dhkdw(c,j-1))/den
             qout(c,j)   =  0._r8
             dqodw1(c,j) =  0._r8
-            !rmx(c,j)    =  qin(c,j) - qout(c,j) - qflx_rootsoi_col(c,j) + qflx_lateral_s(c,j)/dx*dz(c,j)
+
             rmx(c,j)    =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j) !/dx*dz(c,j) 
             amx(c,j)    = -dqidw0(c,j)
             bmx(c,j)    =  dzmm(c,j)/dtime - dqidw1(c,j) + dqodw1(c,j)
@@ -806,15 +801,7 @@ contains
          endif
       end do
       ! Solve for dwat
-      !print *, 'rmx', rmx(1,1:16)
-
       jtop(bounds%begc : bounds%endc) = 1
-      ! Determination of how many layers (nlev2bed) to do for the tridiagonal
-      ! at each column
-      !print *, 'dwat2',dwat2(1,1:16)
-      !print *, 'dwat2 84',dwat2(84,1:16)
-      !print *, 'dwat2 16',dwat2(16,1:16)
-      !print *, 'dwat2 100',dwat2(100,1:16)
 
       if (use_var_soil_thick) then
       	 do fc = 1,num_hydrologyc
@@ -840,10 +827,6 @@ contains
               rmx(bounds%begc:bounds%endc, :), &
               dwat2(bounds%begc:bounds%endc, :) )
       end if
-      print *, 'dwat97',dwat2(97,1:16)
-      print *, 'dwat2 98',dwat2(98,1:16)
-      print *, 'dwat2 99',dwat2(99,1:16)
-      print *, 'dwat2 100',dwat2(100,1:16)
 
       ! Renew the mass of liquid water
       ! also compute qcharge from dwat in aquifer layer
@@ -935,7 +918,6 @@ contains
       end do
 
     ! Water table changes due to qlateral in saturated GW
-    !if(jwt(1)==100) then
     nstep=1
     do step = 1,nstep
         qflx_lateral_s=0._r8
@@ -956,51 +938,9 @@ contains
         ! calculate transmissivity 
         trans = 1.0_r8*sqrt(hksat(col_id_up,15)*hksat(col_id_dn,15))*(depth_up+depth_down)/2._r8*1000._r8 ! (mm2/s) 
         qflx_up_to_dn = -trans*(depth_down-depth_up+conn%dzg(iconn))*1000._r8/den
-       if(iconn == 180)  then
-          print *, 'colup', col_id_up
-          print *, 'coldn', col_id_dn
-          print *, 'qflx_updn', qflx_up_to_dn
-       endif
-        if(iconn == 90)  then
-          print *, 'colup', col_id_up
-          print *, 'coldn', col_id_dn
-          print *, 'qflx_updn', qflx_up_to_dn
-       endif
-        if(iconn == 179)  then
-          print *, 'colup', col_id_up
-          print *, 'coldn', col_id_dn
-          print *, 'qflx_updn', qflx_up_to_dn
-       endif
-        if(iconn == 89)  then
-          print *, 'colup', col_id_up
-          print *, 'coldn', col_id_dn
-          print *, 'qflx_updn', qflx_up_to_dn
-       endif
-       
-        if(col_id_up == 100)  then
-          print *, 'colups', col_id_up
-       endif
-       if(col_id_dn == 100)  then
-          print *, 'colupp', col_id_dn
-          print *, 'qflx_up_to_dn', qflx_up_to_dn
-          print *, 'conn%area(iconn)', conn%area(iconn)
-          print *, 'conn%uparea(iconn)', conn%uparea(iconn)
-          print *, 'conn%facecos(iconn)',conn%facecos(iconn)
-          print *, 'conn%vertcos(col_id_dn)',conn%vertcos(col_id_dn)
-       endif
-
        qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn/1000._r8*conn%area(iconn)/conn%uparea(iconn)*conn%facecos(iconn)* conn%vertcos(col_id_up)  !dy = area/dz dz= 1.0m=1000mm
        qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn/1000._r8*conn%area(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn) 
-       !qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-       !qflx_lateral_s(col_id_dn, j) = 0._r8;
        enddo        
-     print *, 'qflx_lateral_s91', qflx_lateral_s(91,:)
-     print *, 'qflx_lateral_s92', qflx_lateral_s(92,:)
-     print *, 'qflx_lateral_s95', qflx_lateral_s(95,:)
-     print *, 'qflx_lateral_s97', qflx_lateral_s(97,:)
-     print *, 'qflx_lateral_s98', qflx_lateral_s(98,:)
-     print *, 'qflx_lateral_s99', qflx_lateral_s(99,:)
-     print *, 'qflx_lateral_s100', qflx_lateral_s(100,:)
 
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
@@ -1029,17 +969,10 @@ contains
                    s_y = watsat(c,j) &
                         * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
                    s_y=max(s_y,0.02_r8)
-                     !if(c==1) then
-                     !   print *, 'jwt',jwt(c)
-                     !   print *, 'h2osoi_liq1',h2osoi_liq(c,3)
-                     !endif
                    qlat_layer=min(qlat_tot,(s_y*(zwt(c) - zi(c,j-1))*1.e3))
                    qlat_layer=max(qlat_layer,0._r8)
 
                     h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
-                    if(c==1) then
-                        print *, 'h2osoi_liq1',h2osoi_liq(c,3)
-                    endif
 
                    if(s_y > 0._r8) zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
 
@@ -1057,13 +990,7 @@ contains
                    qlat_layer=min(qlat_layer,0._r8)
                    h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
                    qlat_tot = qlat_tot - qlat_layer
-                   if(c==10) then
-                     print *, 'jwt',jwt(c)
-                     print *, 'zwt',zwt(c)
-                    !print *, 'qlat_tot',qlat_tot
-                    !print *, 'qlat_layer',qlat_layer
-                     print *, 's_y',s_y
-                   endif
+
                    if (qlat_tot >= 0.) then
                       zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
                       exit
@@ -1097,7 +1024,6 @@ contains
             soilhydrology_vars, soilstate_vars)
 
   enddo
-  !endif
       
       ! compute the water deficit and reset negative liquid water content
       !  Jinyun Tang
@@ -1105,7 +1031,6 @@ contains
          c = filter_hydrologyc(fc)
          nlevbed = nlev2bed(c)
          qflx_deficit(c) = 0._r8
-         !do j = 1, nlevbed
          do j = 1, nlevgrnd
             if(h2osoi_liq(c,j)<0._r8)then
                qflx_deficit(c) = qflx_deficit(c) - h2osoi_liq(c,j)
@@ -1116,121 +1041,115 @@ contains
     end associate
 
   end subroutine soilwater_zengdecker2009
-  !
+
+  !-----------------------------------------------------------------------
   subroutine ThetaBasedWaterTable(bounds, num_hydrologyc, filter_hydrologyc, &
-        num_urbanc, filter_urbanc, soilhydrology_vars, soilstate_vars) 
-     !
-     ! !DESCRIPTION:
-     ! Calculate watertable, considering aquifer recharge but no drainage.
-     !
-     ! !USES:
-     use decompMod        , only : bounds_type
-     use elm_varctl           , only : use_var_soil_thick
-    use shr_kind_mod         , only : r8 => shr_kind_r8
-    use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
-    use decompMod            , only : bounds_type
-    use elm_varcon           , only : wimp,grav,hfus,tfrz
-    use elm_varcon           , only : e_ice,denh2o, denice
-    use elm_varpar           , only : nlevsoi, max_patch_per_col, nlevgrnd
-    use clm_time_manager     , only : get_step_size
-    use column_varcon        , only : icol_roof, icol_road_imperv
-    use TridiagonalMod       , only : Tridiagonal
-    use SoilStateType        , only : soilstate_type
-    use SoilHydrologyType    , only : soilhydrology_type
-    use VegetationType       , only : veg_pp
-    use ColumnType           , only : col_pp
-    use GridCellConnectionSetType    , only : conn, get_natveg_column_id
-    use GridcellType         , only : grc_pp
-    use TopounitType         , only : top_pp
+       num_urbanc, filter_urbanc, soilhydrology_vars, soilstate_vars) 
+    !
+    ! !DESCRIPTION:
+    ! Calculate watertable, considering aquifer recharge but no drainage.
+    !
+    ! !USES:
+    use decompMod                 , only : bounds_type
+    use elm_varctl                , only : use_var_soil_thick
+    use shr_kind_mod              , only : r8 => shr_kind_r8
+    use shr_const_mod             , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
+    use decompMod                 , only : bounds_type
+    use elm_varcon                , only : wimp,grav,hfus,tfrz
+    use elm_varcon                , only : e_ice,denh2o, denice
+    use elm_varpar                , only : nlevsoi, max_patch_per_col, nlevgrnd
+    use clm_time_manager          , only : get_step_size
+    use column_varcon             , only : icol_roof, icol_road_imperv
+    use TridiagonalMod            , only : Tridiagonal
+    use SoilStateType             , only : soilstate_type
+    use SoilHydrologyType         , only : soilhydrology_type
+    use VegetationType            , only : veg_pp
+    use ColumnType                , only : col_pp
+    use GridCellConnectionSetType , only : conn, get_natveg_column_id
+    use GridcellType              , only : grc_pp
+    use TopounitType              , only : top_pp
 
-     !
-     ! !ARGUMENTS:
-     type(bounds_type)        , intent(in)    :: bounds  
-     integer                  , intent(in)    :: num_hydrologyc       ! number of column soil points in column filter
-     integer                  , intent(in)    :: num_urbanc           ! number of column urban points in column filter
-     integer                  , intent(in)    :: filter_urbanc(:)     ! column filter for urban points
-     integer                  , intent(in)    :: filter_hydrologyc(:) ! column filter for soil points
-     type(soilhydrology_type) , intent(inout) :: soilhydrology_vars
-     type(soilstate_type)     , intent(in)    :: soilstate_vars
-     !type(waterstatebulk_type)     , intent(inout) :: waterstatebulk_inst
-     !type(waterfluxbulk_type)      , intent(inout) :: waterfluxbulk_inst
-     !
-     ! !LOCAL VARIABLES:
-     integer  :: c,j,fc,i                                ! indices
-     integer  :: k,k_zwt
-     real(r8) :: sat_lev
-     real(r8) :: s1,s2,m,b   ! temporary variables used to interpolate theta
-     integer  :: sat_flag
-     
-     !-----------------------------------------------------------------------
+    !
+    ! !ARGUMENTS:
+    type(bounds_type)        , intent(in)    :: bounds  
+    integer                  , intent(in)    :: num_hydrologyc       ! number of column soil points in column filter
+    integer                  , intent(in)    :: num_urbanc           ! number of column urban points in column filter
+    integer                  , intent(in)    :: filter_urbanc(:)     ! column filter for urban points
+    integer                  , intent(in)    :: filter_hydrologyc(:) ! column filter for soil points
+    type(soilhydrology_type) , intent(inout) :: soilhydrology_vars
+    type(soilstate_type)     , intent(in)    :: soilstate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer  :: c,j,fc,i                                ! indices
+    integer  :: k,k_zwt
+    real(r8) :: sat_lev
+    real(r8) :: s1,s2,m,b   ! temporary variables used to interpolate theta
+    integer  :: sat_flag
 
-     associate(                                                            & 
-          nbedrock           =>    col_pp%nlevbed                         , & ! Input:  [real(r8) (:,:) ]  depth to bedrock (m)           
-          dz                 =>    col_pp%dz                                , & ! Input:  [real(r8) (:,:) ]  layer depth (m)                                 
-          z                  =>    col_pp%z                                 , & ! Input:  [real(r8) (:,:) ]  layer depth (m)                                 
-          zi                 =>    col_pp%zi                                , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)           
-          h2osoi_liq         =>    col_ws%h2osoi_liq        , & ! Output: [real(r8) (:,:) ]  liquid water (kg/m2)                            
-          h2osoi_ice         =>    col_ws%h2osoi_ice        , & ! Output: [real(r8) (:,:) ]  ice lens (kg/m2)                                
-          h2osoi_vol         =>    col_ws%h2osoi_vol        , & ! Input:  [real(r8) (:,:) ]  volumetric soil water (0<=h2osoi_vol<=watsat) [m3/m3]
-          watsat             =>    soilstate_vars%watsat_col             , & ! Input:  [real(r8) (:,:) ] volumetric soil water at saturation (porosity)  
-          zwt                =>    soilhydrology_vars%zwt_col              & ! Output: [real(r8) (:)   ]  water table depth (m)                             
-          )
+    !-----------------------------------------------------------------------
 
-       ! calculate water table based on soil moisture state
-       ! this is a simple search for 1st layer with soil moisture 
-       ! less than specified threshold (sat_lev)
+    associate(                                                & 
+         nbedrock           =>    col_pp%nlevbed            , & ! Input:  [real(r8) (:,:) ]  depth to bedrock (m)           
+         dz                 =>    col_pp%dz                 , & ! Input:  [real(r8) (:,:) ]  layer depth (m)                                 
+         z                  =>    col_pp%z                  , & ! Input:  [real(r8) (:,:) ]  layer depth (m)                                 
+         zi                 =>    col_pp%zi                 , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)           
+         h2osoi_liq         =>    col_ws%h2osoi_liq         , & ! Output: [real(r8) (:,:) ]  liquid water (kg/m2)                            
+         h2osoi_ice         =>    col_ws%h2osoi_ice         , & ! Output: [real(r8) (:,:) ]  ice lens (kg/m2)                                
+         h2osoi_vol         =>    col_ws%h2osoi_vol         , & ! Input:  [real(r8) (:,:) ]  volumetric soil water (0<=h2osoi_vol<=watsat) [m3/m3]
+         watsat             =>    soilstate_vars%watsat_col , & ! Input:  [real(r8) (:,:) ] volumetric soil water at saturation (porosity)  
+         zwt                =>    soilhydrology_vars%zwt_col  & ! Output: [real(r8) (:)   ]  water table depth (m)                             
+         )
 
-       do fc = 1, num_hydrologyc
-          c = filter_hydrologyc(fc)
+      ! calculate water table based on soil moisture state
+      ! this is a simple search for 1st layer with soil moisture 
+      ! less than specified threshold (sat_lev)
 
-          ! initialize to depth of bottom of lowest layer
-          zwt(c)=zi(c,nlevgrnd)
+      do fc = 1, num_hydrologyc
+         c = filter_hydrologyc(fc)
 
-          ! locate water table from bottom up starting at bottom of soil column
-          ! sat_lev is an arbitrary saturation level used to determine water table
-          sat_lev=0.96
-          
-          k_zwt=nlevgrnd
-          sat_flag=1 !will remain unchanged if all layers at saturation
-           do k=nlevgrnd,1,-1
-             h2osoi_vol(c,k) = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
-                  + h2osoi_ice(c,k)/(dz(c,k)*denice)
-             
-             if (h2osoi_vol(c,k)/watsat(c,k) <= sat_lev) then 
-                k_zwt=k
-                sat_flag=0
-                exit
-             endif
-          enddo
-          if (sat_flag == 1) k_zwt=1
+         ! initialize to depth of bottom of lowest layer
+         zwt(c)=zi(c,nlevgrnd)
 
-          ! if soil column above sat_lev, set water table to lower 
-          ! interface of first layer
-          if (k_zwt == 1) then
-             zwt(c)=zi(c,1)
-          else if (k_zwt < nlevgrnd) then
-             ! interpolate between k_zwt and k_zwt+1 to find water table height
-             s1 = (h2osoi_liq(c,k_zwt)/(dz(c,k_zwt)*denh2o) &
-                  + h2osoi_ice(c,k_zwt)/(dz(c,k_zwt)*denice))/watsat(c,k_zwt)
-             s2 = (h2osoi_liq(c,k_zwt+1)/(dz(c,k_zwt+1)*denh2o) &
-                  + h2osoi_ice(c,k_zwt+1)/(dz(c,k_zwt+1)*denice))/watsat(c,k_zwt+1)
-             if(c==10) then
-             print *, 's1', s1
-             print *, 's2',s2
-             print *, 'k_zwt',k_zwt
-             endif
-             m=(z(c,k_zwt+1)-z(c,k_zwt))/(s2-s1)*1.0_r8
-             b=z(c,k_zwt+1)-m*s2
-             zwt(c)=max(0._r8,m*sat_lev+b)
-       
-          else
-             zwt(c)=zi(c,nlevgrnd)
-          endif
-       end do
+         ! locate water table from bottom up starting at bottom of soil column
+         ! sat_lev is an arbitrary saturation level used to determine water table
+         sat_lev=0.96
 
-     end associate
+         k_zwt=nlevgrnd
+         sat_flag=1 !will remain unchanged if all layers at saturation
+         do k=nlevgrnd,1,-1
+            h2osoi_vol(c,k) = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
+                 + h2osoi_ice(c,k)/(dz(c,k)*denice)
 
-   end subroutine ThetaBasedWaterTable
+            if (h2osoi_vol(c,k)/watsat(c,k) <= sat_lev) then 
+               k_zwt=k
+               sat_flag=0
+               exit
+            endif
+         enddo
+         if (sat_flag == 1) k_zwt=1
+
+         ! if soil column above sat_lev, set water table to lower 
+         ! interface of first layer
+         if (k_zwt == 1) then
+            zwt(c)=zi(c,1)
+         else if (k_zwt < nlevgrnd) then
+            ! interpolate between k_zwt and k_zwt+1 to find water table height
+            s1 = (h2osoi_liq(c,k_zwt)/(dz(c,k_zwt)*denh2o) &
+                 + h2osoi_ice(c,k_zwt)/(dz(c,k_zwt)*denice))/watsat(c,k_zwt)
+            s2 = (h2osoi_liq(c,k_zwt+1)/(dz(c,k_zwt+1)*denh2o) &
+                 + h2osoi_ice(c,k_zwt+1)/(dz(c,k_zwt+1)*denice))/watsat(c,k_zwt+1)
+            m=(z(c,k_zwt+1)-z(c,k_zwt))/(s2-s1)*1.0_r8
+            b=z(c,k_zwt+1)-m*s2
+            zwt(c)=max(0._r8,m*sat_lev+b)
+
+         else
+            zwt(c)=zi(c,nlevgrnd)
+         endif
+      end do
+
+    end associate
+
+  end subroutine ThetaBasedWaterTable
 
 
   !-----------------------------------------------------------------------
