@@ -1267,7 +1267,8 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine surfrd_get_grid_conn(filename, cellsOnCell, edgesOnCell, &
-       nEdgesOnCell, areaCell, xCell, yCell, zCell, dcEdge, dvEdge, &
+       nEdgesOnCell, areaCell, xCell, yCell, zCell, vcosCell, &
+       dcEdge, dvEdge, cosEdge, &
        nCells_loc, nEdges_loc, maxEdges)
     !
     ! !DESCRIPTION:
@@ -1284,10 +1285,12 @@ contains
     integer         , pointer     :: nEdgesOnCell(:)                 ! number of edges
     real(r8)        , pointer     :: dcEdge(:)                       ! distance between centroids of grid cells
     real(r8)        , pointer     :: dvEdge(:)                       ! distance between vertices
+    real(r8)        , pointer     :: cosEdge(:)                      ! cosine of angle between unit vec between cells and edge
     real(r8)        , pointer     :: areaCell(:)                     ! area of grid cells [m^2]
     real(r8)        , pointer     :: xCell(:)                        ! x-coordinate of grid cells [m]
     real(r8)        , pointer     :: yCell(:)                        ! y-coordinate of grid cells [m]
     real(r8)        , pointer     :: zCell(:)                        ! z-coordinate of grid cells [m]
+    real(r8)        , pointer     :: vcosCell(:)                     ! cosine of angle between vertical unit vec and plane of the cell
     integer         , intent(out) :: nCells_loc                      ! number of local cell-to-cell connections
     integer         , intent(out) :: maxEdges                        ! max number of edges/neighbors
     integer         , intent(out) :: nEdges_loc                      ! number of edge length saved locally
@@ -1372,15 +1375,17 @@ contains
     ibeg_e = ibeg_e + 1 - nEdges_loc
 
     ! Allocate memory
-    allocate(cellsOnCell   (maxEdges, nCells_loc))
-    allocate(edgesOnCell   (maxEdges, nCells_loc))
-    allocate(nEdgesOnCell  (nCells_loc          ))
-    allocate(areaCell      (nCells_loc          ))
-    allocate(xCell         (nCells_loc          ))
-    allocate(yCell         (nCells_loc          ))
-    allocate(zCell         (nCells_loc          ))
-    allocate(dcEdge        (nEdges_loc          ))
-    allocate(dvEdge        (nEdges_loc          ))
+    allocate(cellsOnCell   (maxEdges, nCells_loc)); cellsOnCell(:,:)  = 0
+    allocate(edgesOnCell   (maxEdges, nCells_loc)); edgesOnCell(:,:)  = 0
+    allocate(nEdgesOnCell  (nCells_loc          )); nEdgesOnCell(:)   = 0
+    allocate(areaCell      (nCells_loc          )); areaCell(:)       = 0._r8
+    allocate(xCell         (nCells_loc          )); xCell(:)          = 0._r8
+    allocate(yCell         (nCells_loc          )); yCell(:)          = 0._r8
+    allocate(zCell         (nCells_loc          )); zCell(:)          = 0._r8
+    allocate(vcosCell      (nCells_loc          )); vcosCell(:)       = 0._r8
+    allocate(dcEdge        (nEdges_loc          )); dcEdge(:)         = 0._r8
+    allocate(dvEdge        (nEdges_loc          )); dvEdge(:)         = 0._r8
+    allocate(cosEdge       (nEdges_loc          )); cosEdge(:)        = 0._r8
 
     ! Read the data independently (i.e. each MPI-proc reads in the entire
     ! dataset)
@@ -1412,56 +1417,71 @@ contains
     nEdgesOnCell(:) = idata1d(ibeg_c:iend_c)
     deallocate(idata1d)
 
-    ! Read areaCell
+    !
+    ! Read cell related variables
+    !
     allocate(rdata1d(nCells))
+
+    ! 1. areaCell
     call ncd_io(ncid=ncid, varname='areaCell', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: areaCell not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     areaCell(:) = rdata1d(ibeg_c:iend_c)
-    deallocate(rdata1d)
 
-    ! Read xCell
-    allocate(rdata1d(nCells))
+    ! 2. xCell
     call ncd_io(ncid=ncid, varname='xCell', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: xCell not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     xCell(:) = rdata1d(ibeg_c:iend_c)
-    deallocate(rdata1d)
 
-    ! Read xCell
-    allocate(rdata1d(nCells))
+    ! 3. yCell
     call ncd_io(ncid=ncid, varname='yCell', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: yCell not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     yCell(:) = rdata1d(ibeg_c:iend_c)
-    deallocate(rdata1d)
 
-    ! Read xCell
-    allocate(rdata1d(nCells))
+    ! 4. zCell
     call ncd_io(ncid=ncid, varname='zCell', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: zCell not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     zCell(:) = rdata1d(ibeg_c:iend_c)
+
+    ! 5. vcosCell: optional data
+    call ncd_io(ncid=ncid, varname='vcosCell', data=rdata1d, flag='read', readvar=readvar)
+    if (readvar) then
+       vcosCell(:) = rdata1d(ibeg_c:iend_c)
+    end if
+
     deallocate(rdata1d)
 
-    ! Read dcEdge
+    !
+    ! Read edge related variables
+    !
     allocate(rdata1d(nEdges))
+    
+    ! 1. dcEdge
     call ncd_io(ncid=ncid, varname='dcEdge', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: dcEdge not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     dcEdge(:) = rdata1d(ibeg_e:iend_e)
 
-    ! Read dvEdge
+    ! 2. dvEdge
     call ncd_io(ncid=ncid, varname='dvEdge', data=rdata1d, flag='read', readvar=readvar)
     if (.not. readvar) then
        call endrun(msg=' ERROR: dvEdge not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     dvEdge(:) = rdata1d(ibeg_e:iend_e)
+
+    ! 3. cosEdge: optional data
+    call ncd_io(ncid=ncid, varname='cosEdge', data=rdata1d, flag='read', readvar=readvar)
+    if (readvar) then
+       cosEdge(:) = rdata1d(ibeg_c:iend_c)
+    end if
 
     deallocate(rdata1d)
 

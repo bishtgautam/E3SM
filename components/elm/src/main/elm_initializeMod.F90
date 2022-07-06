@@ -102,12 +102,14 @@ contains
     integer ,pointer  :: cellsOnCell(:,:)        ! grid cell level connectivity
     integer ,pointer  :: edgesOnCell(:,:)        ! index to determine distance between neighbors from dcEdge
     integer ,pointer  :: nEdgesOnCell(:)         ! number of edges
-    real(r8), pointer :: dcEdge(:)               ! distance between centroids of grid cells
-    real(r8), pointer :: dvEdge(:)               ! distance between vertices
     real(r8), pointer :: areaCell(:)             ! area of grid cells [m^2]
     real(r8), pointer :: xCell(:)                ! x-coordinate of grid cells [m]
     real(r8), pointer :: yCell(:)                ! y-coordinate of grid cells [m]
     real(r8), pointer :: zCell(:)                ! z-coordinate of grid cells [m]
+    real(r8), pointer :: vcosCell(:)             ! cosine of vertical angle                                  [in natural order prior to domain decomposition]
+    real(r8), pointer :: dcEdge(:)               ! distance between centroids of grid cells
+    real(r8), pointer :: dvEdge(:)               ! distance between vertices
+    real(r8), pointer :: cosEdge(:)              ! cosine of angle between unit vec between cells and edge
     integer           :: nCells_loc              ! number of grid cell level connectivity saved locally
     integer           :: nEdges_loc              ! number of edge length saved locally
     integer           :: maxEdges                ! max number of edges/neighbors
@@ -178,7 +180,7 @@ contains
 
     if (lateral_connectivity) then
        call surfrd_get_grid_conn(fatmlndfrc, cellsOnCell, edgesOnCell, &
-            nEdgesOnCell, areaCell, xCell, yCell, zCell, dcEdge, dvEdge, &
+            nEdgesOnCell, areaCell, xCell, yCell, zCell, vcosCell, dcEdge, dvEdge, cosEdge, &
             nCells_loc, nEdges_loc, maxEdges)
     else
        nullify(cellsOnCell)
@@ -206,7 +208,8 @@ contains
 
     if (lateral_connectivity) then
        call domainlateral_init(ldomain_lateral, cellsOnCell, edgesOnCell, &
-            nEdgesOnCell, areaCell, dcEdge, dvEdge, &
+            nEdgesOnCell, areaCell, xCell, yCell, zCell, vcosCell, &
+            dcEdge, dvEdge, cosEdge, &
             nCells_loc, nEdges_loc, maxEdges)
     endif
 
