@@ -61,7 +61,7 @@ contains
   !
   ! !INTERFACE:
   subroutine domainlateral_init(domain_l, cellsOnCell_old, edgesOnCell_old, &
-       nEdgesOnCell_old, areaCell_old, dcEdge_old, dvEdge_old, &
+       nEdgesOnCell_old, areaCell_old, xCell_old, yCell_old, zCell_old, dcEdge_old, dvEdge_old, &
        nCells_loc_old, nEdges_loc_old, maxEdges)
     !
     use decompMod, only : ldecomp, get_proc_bounds
@@ -77,6 +77,9 @@ contains
     real(r8), intent(in)     :: dvEdge_old(:)           ! distance between neighbors                                 [in natural order prior to domain decomposition]
     real(r8), intent(in)     :: dcEdge_old(:)           ! distance between vertices                                  [in natural order prior to domain decomposition]
     real(r8), intent(in)     :: areaCell_old(:)         ! area of grid cell                                          [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: xCell_old(:)            ! x-coordinate of grid cell                                  [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: yCell_old(:)            ! x-coordinate of grid cell                                  [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: zCell_old(:)            ! x-coordinate of grid cell                                  [in natural order prior to domain decomposition]
     integer , intent(in)     :: nCells_loc_old          ! number of local cell-to-cell connections                   [in natural order prior to domain decomposition]
     integer , intent(in)     :: nEdges_loc_old          ! number of edges                                            [in natural order prior to domain decomposition]
     integer , intent(in)     :: maxEdges                ! max number of edges/neighbors
@@ -95,14 +98,15 @@ contains
     call create_ugdm(domain_l%ugrid, domain_l%dm_1dof, 1)
 
     call save_geometric_attributes(edgesOnCell_old, &
-         nEdgesOnCell_old, areaCell_old, dcEdge_old, dvEdge_old, &
+         nEdgesOnCell_old, areaCell_old, xCell_old, yCell_old, zCell_old, dcEdge_old, dvEdge_old, &
          nCells_loc_old, nEdges_loc_old, maxEdges)
 
   end subroutine domainlateral_init
 
   !------------------------------------------------------------------------------
   subroutine save_geometric_attributes(edgesOnCell_old, &
-       nEdgesOnCell_old, areaCell_old, dcEdge_old, dvEdge_old, &
+       nEdgesOnCell_old, areaCell_old, xCell_old, yCell_old, zCell_old, &
+       dcEdge_old, dvEdge_old, &
        nCells_loc_old, nEdges_loc_old, maxEdges)
     !
     ! !DESCRIPTION:
@@ -119,6 +123,9 @@ contains
     real(r8), intent(in)     :: dcEdge_old(:)        ! distance between neighbors                                [in natural order prior to domain decomposition]
     real(r8), intent(in)     :: dvEdge_old(:)        ! distance between vertices                                 [in natural order prior to domain decomposition]
     real(r8), intent(in)     :: areaCell_old(:)      ! area of grid cell                                         [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: xCell_old(:)         ! x-coordinate of grid cell                                 [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: yCell_old(:)         ! y-coordinate of grid cell                                 [in natural order prior to domain decomposition]
+    real(r8), intent(in)     :: zCell_old(:)         ! z-coordinate of grid cell                                 [in natural order prior to domain decomposition]
     integer , intent(in)     :: nCells_loc_old       ! number of local cell-to-cell connections                  [in natural order prior to domain decomposition]
     integer , intent(in)     :: nEdges_loc_old       ! number of edges                                           [in natural order prior to domain decomposition]
     integer , intent(in)     :: maxEdges             ! max number of edges/neighbors
@@ -301,11 +308,14 @@ contains
     call VecDestroy(attr_glb_vec, ierr); CHKERRQ(ierr);
 
     !
-    ! areaCell
+    ! area,x,y,z cell
     !
     allocate(ldomain_lateral%ugrid%areaGrid_ghosted(ldomain_lateral%ugrid%ngrid_ghosted))
+    allocate(ldomain_lateral%ugrid%xGrid_ghosted(   ldomain_lateral%ugrid%ngrid_ghosted))
+    allocate(ldomain_lateral%ugrid%yGrid_ghosted(   ldomain_lateral%ugrid%ngrid_ghosted))
+    allocate(ldomain_lateral%ugrid%zGrid_ghosted(   ldomain_lateral%ugrid%ngrid_ghosted))
 
-    nblocks = 1
+    nblocks = 4
     call VecCreate(mpicom, attr_glb_vec, ierr); CHKERRQ(ierr)
     call VecSetSizes(attr_glb_vec, nCells_loc_old*nblocks, PETSC_DECIDE, ierr);
     CHKERRQ(ierr)
@@ -333,8 +343,12 @@ contains
     deallocate(int_array)
 
     call VecGetArrayF90(attr_glb_vec, real_ptr, ierr); CHKERRQ(ierr)
+    count = 0
     do ii = 1, nCells_loc_old
-       real_ptr(ii) = areaCell_old(ii)
+       count = count + 1; real_ptr(count) = areaCell_old(ii)
+       count = count + 1; real_ptr(count) = xCell_old(ii)
+       count = count + 1; real_ptr(count) = yCell_old(ii)
+       count = count + 1; real_ptr(count) = zCell_old(ii)
     enddo
     call VecRestoreArrayF90(attr_glb_vec, real_ptr, ierr); CHKERRQ(ierr)
 
@@ -350,8 +364,12 @@ contains
     call VecScatterDestroy(scatter, ierr)
 
     call VecGetArrayF90(attr_loc_vec, real_ptr, ierr); CHKERRQ(ierr)
+    count = 0
     do ii = 1, ldomain_lateral%ugrid%ngrid_ghosted
-       ldomain_lateral%ugrid%areaGrid_ghosted(ii) = real_ptr(ii)
+       count = count + 1; ldomain_lateral%ugrid%areaGrid_ghosted(ii) = real_ptr(count)
+       count = count + 1; ldomain_lateral%ugrid%xGrid_ghosted(ii) = real_ptr(count)
+       count = count + 1; ldomain_lateral%ugrid%yGrid_ghosted(ii) = real_ptr(count)
+       count = count + 1; ldomain_lateral%ugrid%zGrid_ghosted(ii) = real_ptr(count)
     enddo
     call VecRestoreArrayF90(attr_loc_vec, real_ptr, ierr); CHKERRQ(ierr)
 

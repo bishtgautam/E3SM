@@ -105,6 +105,9 @@ contains
     real(r8), pointer :: dcEdge(:)               ! distance between centroids of grid cells
     real(r8), pointer :: dvEdge(:)               ! distance between vertices
     real(r8), pointer :: areaCell(:)             ! area of grid cells [m^2]
+    real(r8), pointer :: xCell(:)                ! x-coordinate of grid cells [m]
+    real(r8), pointer :: yCell(:)                ! y-coordinate of grid cells [m]
+    real(r8), pointer :: zCell(:)                ! z-coordinate of grid cells [m]
     integer           :: nCells_loc              ! number of grid cell level connectivity saved locally
     integer           :: nEdges_loc              ! number of edge length saved locally
     integer           :: maxEdges                ! max number of edges/neighbors
@@ -175,7 +178,7 @@ contains
 
     if (lateral_connectivity) then
        call surfrd_get_grid_conn(fatmlndfrc, cellsOnCell, edgesOnCell, &
-            nEdgesOnCell, areaCell, dcEdge, dvEdge, &
+            nEdgesOnCell, areaCell, xCell, yCell, zCell, dcEdge, dvEdge, &
             nCells_loc, nEdges_loc, maxEdges)
     else
        nullify(cellsOnCell)

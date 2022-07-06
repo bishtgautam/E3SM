@@ -1267,7 +1267,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine surfrd_get_grid_conn(filename, cellsOnCell, edgesOnCell, &
-       nEdgesOnCell, areaCell, dcEdge, dvEdge, &
+       nEdgesOnCell, areaCell, xCell, yCell, zCell, dcEdge, dvEdge, &
        nCells_loc, nEdges_loc, maxEdges)
     !
     ! !DESCRIPTION:
@@ -1285,6 +1285,9 @@ contains
     real(r8)        , pointer     :: dcEdge(:)                       ! distance between centroids of grid cells
     real(r8)        , pointer     :: dvEdge(:)                       ! distance between vertices
     real(r8)        , pointer     :: areaCell(:)                     ! area of grid cells [m^2]
+    real(r8)        , pointer     :: xCell(:)                        ! x-coordinate of grid cells [m]
+    real(r8)        , pointer     :: yCell(:)                        ! y-coordinate of grid cells [m]
+    real(r8)        , pointer     :: zCell(:)                        ! z-coordinate of grid cells [m]
     integer         , intent(out) :: nCells_loc                      ! number of local cell-to-cell connections
     integer         , intent(out) :: maxEdges                        ! max number of edges/neighbors
     integer         , intent(out) :: nEdges_loc                      ! number of edge length saved locally
@@ -1373,6 +1376,9 @@ contains
     allocate(edgesOnCell   (maxEdges, nCells_loc))
     allocate(nEdgesOnCell  (nCells_loc          ))
     allocate(areaCell      (nCells_loc          ))
+    allocate(xCell         (nCells_loc          ))
+    allocate(yCell         (nCells_loc          ))
+    allocate(zCell         (nCells_loc          ))
     allocate(dcEdge        (nEdges_loc          ))
     allocate(dvEdge        (nEdges_loc          ))
 
@@ -1413,6 +1419,33 @@ contains
        call endrun(msg=' ERROR: areaCell not found in the file'//errMsg(__FILE__, __LINE__))
     end if
     areaCell(:) = rdata1d(ibeg_c:iend_c)
+    deallocate(rdata1d)
+
+    ! Read xCell
+    allocate(rdata1d(nCells))
+    call ncd_io(ncid=ncid, varname='xCell', data=rdata1d, flag='read', readvar=readvar)
+    if (.not. readvar) then
+       call endrun(msg=' ERROR: xCell not found in the file'//errMsg(__FILE__, __LINE__))
+    end if
+    xCell(:) = rdata1d(ibeg_c:iend_c)
+    deallocate(rdata1d)
+
+    ! Read xCell
+    allocate(rdata1d(nCells))
+    call ncd_io(ncid=ncid, varname='yCell', data=rdata1d, flag='read', readvar=readvar)
+    if (.not. readvar) then
+       call endrun(msg=' ERROR: yCell not found in the file'//errMsg(__FILE__, __LINE__))
+    end if
+    yCell(:) = rdata1d(ibeg_c:iend_c)
+    deallocate(rdata1d)
+
+    ! Read xCell
+    allocate(rdata1d(nCells))
+    call ncd_io(ncid=ncid, varname='zCell', data=rdata1d, flag='read', readvar=readvar)
+    if (.not. readvar) then
+       call endrun(msg=' ERROR: zCell not found in the file'//errMsg(__FILE__, __LINE__))
+    end if
+    zCell(:) = rdata1d(ibeg_c:iend_c)
     deallocate(rdata1d)
 
     ! Read dcEdge
