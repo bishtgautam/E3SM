@@ -13,7 +13,7 @@ module GridCellConnectionSetType
      Integer, pointer  :: grid_id_up(:) => null() ! list of ids of upwind cells
      Integer, pointer  :: grid_id_dn(:) => null() ! list of ids of downwind cells
      Real(r8), pointer :: dist(:)       => null() ! list of distance vectors
-     Real(r8), pointer :: area(:)       => null() ! list of areas of faces normal to distance vectors
+     Real(r8), pointer :: face_length(:)=> null() ! list of edge of faces normal to distance vectors
      Real(r8), pointer :: uparea(:)     => null() ! list of up cell areas of horizaontal faces 
      Real(r8), pointer :: downarea(:)   => null() ! list of down cell areas of horizaontal faces 
      Real(r8), pointer :: dzg(:)        => null() ! list of areas of dz between downwind and upwind cells
@@ -53,7 +53,7 @@ contains
     allocate(this%nconn)          ;  this%nconn = n                   
     allocate(this%grid_id_up(n))  ;  this%grid_id_up(:) = 0
     allocate(this%grid_id_dn(n))  ;  this%grid_id_dn(:) = 0
-    allocate(this%area(n))        ;  this%area(:) = 0
+    allocate(this%face_length(n)) ;  this%face_length(:) = 0
     allocate(this%uparea(n))      ;  this%uparea(:) = 0
     allocate(this%downarea(n))    ;  this%downarea(:) = 0
     allocate(this%dist(n))        ;  this%dist(:) = 0
@@ -102,7 +102,7 @@ contains
              iconn                  = iconn+1
              this%grid_id_up(iconn) = (ii-1)*nx+jj                                                            !  Step-2: Eventually will need to read from surface dataset
              this%grid_id_dn(iconn) = (ii-1)*nx+jj+1                                                          !  There is already some code that we will be able to
-             this%area(iconn)       = abs((y(ii+1,jj+1)-y(ii,jj+1))*dz(ii,jj))                                ! cross-sectional area, rectangular
+             this%face_length(iconn)= abs((y(ii+1,jj+1)-y(ii,jj+1))*dz(ii,jj))                                ! cross-sectional area, rectangular
              this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*dx(ii,jj))/2.0_r8     ! up cell vertical area, trapzoid
              this%downarea(iconn)   = abs((y(ii+1,jj+1)-y(ii,jj+1)+y(ii+1,jj+2)-y(ii,jj+2))*dx(ii,jj))/2.0_r8 ! down cell vertical area
              this%dist(iconn)       = sqrt((slopex(ii,jj)*dx(ii,jj))**2+dx(ii,jj)**2)                         ! triangle law 
@@ -117,7 +117,7 @@ contains
              iconn                  = iconn+1
              this%grid_id_up(iconn) = jj+ nx*(ii-1)                                                                         !  Step-2: Eventually will need to read from surface dataset
              this%grid_id_dn(iconn) = jj+ nx*ii                                                                             !  There is already some code that we will be able to
-             this%area(iconn)       = abs((x(ii+1,jj+1)-x(ii+1,jj))*dz(ii,jj))                                              !  cross-sectional area
+             this%face_length(iconn)= abs((x(ii+1,jj+1)-x(ii+1,jj))*dz(ii,jj))                                              !  cross-sectional area
              this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2.0;     ! up cell vertical area
              this%downarea(iconn)   = abs((y(ii+2,jj)-y(ii+1,jj)+y(ii+2,jj+1)-y(ii+1,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2.0; ! down cell vertical area       
              this%dist(iconn)       = sqrt((slopey(ii,jj)*dy(ii,jj))**2 + dy(ii, jj)**2)                                    ! triangle law 
@@ -132,7 +132,7 @@ contains
              iconn                  = iconn+1
              this%grid_id_up(iconn) = jj                                                                      !  Step-2: Eventually will need to read from surface dataset
              this%grid_id_dn(iconn) = jj+1                                                                    !  There is already some code that we will be able to
-             this%area(iconn)       = abs(dx(jj,1)*dz(jj,1))                                                  !  use to fill this data structure
+             this%face_length(iconn)= abs(dx(jj,1)*dz(jj,1))                                                  !  use to fill this data structure
              this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*dx(ii,jj))/2.0_r8     ! up cell vertical area, trapzoid
              this%downarea(iconn)   = abs((y(ii+1,jj+1)-y(ii,jj+1)+y(ii+1,jj+2)-y(ii,jj+2))*dx(ii,jj))/2.0_r8 ! down cell vertical area
              this%facecos(iconn)    = 1/sqrt(1 + slopex(ii,jj)**2)

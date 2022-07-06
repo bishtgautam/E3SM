@@ -641,8 +641,8 @@ contains
 	  
             hkl(iconn,j) = impedl(iconn,j)*s1*s2*10.0_r8
             qflx_up_to_dn = -hkl(iconn,j)*(smp(col_id_dn,j) - smp(col_id_up,j) + dzgmm(iconn,j))/den 
-            qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%area(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
-            qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%area(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
+            qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
+            qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
             !qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
             !qflx_lateral_s(col_id_dn, j) = 0._r8;
           endif
@@ -938,8 +938,8 @@ contains
         ! calculate transmissivity 
         trans = 1.0_r8*sqrt(hksat(col_id_up,15)*hksat(col_id_dn,15))*(depth_up+depth_down)/2._r8*1000._r8 ! (mm2/s) 
         qflx_up_to_dn = -trans*(depth_down-depth_up+conn%dzg(iconn))*1000._r8/den
-       qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn/1000._r8*conn%area(iconn)/conn%uparea(iconn)*conn%facecos(iconn)* conn%vertcos(col_id_up)  !dy = area/dz dz= 1.0m=1000mm
-       qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn/1000._r8*conn%area(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn) 
+       qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn)* conn%vertcos(col_id_up)
+       qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn) 
        enddo        
 
        do fc = 1, num_hydrologyc
