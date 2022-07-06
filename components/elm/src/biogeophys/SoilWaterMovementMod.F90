@@ -283,7 +283,7 @@ contains
     use SoilHydrologyType    , only : soilhydrology_type
     use VegetationType       , only : veg_pp
     use ColumnType           , only : col_pp
-    use ConnectionSetType    , only : conn, get_natveg_column_id
+    use GridCellConnectionSetType    , only : conn, get_natveg_column_id
     use GridcellType         , only : grc_pp
     use TopounitType         , only : top_pp
     !
@@ -1139,7 +1139,7 @@ contains
     use SoilHydrologyType    , only : soilhydrology_type
     use VegetationType       , only : veg_pp
     use ColumnType           , only : col_pp
-    use ConnectionSetType    , only : conn, get_natveg_column_id
+    use GridCellConnectionSetType    , only : conn, get_natveg_column_id
     use GridcellType         , only : grc_pp
     use TopounitType         , only : top_pp
 

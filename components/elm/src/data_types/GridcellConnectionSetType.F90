@@ -1,4 +1,4 @@
-module ConnectionSetType
+module GridCellConnectionSetType
 !This module is for creating the 2D grid connections for lateral GW flow.
 !Han Qiu 2021.12
 use shr_kind_mod   , only : r8 => shr_kind_r8
@@ -8,7 +8,7 @@ implicit none
 save
 public
   
-type, public :: connection_set_type
+type, public :: gridcell_connection_set_type
     Integer, pointer :: nconn  => null()         ! number of connections
     Integer, pointer :: grid_id_up(:)  => null()    ! list of ids of upwind cells
     Integer, pointer :: grid_id_dn(:)  => null()    ! list of ids of downwind cells
@@ -22,11 +22,11 @@ type, public :: connection_set_type
                                                    !is from 1 to column size which is different from rank of lateral faces
 contains
     procedure, public :: Init => col_connect_init
-end type connection_set_type
+ end type gridcell_connection_set_type
 
 public :: get_natveg_column_id 
  
-type (connection_set_type), public, target :: conn   ! connection type
+type (gridcell_connection_set_type), public, target :: conn   ! connection type
 
 contains
 
@@ -34,7 +34,7 @@ contains
 subroutine col_connect_init(this, bounds)
 
    type(bounds_type), intent(in)    :: bounds
-   class(connection_set_type)       :: this 
+   class(gridcell_connection_set_type)       :: this 
    Integer                          :: n, iconn,begc,endc,begg, endg,ii,jj 
    Integer                          :: g,nx,ny
    !Real(r8)                         :: x(ny+1,nx+1),y(ny+1,nx+1),zh(ny+1,11),dx(ny,nx-1),dy(9,10),dz(ny,nx),slopex(ny,nx-1),slopey(9,10)
@@ -196,4 +196,5 @@ function get_natveg_column_id(id, bounds) result(id_out)
 
 
 end function get_natveg_column_id
-end module ConnectionSetType
+end module GridCellConnectionSetType
+

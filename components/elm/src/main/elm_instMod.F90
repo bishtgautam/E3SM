@@ -75,7 +75,7 @@ module elm_instMod
   use BeTRSimulationELM          , only : betr_simulation_elm_type
   use PlantMicKineticsMod        , only : PlantMicKinetics_type
   use ELMFatesInterfaceMod       , only : hlm_fates_interface_type
-  use ConnectionSetType          , only : conn
+  use GridCellConnectionSetType  , only : conn
 
   ! instances declared in their own modules
   use UrbanParamsType            , only : urbanparams_vars
