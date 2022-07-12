@@ -64,22 +64,22 @@ contains
     dz = 1.0_r8
     do ii = 1, nx+1
        do jj = 1,ny+1
-          x (jj , ii) = ii*10-10
-          y (jj , 11-ii+1) = (0.2*(ii-1)+(1-0.02*(ii-1)*2)*(jj-1))*10 ! converge
+          x (jj , ii) = ii*10._r8 - 10._r8
+          y (jj , 11-ii+1) = (0.2_r8*(ii-1)+(1._r8 - 0.02_r8*(ii-1._r8)*2._r8)*(jj-1._r8))*10._r8 ! converge
        end do
     end do
 
 
     do ii = 1, nx+1
        do jj = 1,ny+1
-          zh(ii,jj) = 10*SIN(x(ii,jj)*DACOS(-1.D0)/100._r8-DACOS(-1.D0)/2.0_r8)+20._r8  !no y slope
+          zh(ii,jj) = 10*SIN(x(ii,jj)*DACOS(-1._r8)/100._r8-DACOS(-1._r8)/2.0_r8)+20._r8  !no y slope
        end do
     end do
 
     do ii = 1, ny           
        do jj = 1,nx-1
           slopex(ii,jj) = (zh(ii,jj+2)+zh(ii+1,jj+2)-zh(ii,jj)-zh(ii+1,jj))/(x(ii,jj+2)+x(ii+1,jj+2)-x(ii,jj)-x(ii+1,jj))
-          dx(ii,jj) = abs((x(ii,jj+2)+x(ii+1,jj+2)-x(ii,jj)-x(ii+1,jj))/4)
+          dx(ii,jj) = abs((x(ii,jj+2)+x(ii+1,jj+2)-x(ii,jj)-x(ii+1,jj))/4._r8)
        end do
     end do
 
@@ -87,7 +87,7 @@ contains
        do ii = 1, ny-1
           do jj = 1,nx
              slopey(ii,jj) = (zh(ii+2,jj)+zh(ii+2,jj+1)-zh(ii,jj)-zh(ii,jj+1))/(y(ii+2,jj)+y(ii+2,jj+1)-y(ii,jj)-y(ii,jj+1))
-             dy(ii,jj) = abs((y(ii+2,jj)+y(ii+2,jj+1)-y(ii,jj)-y(ii,jj+1))/4)
+             dy(ii,jj) = abs((y(ii+2,jj)+y(ii+2,jj+1)-y(ii,jj)-y(ii,jj+1))/4._r8)
           end do
        end do
     endif
@@ -105,9 +105,9 @@ contains
              this%face_length(iconn)= abs((y(ii+1,jj+1)-y(ii,jj+1))*dz(ii,jj))                                ! cross-sectional area, rectangular
              this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*dx(ii,jj))/2.0_r8     ! up cell vertical area, trapzoid
              this%downarea(iconn)   = abs((y(ii+1,jj+1)-y(ii,jj+1)+y(ii+1,jj+2)-y(ii,jj+2))*dx(ii,jj))/2.0_r8 ! down cell vertical area
-             this%dist(iconn)       = sqrt((slopex(ii,jj)*dx(ii,jj))**2+dx(ii,jj)**2)                         ! triangle law 
+             this%dist(iconn)       = sqrt((slopex(ii,jj)*dx(ii,jj))**2._r8+dx(ii,jj)**2._r8)                 ! triangle law
              this%dzg(iconn)        = slopex(ii,jj)*dx(ii,jj)                                                 ! down cell elevation - up cell elevation, positive go up hill, negative go down hill
-             this%facecos(iconn)    = 1/sqrt(1 + slopex(ii,jj)**2)
+             this%facecos(iconn)    = 1/sqrt(1 + slopex(ii,jj)**2._r8)
           enddo
        enddo
 
@@ -118,11 +118,11 @@ contains
              this%grid_id_up(iconn) = jj+ nx*(ii-1)                                                                         !  Step-2: Eventually will need to read from surface dataset
              this%grid_id_dn(iconn) = jj+ nx*ii                                                                             !  There is already some code that we will be able to
              this%face_length(iconn)= abs((x(ii+1,jj+1)-x(ii+1,jj))*dz(ii,jj))                                              !  cross-sectional area
-             this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2.0;     ! up cell vertical area
-             this%downarea(iconn)   = abs((y(ii+2,jj)-y(ii+1,jj)+y(ii+2,jj+1)-y(ii+1,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2.0; ! down cell vertical area       
-             this%dist(iconn)       = sqrt((slopey(ii,jj)*dy(ii,jj))**2 + dy(ii, jj)**2)                                    ! triangle law 
+             this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2._r8;     ! up cell vertical area
+             this%downarea(iconn)   = abs((y(ii+2,jj)-y(ii+1,jj)+y(ii+2,jj+1)-y(ii+1,jj+1))*(x(ii+1,jj+1)-x(ii+1,jj)))/2._r8; ! down cell vertical area
+             this%dist(iconn)       = sqrt((slopey(ii,jj)*dy(ii,jj))**2._r8 + dy(ii, jj)**2._r8)                              ! triangle law
              this%dzg(iconn)        = slopey(ii,jj)*dy(ii,jj)
-             this%facecos(iconn)    = 1._r8/sqrt(1 + slopey(ii,jj)**2)
+             this%facecos(iconn)    = 1._r8/sqrt(1 + slopey(ii,jj)**2._r8)
           enddo
        enddo
     else
@@ -135,8 +135,8 @@ contains
              this%face_length(iconn)= abs(dx(jj,1)*dz(jj,1))                                                  !  use to fill this data structure
              this%uparea(iconn)     = abs((y(ii+1,jj)-y(ii,jj)+y(ii+1,jj+1)-y(ii,jj+1))*dx(ii,jj))/2.0_r8     ! up cell vertical area, trapzoid
              this%downarea(iconn)   = abs((y(ii+1,jj+1)-y(ii,jj+1)+y(ii+1,jj+2)-y(ii,jj+2))*dx(ii,jj))/2.0_r8 ! down cell vertical area
-             this%facecos(iconn)    = 1/sqrt(1 + slopex(ii,jj)**2)
-             this%dist(iconn)       = sqrt((slopex(jj,1)*dx(jj,1))**2+dx(ii,jj)**2)                           ! triangle law !may not used for now
+             this%facecos(iconn)    = 1._r8/sqrt(1._r8 + slopex(ii,jj)**2_r8)
+             this%dist(iconn)       = sqrt((slopex(jj,1)*dx(jj,1))**2._r8+dx(ii,jj)**2_r8)                    ! triangle law !may not used for now
              this%dzg(iconn)        = slopex(ii,jj)*dx(ii,jj) 
           enddo
        enddo
@@ -148,14 +148,14 @@ contains
              iconn = iconn+1
              slopexx(ii,jj) = (zh(ii,jj+1)+zh(ii+1,jj+1)-zh(ii,jj)-zh(ii+1,jj))/(x(ii,jj+1)+x(ii+1,jj+1)-x(ii,jj)-x(ii+1,jj))
              slopeyy(ii,jj) = (zh(ii+1,jj)+zh(ii+1,jj+1)-zh(ii,jj)-zh(ii,jj+1))/(y(ii+1,jj)+y(ii+1,jj+1)-y(ii,jj)-y(ii,jj+1))
-             this%vertcos(iconn) = 1._r8/sqrt(1 + slopeyy(ii,jj)**2) * 1._r8/sqrt(1 + slopexx(ii,jj)**2)
+             this%vertcos(iconn) = 1._r8/sqrt(1._r8 + slopeyy(ii,jj)**2._r8) * 1._r8/sqrt(1._r8 + slopexx(ii,jj)**2._r8)
           enddo
        enddo
     else
        do jj = 1, nx
           iconn = iconn+1
           slopexx(1,jj) = (zh(1,jj+1)+zh(2,jj+1)-zh(1,jj)-zh(2,jj))/(x(1,jj+1)+x(2,jj+1)-x(1,jj)-x(2,jj))
-          this%vertcos(iconn) = 1._r8/sqrt(1 + slopexx(1,jj)**2)
+          this%vertcos(iconn) = 1._r8/sqrt(1 + slopexx(1,jj)**2._r8)
        enddo
     endif
   end subroutine col_connect_init
