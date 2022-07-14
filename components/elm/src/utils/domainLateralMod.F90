@@ -152,13 +152,16 @@ contains
     PetscReal, pointer       :: real_ptr(:)          ! temporary
     PetscReal, pointer       :: dcOnCell_old(:,:)    ! temporary array to hold distance between neighbors
     PetscReal, pointer       :: dvOnCell_old(:,:)    ! temporary array to hold distance between vertices
+    PetscReal, pointer       :: cosOnCell_old(:,:)   ! temporary array to hold cosine of angle between unit normal joining cell centeroids and face normal
     PetscErrorCode           :: ierr                 ! get error code from PETSc
 
     allocate(dcOnCell_old(maxEdges, nCells_loc_old))
     allocate(dvOnCell_old(maxEdges, nCells_loc_old))
+    allocate(cosOnCell_old(maxEdges, nCells_loc_old))
 
     dcOnCell_old = 0._r8
     dvOnCell_old = 0._r8
+    cosOnCell_old = 0._r8
 
     dcdv_count = 0
     do icell = 1, nCells_loc_old
@@ -221,17 +224,16 @@ contains
     count = 0
     do icell = 1, nCells_loc_old
        do iedge = 1, nEdgesOnCell_old(icell)
-          count = count + 1;
-          dcOnCell_old(iedge, icell) = real_ptr(count)
-          count = count + 1
-          dvOnCell_old(iedge, icell) = real_ptr(count)
+          count = count + 1; dcOnCell_old(iedge, icell) = real_ptr(count)
+          count = count + 1; dvOnCell_old(iedge, icell) = real_ptr(count)
+          count = count + 1; cosOnCell_old(iedge, icell) = real_ptr(count)
        enddo
     enddo
     call VecRestoreArrayF90(dcdvEdge_loc_vec, real_ptr, ierr); CHKERRQ(ierr)
     call VecDestroy(dcdvEdge_loc_vec, ierr); CHKERRQ(ierr)
 
     ! Aggregate data to be sent
-    nblocks = maxEdges*2
+    nblocks = maxEdges*3
     call VecCreate(mpicom, attr_glb_vec, ierr); CHKERRQ(ierr)
     call VecSetSizes(attr_glb_vec, nCells_loc_old*nblocks, PETSC_DECIDE, ierr);
     CHKERRQ(ierr)
@@ -256,7 +258,12 @@ contains
           count           = count + 1;
           real_ptr(count) = dvOnCell_old(iedge, icell)
        enddo
-    enddo
+
+       do iedge = 1, maxEdges
+         count           = count + 1;
+         real_ptr(count) = cosOnCell_old(iedge, icell)
+      enddo
+   enddo
     call VecRestoreArrayF90(attr_glb_vec, real_ptr, ierr); CHKERRQ(ierr)
     deallocate(dcOnCell_old)
     deallocate(dvOnCell_old)
