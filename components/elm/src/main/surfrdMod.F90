@@ -1451,7 +1451,7 @@ contains
     zCell(:) = rdata1d(ibeg_c:iend_c)
 
     ! 5. vcosCell: optional data
-    call ncd_io(ncid=ncid, varname='vcosCell', data=rdata1d, flag='read', readvar=readvar)
+    call ncd_io(ncid=ncid, varname='cosCell', data=rdata1d, flag='read', readvar=readvar)
     if (readvar) then
        vcosCell(:) = rdata1d(ibeg_c:iend_c)
     end if
@@ -1480,7 +1480,7 @@ contains
     ! 3. cosEdge: optional data
     call ncd_io(ncid=ncid, varname='cosEdge', data=rdata1d, flag='read', readvar=readvar)
     if (readvar) then
-       cosEdge(:) = rdata1d(ibeg_c:iend_c)
+       cosEdge(:) = rdata1d(ibeg_e:iend_e)
     end if
 
     deallocate(rdata1d)
