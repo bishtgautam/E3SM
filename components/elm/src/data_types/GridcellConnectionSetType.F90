@@ -1,9 +1,16 @@
 module GridCellConnectionSetType
+
+#ifdef USE_PETSC_LIB
+#include <petsc/finclude/petsc.h>
+  use petscsys
+#endif
+  
   !This module is for creating the 2D grid connections for lateral GW flow.
   !Han Qiu 2021.12
   use shr_kind_mod   , only : r8 => shr_kind_r8
   use shr_infnan_mod  , only : isnan => shr_infnan_isnan,nan => shr_infnan_nan, assignment(=)
   use decompMod      , only : bounds_type
+  use abortutils      , only : endrun
   implicit none
   save
   public
@@ -31,12 +38,123 @@ module GridCellConnectionSetType
 contains
 
   ! ************************************************************************** !
-  subroutine col_connect_init(this, bounds)
+  subroutine col_connect_init(this, bounds, domain_l)
+
+    use elm_varctl       , only : lateral_connectivity
+    use domainLateralMod , only : domainlateral_type
 
     implicit none
 
-    type(bounds_type), intent(in)       :: bounds
     class(gridcell_connection_set_type) :: this 
+    type(bounds_type), intent(in)       :: bounds
+    type(domainlateral_type), intent(in):: domain_l
+    character(len=*), parameter :: subname = 'col_connect_init'
+
+    if (.not.lateral_connectivity) then
+       call col_connect_init_default(this, bounds)
+    else
+#ifdef USE_PETSC_LIB
+       call col_connect_init_from_domainlateral(this, bounds, domain_l)
+#else
+       call endrun(msg='ERROR ' // trim(subname) //': Requires '//&
+            'PETSc, but the code was compiled without -DUSE_PETSC_LIB')
+#endif
+    endif
+   !  call exit(-1)
+  end subroutine col_connect_init
+
+  ! ************************************************************************** !
+#ifdef USE_PETSC_LIB
+
+  subroutine col_connect_init_from_domainlateral(this, bounds, domain_l)
+    !
+    ! !DESCRIPTION:
+    ! Create grid level connection based on the data previously read from
+    ! netcdf file.
+    !
+    use domainLateralMod     , only : domainlateral_type
+    use UnstructuredGridType , only : ugrid_type
+    !
+    implicit none
+    !
+    ! !ARGUMENTS:
+    class(gridcell_connection_set_type)   :: this 
+    type(bounds_type)        , intent(in) :: bounds
+    type(domainlateral_type) , intent(in) :: domain_l
+    !
+    ! !LOCAL VARIABLES:
+    PetscInt                  :: icell, iedge, nconn, cell_id
+    type(ugrid_type), pointer :: ugrid
+    
+
+    ugrid => domain_l%ugrid
+
+    ! Determine the number of connections
+    nconn = 0
+    do icell = 1, ugrid%ngrid_local
+       do iedge = 1, ugrid%maxEdges
+          cell_id = ugrid%gridsOnGrid_local(iedge,icell)
+          if (cell_id > icell) then
+             nconn = nconn + 1
+          end if
+       end do
+    end do
+
+    ! Allocate memory
+    allocate(this%nconn)              ;  this%nconn          = nconn
+    allocate(this%grid_id_up(nconn))  ;  this%grid_id_up(:)  = 0
+    allocate(this%grid_id_dn(nconn))  ;  this%grid_id_dn(:)  = 0
+    allocate(this%face_length(nconn)) ;  this%face_length(:) = 0
+    allocate(this%uparea(nconn))      ;  this%uparea(:)      = 0
+    allocate(this%downarea(nconn))    ;  this%downarea(:)    = 0
+    allocate(this%dist(nconn))        ;  this%dist(:)        = 0
+    allocate(this%dzg(nconn))         ;  this%dzg(:)         = 0
+    allocate(this%facecos(nconn))     ;  this%facecos(:)     = 0
+
+    allocate(this%vertcos(ugrid%ngrid_local)) ;  this%vertcos(:) = 0
+
+    ! Populate the information about connections
+    nconn = 0
+    do icell = 1, ugrid%ngrid_local
+       do iedge = 1, ugrid%maxEdges
+          cell_id = ugrid%gridsOnGrid_local(iedge,icell)
+          if (cell_id > icell) then
+             nconn = nconn + 1
+
+             this%grid_id_up(nconn)  = icell
+             this%grid_id_dn(nconn)  = cell_id
+
+             this%uparea(nconn)      = ugrid%areaGrid_ghosted(icell)
+             this%downarea(nconn)    = ugrid%areaGrid_ghosted(cell_id)
+
+             this%face_length(nconn) = ugrid%dvOnGrid_local(iedge,icell)
+             this%dist(nconn)        = ugrid%dcOnGrid_local(iedge,icell)
+             this%dzg(nconn)         = ugrid%zGrid_ghosted(cell_id) - ugrid%zGrid_ghosted(icell)
+
+             this%facecos(nconn)     = ugrid%cosEdgeOnGrid_local(iedge,icell)
+          end if
+       end do
+    end do
+
+    ! NOTE: This is not the correct approach because 'vertcos' is a grid-level
+    ! variable and not a connection-level field. This needs to be fixed in the
+    ! future
+    do icell = 1, ugrid%ngrid_local
+       this%vertcos(icell) = ugrid%vcosGrid_ghosted(icell)
+    end do
+
+  end subroutine col_connect_init_from_domainlateral
+
+#endif
+
+  ! ************************************************************************** !
+  subroutine col_connect_init_default(this, bounds)
+
+    implicit none
+
+    class(gridcell_connection_set_type) :: this 
+    type(bounds_type), intent(in)       :: bounds
+
     Integer                             :: n, iconn,begc,endc,begg, endg,ii,jj 
     Integer                             :: g,nx,ny
     Real(r8)                            :: x(11,11),y(11,11),zh(11,11),dx(10,9),dy(9,10),dz(10,10),slopex(10,9),slopey(9,10),slopexx(10,10),slopeyy(10,10)
@@ -158,7 +276,8 @@ contains
           this%vertcos(iconn) = 1._r8/sqrt(1 + slopexx(1,jj)**2._r8)
        enddo
     endif
-  end subroutine col_connect_init
+
+  end subroutine col_connect_init_default
 
   function get_natveg_column_id(id, bounds) result(id_out)
 
