@@ -600,54 +600,58 @@ contains
          end if
       end do
   
- ! loop over connections: NOT loop over grid cells
- qflx_lateral_s(:,:) = 0._r8
+      ! loop over connections: NOT loop over grid cells
+      qflx_lateral_s(:,:) = 0._r8
 				    
-    do iconn = 1, conn%nconn
+      do iconn = 1, conn%nconn
          grid_id_up = conn%grid_id_up(iconn); !g1
          grid_id_dn = conn%grid_id_dn(iconn); !g2
-         col_id_up = get_natveg_column_id(grid_id_up,bounds)   
+
+         col_id_up = get_natveg_column_id(grid_id_up,bounds)
          col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
          den = conn%dist(iconn)*1000._r8
-      !do j = 1, nlevsoi
-       do j = 1, nlevgrnd
-	 !dzg(iconn,j) =  grc_pp%elevation(grid_id_up) - grc_pp%elevation(grid_id_dn)  !gravity potential here is the elevation change
-	                                                                    !it's the same for all the neighboring up-down layers 
-	 dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele							    !in a grid since the vertical discretization is the same
-         dzgmm(iconn,j) = conn%dzg(iconn)*1000._r8
-         if ((j > jwt(col_id_up)-1).or.(j > jwt(col_id_dn)-1)) then
-         !if ((j > jwt(col_id_up)).or.(j > jwt(col_id_dn))) then
-         !if (j > max(jwt(col_id_dn),jwt(col_id_up))+1) then
-           !if ((zwt(col_id_up) < zi(j,col_id_up)).or.(zwt(col_id_dn)< zi(j,col_id_dn))) then
-            qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-            qflx_lateral_s(col_id_dn, j) = 0._r8;
-         else
 
-	   !hydraulic conductivity hkl(iconn,j) is
-           !the lateral hydraulic conductivity is calculated using the geometric mean of the 
-           !neighbouring lateral cells and is approximated as 1000 times of the vertical hydraulic conductivity
-             s1 = 0.5_r8*(h2osoi_vol(col_id_up,j) + h2osoi_vol(col_id_dn,j)) / &
-                    (0.5_r8*(watsat(col_id_up,j)+watsat(col_id_dn,j)))
-             s1 = min(1._r8, s1)
-	     bswl = (bsw(col_id_up,j)+bsw(col_id_dn,j))/2
-             s2 = sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*s1**(2._r8*bswl+3._r8)
+         !do j = 1, nlevsoi
+         do j = 1, nlevgrnd
 
-            ! replace fracice with impedance factor, as in zhao 97,99
-            if (origflag == 1) then
-               impedl(iconn,j)=(1._r8-0.5_r8*(fracice(col_id_up,j)+fracice(col_id_dn,j)))
+            !dzg(iconn,j) =  grc_pp%elevation(grid_id_up) - grc_pp%elevation(grid_id_dn)  !gravity potential here is the elevation change
+            !it's the same for all the neighboring up-down layers
+            dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele							    !in a grid since the vertical discretization is the same
+            dzgmm(iconn,j) = conn%dzg(iconn)*1000._r8
+
+            if ((j > jwt(col_id_up)-1).or.(j > jwt(col_id_dn)-1)) then
+               !if ((j > jwt(col_id_up)).or.(j > jwt(col_id_dn))) then
+               !if (j > max(jwt(col_id_dn),jwt(col_id_up))+1) then
+               !if ((zwt(col_id_up) < zi(j,col_id_up)).or.(zwt(col_id_dn)< zi(j,col_id_dn))) then
+               qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
+               qflx_lateral_s(col_id_dn, j) = 0._r8;
             else
-               impedl(iconn,j)=10._r8**(-e_ice*(0.5_r8*(icefrac(col_id_up,j)+icefrac(col_id_dn,j))))
+
+               !hydraulic conductivity hkl(iconn,j) is
+               !the lateral hydraulic conductivity is calculated using the geometric mean of the
+               !neighbouring lateral cells and is approximated as 1000 times of the vertical hydraulic conductivity
+               s1 = 0.5_r8*(h2osoi_vol(col_id_up,j) + h2osoi_vol(col_id_dn,j)) / &
+                    (0.5_r8*(watsat(col_id_up,j)+watsat(col_id_dn,j)))
+               s1 = min(1._r8, s1)
+               bswl = (bsw(col_id_up,j)+bsw(col_id_dn,j))/2
+               s2 = sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*s1**(2._r8*bswl+3._r8)
+
+               ! replace fracice with impedance factor, as in zhao 97,99
+               if (origflag == 1) then
+                  impedl(iconn,j)=(1._r8-0.5_r8*(fracice(col_id_up,j)+fracice(col_id_dn,j)))
+               else
+                  impedl(iconn,j)=10._r8**(-e_ice*(0.5_r8*(icefrac(col_id_up,j)+icefrac(col_id_dn,j))))
+               endif
+
+               hkl(iconn,j) = impedl(iconn,j)*s1*s2*10.0_r8
+               qflx_up_to_dn = -hkl(iconn,j)*(smp(col_id_dn,j) - smp(col_id_up,j) + dzgmm(iconn,j))/den
+               qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
+               qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
+               !qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
+               !qflx_lateral_s(col_id_dn, j) = 0._r8;
             endif
-	  
-            hkl(iconn,j) = impedl(iconn,j)*s1*s2*10.0_r8
-            qflx_up_to_dn = -hkl(iconn,j)*(smp(col_id_dn,j) - smp(col_id_up,j) + dzgmm(iconn,j))/den 
-            qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
-            qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
-            !qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-            !qflx_lateral_s(col_id_dn, j) = 0._r8;
-          endif
-        enddo
-     enddo
+         enddo
+      enddo
 
       ! Set up r, a, b, and c vectors for tridiagonal solution
 
@@ -917,113 +921,121 @@ contains
          endif
       end do
 
-    ! Water table changes due to qlateral in saturated GW
-    nstep=1
-    do step = 1,nstep
-        qflx_lateral_s=0._r8
-        do iconn = 1, conn%nconn 
-         grid_id_up = conn%grid_id_up(iconn); !g1
-         grid_id_dn = conn%grid_id_dn(iconn); !g2
-         col_id_up = get_natveg_column_id(grid_id_up,bounds)   
-         col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
-         den = conn%dist(iconn)*1000._r8
-         j = nlevgrnd+1   !lateral flow in saturated zone
-         !hkl(iconn,j) =  sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*1000._r8   ! should be multiple layers to the bottom of bedrock
-         depth_up = zi(col_id_up,nlevgrnd) - zwt(col_id_up)  ! groundwater head(m) 
-         depth_down = zi(col_id_dn,nlevgrnd) - zwt(col_id_dn) 
-        !depth_up = 15._r8 - zwt(col_id_up)  ! groundwater head(m) bedrock 15m deep
-        !depth_down = 15._r8 - zwt(col_id_dn) 
-        depth_up = max(depth_up, 0._r8)
-        depth_down= max(depth_down, 0._r8)
-        ! calculate transmissivity 
-        trans = 1.0_r8*sqrt(hksat(col_id_up,15)*hksat(col_id_dn,15))*(depth_up+depth_down)/2._r8*1000._r8 ! (mm2/s) 
-        qflx_up_to_dn = -trans*(depth_down-depth_up+conn%dzg(iconn))*1000._r8/den
-       qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn)* conn%vertcos(col_id_up)
-       qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn) 
-       enddo        
+      ! Water table changes due to qlateral in saturated GW
+      nstep=1
+      do step = 1,nstep
+         qflx_lateral_s=0._r8
+         do iconn = 1, conn%nconn
 
-       do fc = 1, num_hydrologyc
-          c = filter_hydrologyc(fc)
-       	  nlevbed = nlev2bed(c)
-          !scs: use analytical expression for aquifer specific yield
-          rous = watsat(c,nlevbed) &
-               * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
-          rous=max(rous,0.02_r8)
+            grid_id_up = conn%grid_id_up(iconn); !g1
+            grid_id_dn = conn%grid_id_dn(iconn); !g2
 
-          !--  water table is below the soil column  --------------------------------------
+            col_id_up = get_natveg_column_id(grid_id_up,bounds)
+            col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
+            den = conn%dist(iconn)*1000._r8
 
-          qlat_temp = qflx_lateral_s(c,16)
-        
-          if(jwt(c) == nlevgrnd) then
-	      if (.not. (zengdecker_2009_with_var_soil_thick)) then
-                wa(c)  = wa(c) + qflx_lateral_s(c,16)  * dtime/nstep
-                zwt(c) = zwt(c) - (qflx_lateral_s(c,16) * dtime)/nstep/1000._r8/rous
-             end if
-          else
-             !-- water table within soil layers 1-15  -------------------------------------
-             ! try to raise water table to account for qlat
-             qlat_tot = qflx_lateral_s(c,16) * dtime/nstep
-             if(qlat_tot > 0.) then !rising water table ! need to modify soil water content also, Han Qiu
-                do j = jwt(c)+1, 1,-1
-                   !scs: use analytical expression for specific yield
-                   s_y = watsat(c,j) &
-                        * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
-                   s_y=max(s_y,0.02_r8)
-                   qlat_layer=min(qlat_tot,(s_y*(zwt(c) - zi(c,j-1))*1.e3))
-                   qlat_layer=max(qlat_layer,0._r8)
+            j = nlevgrnd+1   !lateral flow in saturated zone
+            !hkl(iconn,j) =  sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*1000._r8   ! should be multiple layers to the bottom of bedrock
 
-                    h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
+            depth_up = zi(col_id_up,nlevgrnd) - zwt(col_id_up)  ! groundwater head(m)
+            depth_down = zi(col_id_dn,nlevgrnd) - zwt(col_id_dn)
 
-                   if(s_y > 0._r8) zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
+            !depth_up = 15._r8 - zwt(col_id_up)  ! groundwater head(m) bedrock 15m deep
+            !depth_down = 15._r8 - zwt(col_id_dn)
+            depth_up = max(depth_up, 0._r8)
+            depth_down= max(depth_down, 0._r8)
 
-                   qlat_tot = qlat_tot - qlat_layer
-                   if (qlat_tot <= 0.) exit
-                enddo
-             else ! deepening water table (negative qlat)
-                do j = jwt(c)+1, 15
-                   !scs: use analytical expression for specific yield
-                   s_y = watsat(c,j) &
-                        * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
-                   s_y=max(s_y,0.02_r8)
+            ! calculate transmissivity
+            trans = 1.0_r8*sqrt(hksat(col_id_up,15)*hksat(col_id_dn,15))*(depth_up+depth_down)/2._r8*1000._r8 ! (mm2/s)
+            qflx_up_to_dn = -trans*(depth_down-depth_up+conn%dzg(iconn))*1000._r8/den
+            qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn)* conn%vertcos(col_id_up)
+            qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn)
+         enddo
 
-                   qlat_layer=max(qlat_tot,-(s_y*(zi(c,j) - zwt(c))*1.e3))
-                   qlat_layer=min(qlat_layer,0._r8)
-                   h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
-                   qlat_tot = qlat_tot - qlat_layer
+         do fc = 1, num_hydrologyc
+            c = filter_hydrologyc(fc)
+            nlevbed = nlev2bed(c)
 
-                   if (qlat_tot >= 0.) then
-                      zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
-                      exit
-                   else
-                      zwt(c) = zi(c,j)
-                   endif
+            !scs: use analytical expression for aquifer specific yield
+            rous = watsat(c,nlevbed) &
+                 * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
+            rous=max(rous,0.02_r8)
 
-                enddo
-                if (qlat_tot > 0.) zwt(c) = zwt(c) - qlat_tot/1000._r8/rous
-                !rsub_top(c) = rsub_top(c) + qlat_tot/dtime    
-                 
-             endif
+            !--  water table is below the soil column  --------------------------------------
 
-             !-- recompute jwt for following calculations  ---------------------------------
-             ! allow jwt to equal zero when zwt is in top layer
-             !jwt(c) = nlevbed
-             jwt(c) = nlevgrnd
-             do j = 1,nlevgrnd
-                if(zwt(c) <= zi(c,j)) then
-                   if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
-                      exit
-                   else
-                      jwt(c) = j-1
-                      exit
-                   end if
-                end if
-             enddo
-          endif
-       enddo
-      call ThetaBasedWaterTable(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
-            soilhydrology_vars, soilstate_vars)
+            qlat_temp = qflx_lateral_s(c,16)
 
-  enddo
+            if(jwt(c) == nlevgrnd) then
+               if (.not. (zengdecker_2009_with_var_soil_thick)) then
+                  wa(c)  = wa(c) + qflx_lateral_s(c,16)  * dtime/nstep
+                  zwt(c) = zwt(c) - (qflx_lateral_s(c,16) * dtime)/nstep/1000._r8/rous
+               end if
+            else
+               !-- water table within soil layers 1-15  -------------------------------------
+               ! try to raise water table to account for qlat
+               qlat_tot = qflx_lateral_s(c,16) * dtime/nstep
+               if(qlat_tot > 0.) then !rising water table ! need to modify soil water content also, Han Qiu
+                  do j = jwt(c)+1, 1,-1
+                     !scs: use analytical expression for specific yield
+                     s_y = watsat(c,j) &
+                          * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
+                     s_y=max(s_y,0.02_r8)
+                     qlat_layer=min(qlat_tot,(s_y*(zwt(c) - zi(c,j-1))*1.e3))
+                     qlat_layer=max(qlat_layer,0._r8)
+
+                     h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
+
+                     if(s_y > 0._r8) zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
+
+                     qlat_tot = qlat_tot - qlat_layer
+                     if (qlat_tot <= 0.) exit
+                  enddo
+               else ! deepening water table (negative qlat)
+                  do j = jwt(c)+1, 15
+                     !scs: use analytical expression for specific yield
+                     s_y = watsat(c,j) &
+                          * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
+                     s_y=max(s_y,0.02_r8)
+
+                     qlat_layer=max(qlat_tot,-(s_y*(zi(c,j) - zwt(c))*1.e3))
+                     qlat_layer=min(qlat_layer,0._r8)
+                     h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
+                     qlat_tot = qlat_tot - qlat_layer
+
+                     if (qlat_tot >= 0.) then
+                        zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
+                        exit
+                     else
+                        zwt(c) = zi(c,j)
+                     endif
+
+                  enddo
+                  if (qlat_tot > 0.) zwt(c) = zwt(c) - qlat_tot/1000._r8/rous
+                  !rsub_top(c) = rsub_top(c) + qlat_tot/dtime
+
+               endif
+
+               !-- recompute jwt for following calculations  ---------------------------------
+               ! allow jwt to equal zero when zwt is in top layer
+               !jwt(c) = nlevbed
+               jwt(c) = nlevgrnd
+               do j = 1,nlevgrnd
+                  if(zwt(c) <= zi(c,j)) then
+                     if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
+                        exit
+                     else
+                        jwt(c) = j-1
+                        exit
+                     end if
+                  end if
+               enddo
+            endif
+         enddo
+
+         call ThetaBasedWaterTable(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
+              soilhydrology_vars, soilstate_vars)
+
+      enddo
       
       ! compute the water deficit and reset negative liquid water content
       !  Jinyun Tang
