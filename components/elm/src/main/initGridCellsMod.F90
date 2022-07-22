@@ -227,6 +227,11 @@ contains
           grc_pp%terrain_config(gdc) = ldomain%terrain_config(gdc)
           grc_pp%sinsl_cosas(gdc)    = ldomain%sinsl_cosas(gdc)
           grc_pp%sinsl_sinas(gdc)    = ldomain%sinsl_sinas(gdc)
+
+          grc_pp%ntopounits(gdc) = 0
+          grc_pp%nlandunits(gdc) = 0
+          grc_pp%ncolumns(gdc)   = 0
+          grc_pp%npfts(gdc)      = 0
           
        enddo
 
@@ -238,6 +243,27 @@ contains
        ! if a clump is responsible for landunit L, then that same clump is also
        ! responsible for all columns and pfts in L.
        call elm_ptrs_check(bounds_clump)
+
+       ! Determine the number of topounit/landunit/columns/patchs present in each grid cell
+       do ti = bounds_clump%begt, bounds_clump%endt
+          gdc = top_pp%gridcell(ti)
+          grc_pp%ntopounits(gdc) = grc_pp%ntopounits(gdc) + 1
+       enddo
+
+       do li = bounds_clump%begl, bounds_clump%endl
+          gdc = lun_pp%gridcell(li)
+          grc_pp%nlandunits(gdc) = grc_pp%nlandunits(gdc) + 1
+       enddo
+
+       do ci = bounds_clump%begc, bounds_clump%endc
+          gdc = col_pp%gridcell(ci)
+          grc_pp%ncolumns(gdc) = grc_pp%ncolumns(gdc) + 1
+       enddo
+
+       do pi = bounds_clump%begp, bounds_clump%endp
+          gdc = veg_pp%gridcell(pi)
+          grc_pp%npfts(gdc) = grc_pp%npfts(gdc) + 1
+       enddo
 
        ! Set veg_pp%wtlunit, veg_pp%wtgcell and col_pp%wtgcell
        call compute_higher_order_weights(bounds_clump)
