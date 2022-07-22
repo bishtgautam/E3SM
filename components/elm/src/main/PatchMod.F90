@@ -3,7 +3,7 @@ module PatchMod
   use shr_kind_mod   , only : r8 => shr_kind_r8
   use shr_infnan_mod , only : nan => shr_infnan_nan, assignment(=)
   use elm_varcon     , only : ispval
-  use VegetationType , only : veg_pp
+  use VegetationType , only : vegetation_physical_properties
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -18,7 +18,7 @@ module PatchMod
 contains
 
   !------------------------------------------------------------------------
-  subroutine GetValuesForPatch(p, values)
+  subroutine GetValuesForPatch(veg_pp, p, values)
     !
     ! !DESCRIPTION:
     ! Returns all values for the p-th patch
@@ -32,8 +32,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer  , intent(in)           :: p
-    real(r8) , intent(out), pointer :: values(:)
+    type(vegetation_physical_properties) , intent(in)           :: veg_pp
+    integer                              , intent(in)           :: p
+    real(r8)                             , intent(out), pointer :: values(:)
     !
     ! !LOCAL VARIABLES:
     integer                         :: idx
@@ -62,7 +63,7 @@ contains
   end subroutine GetValuesForPatch
 
   !------------------------------------------------------------------------
-  subroutine SetValuesForPatch(p, values)
+  subroutine SetValuesForPatch(veg_pp, p, values)
     !
     ! !DESCRIPTION:
     ! Sets all values for the p-th patch.
@@ -75,8 +76,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer  , intent(in)          :: p
-    real(r8) , intent(in), pointer :: values(:)
+    type(vegetation_physical_properties) , intent(inout)       :: veg_pp
+    integer                              , intent(in)          :: p
+    real(r8)                             , intent(in), pointer :: values(:)
     !
     integer                        :: idx
     integer                        :: j

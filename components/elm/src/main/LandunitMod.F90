@@ -3,7 +3,7 @@ module LandunitMod
   use shr_kind_mod   , only : r8 => shr_kind_r8
   use shr_infnan_mod , only : nan => shr_infnan_nan, assignment(=)
   use elm_varcon     , only : ispval
-  use LandunitType   , only : lun_pp
+  use LandunitType   , only : landunit_physical_properties
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -18,7 +18,7 @@ module LandunitMod
 contains
 
   !------------------------------------------------------------------------
-  subroutine GetValuesForLandunit(l, values)
+  subroutine GetValuesForLandunit(lun_pp, l, values)
     !
     ! !DESCRIPTION:
     ! Returns all values for the l-th landunit
@@ -32,8 +32,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer  , intent(in)           :: l
-    real(r8) , intent(out), pointer :: values(:)
+    type(landunit_physical_properties) , intent(in)           :: lun_pp
+    integer                            , intent(in)           :: l
+    real(r8)                           , intent(out), pointer :: values(:)
     !
     ! !LOCAL VARIABLES:
     integer                         :: idx
@@ -73,7 +74,7 @@ contains
   end subroutine GetValuesForLandunit
 
   !------------------------------------------------------------------------
-  subroutine SetValuesForLandunit(l, values)
+  subroutine SetValuesForLandunit(lun_pp, l, values)
     !
     ! !DESCRIPTION:
     ! Sets all values for the l-th landunit.
@@ -86,8 +87,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer , intent(in)          :: l
-    real(r8), intent(in), pointer :: values(:)
+    type(landunit_physical_properties) , intent(inout)       :: lun_pp
+    integer                            , intent(in)          :: l
+    real(r8)                           , intent(in), pointer :: values(:)
     !
     ! !LOCAL VARIABLES:
     integer                       :: idx

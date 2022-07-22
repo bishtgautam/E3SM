@@ -4,7 +4,7 @@ module ColumnMod
   use shr_infnan_mod , only : nan => shr_infnan_nan, assignment(=)
   use elm_varpar     , only : nlevsno, nlevgrnd, nlevlak, nlevslp
   use elm_varcon     , only : spval, ispval
-  use ColumnType     , only : col_pp
+  use ColumnType     , only : column_physical_properties
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -19,7 +19,7 @@ module ColumnMod
 contains
 
   !------------------------------------------------------------------------
-  subroutine GetValuesForColumn(c, values)
+  subroutine GetValuesForColumn(col_pp, c, values)
     !
     ! !DESCRIPTION:
     ! Returns all values for the c-th column
@@ -33,8 +33,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer, intent(in)            :: c
-    real(r8), pointer, intent(out) :: values(:)
+    type(column_physical_properties) , intent(in)           :: col_pp
+    integer                          , intent(in)           :: c
+    real(r8)                         , pointer, intent(out) :: values(:)
     !
     ! !LOCAL VARIABLES:
     integer :: idx
@@ -96,7 +97,7 @@ contains
   end subroutine GetValuesForColumn
 
   !------------------------------------------------------------------------
-  subroutine SetValuesForColumn(c, values)
+  subroutine SetValuesForColumn(col_pp, c, values)
     !
     ! !DESCRIPTION:
     ! Sets all values for the c-th column.
@@ -110,8 +111,9 @@ contains
     use shr_log_mod      , only : errMsg => shr_log_errMsg
     !
     ! !ARGUMENTS:
-    integer, intent(in)            :: c
-    real(r8), pointer, intent(in)  :: values(:)
+    type(column_physical_properties) , intent(inout)       :: col_pp
+    integer                          , intent(in)          :: c
+    real(r8)                         , pointer, intent(in) :: values(:)
     !
     ! !LOCAL VARIABLES:
     integer :: idx
