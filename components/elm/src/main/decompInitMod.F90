@@ -2224,12 +2224,36 @@ contains
        procinfo%endCohort_all   = procinfo%endCohort
 
        if (procinfo%ncells_ghost > 0) then
-          procinfo%begg_ghost      = 1; procinfo%endg_ghost      = procinfo%ncells_ghost
-          procinfo%begt_ghost      = 1; procinfo%endt_ghost      = procinfo%ntunits_ghost
-          procinfo%begl_ghost      = 1; procinfo%endl_ghost      = procinfo%nlunits_ghost
-          procinfo%begc_ghost      = 1; procinfo%endc_ghost      = procinfo%ncols_ghost
-          procinfo%begp_ghost      = 1; procinfo%endp_ghost      = procinfo%npfts_ghost
-          procinfo%begCohort_ghost = 1; procinfo%endCohort_ghost = procinfo%ncohorts_ghost
+
+          procinfo%begg_ghost      = 1;
+          procinfo%begt_ghost      = 1;
+          procinfo%begl_ghost      = 1;
+          procinfo%begc_ghost      = 1;
+          procinfo%begp_ghost      = 1;
+          procinfo%begCohort_ghost = 1;
+
+          procinfo%endg_ghost      = procinfo%ncells_ghost
+          procinfo%endt_ghost      = procinfo%ntunits_ghost
+          procinfo%endl_ghost      = procinfo%nlunits_ghost
+          procinfo%endc_ghost      = procinfo%ncols_ghost
+          procinfo%endp_ghost      = procinfo%npfts_ghost
+          procinfo%endCohort_ghost = procinfo%ncohorts_ghost
+
+       else
+
+          procinfo%begg_ghost      = 0
+          procinfo%begt_ghost      = 0
+          procinfo%begl_ghost      = 0
+          procinfo%begc_ghost      = 0
+          procinfo%begp_ghost      = 0
+          procinfo%begCohort_ghost = 0
+
+          procinfo%endg_ghost      = 0
+          procinfo%endt_ghost      = 0
+          procinfo%endl_ghost      = 0
+          procinfo%endc_ghost      = 0
+          procinfo%endp_ghost      = 0
+          procinfo%endCohort_ghost = 0
        end if
 #endif
 
