@@ -528,6 +528,7 @@ contains
     use FanStreamMod          , only : fanstream_init, fanstream_interp
     use dynFATESLandUseChangeMod, only : dynFatesLandUseInit
     use domainLateralMod      , only: ldomain_lateral, domainlateral_init
+    use elm_instlateralMod    , only:  elm_instlateral_biophysics
     !
     ! !ARGUMENTS
     implicit none
@@ -1071,6 +1072,8 @@ contains
     call t_stopf('init_elm_interface_data & pflotran')
     !------------------------------------------------------------
 
+    call elm_instlateral_biophysics(bounds_proc, ldomain_lateral)
+
     !------------------------------------------------------------
     ! Write log output for end of initialization
     !------------------------------------------------------------
@@ -1173,6 +1176,7 @@ contains
     if (use_petsc_thermal_model) then
        call EMI_Init_EM(EM_ID_PTM)
     endif
+
 
     call t_stopf('elm_init3')
 
