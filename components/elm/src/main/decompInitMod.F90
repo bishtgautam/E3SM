@@ -2223,6 +2223,14 @@ contains
        procinfo%endp_all        = procinfo%endp
        procinfo%endCohort_all   = procinfo%endCohort
 
+       if (procinfo%ncells_ghost > 0) then
+          procinfo%begg_ghost      = 1; procinfo%endg_ghost      = procinfo%ncells_ghost
+          procinfo%begt_ghost      = 1; procinfo%endt_ghost      = procinfo%ntunits_ghost
+          procinfo%begl_ghost      = 1; procinfo%endl_ghost      = procinfo%nlunits_ghost
+          procinfo%begc_ghost      = 1; procinfo%endc_ghost      = procinfo%ncols_ghost
+          procinfo%begp_ghost      = 1; procinfo%endp_ghost      = procinfo%npfts_ghost
+          procinfo%begCohort_ghost = 1; procinfo%endCohort_ghost = procinfo%ncohorts_ghost
+       end if
 #endif
 
     endif
