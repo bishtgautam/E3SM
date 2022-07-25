@@ -592,53 +592,10 @@ contains
             dzmm(c,nlevbed+1) = (1.e3_r8*zwt(c) - zmm(c,nlevbed))
          end if
       end do
-  
-      ! loop over connections: NOT loop over grid cells
-      qflx_lateral_s(:,:) = 0._r8
-				    
-      do iconn = 1, conn%nconn
-         grid_id_up = conn%grid_id_up(iconn); !g1
-         grid_id_dn = conn%grid_id_dn(iconn); !g2
 
-         col_id_up = get_natveg_column_id(grid_id_up,bounds)
-         col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
-         den = conn%dist(iconn)*1000._r8
-
-         do j = 1, nlevgrnd
-
-            !it's the same for all the neighboring up-down layers
-            dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele in a grid since the vertical discretization is the same
-            dzgmm(iconn,j) = conn%dzg(iconn)*1000._r8
-
-            if ((j > jwt(col_id_up)-1).or.(j > jwt(col_id_dn)-1)) then
-               qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-               qflx_lateral_s(col_id_dn, j) = 0._r8;
-            else
-
-               !hydraulic conductivity hkl(iconn,j) is
-               !the lateral hydraulic conductivity is calculated using the geometric mean of the
-               !neighbouring lateral cells and is approximated as 1000 times of the vertical hydraulic conductivity
-
-               s1 = 0.5_r8*(h2osoi_vol(col_id_up,j) + h2osoi_vol(col_id_dn,j)) / &
-                    (0.5_r8*(watsat(col_id_up,j)+watsat(col_id_dn,j)))
-               s1 = min(1._r8, s1)
-               bswl = (bsw(col_id_up,j)+bsw(col_id_dn,j))/2
-               s2 = sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*s1**(2._r8*bswl+3._r8)
-
-               ! replace fracice with impedance factor, as in zhao 97,99
-               if (origflag == 1) then
-                  impedl(iconn,j)=(1._r8-0.5_r8*(fracice(col_id_up,j)+fracice(col_id_dn,j)))
-               else
-                  impedl(iconn,j)=10._r8**(-e_ice*(0.5_r8*(icefrac(col_id_up,j)+icefrac(col_id_dn,j))))
-               endif
-
-               hkl(iconn,j) = impedl(iconn,j)*s1*s2*10.0_r8
-               qflx_up_to_dn = -hkl(iconn,j)*(smp(col_id_dn,j) - smp(col_id_up,j) + dzgmm(iconn,j))/den
-               qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
-               qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
-            endif
-         enddo
-      enddo
+      ! Compute lateral flux
+      call ComputeLateralFlux(bounds, num_hydrologyc, filter_hydrologyc, &
+           num_urbanc, filter_urbanc, soilhydrology_vars, soilstate_vars, jwt, qflx_lateral_s)
 
       ! Set up r, a, b, and c vectors for tridiagonal solution
 
@@ -1031,6 +988,143 @@ contains
     end associate
 
   end subroutine soilwater_zengdecker2009
+
+  !-----------------------------------------------------------------------
+  subroutine ComputeLateralFlux(bounds, num_hydrologyc, filter_hydrologyc, &
+       num_urbanc, filter_urbanc, soilhydrology_vars, soilstate_vars, jwt, qflx_lateral_s)
+    !
+    ! !DESCRIPTION:
+    ! Calculate watertable, considering aquifer recharge but no drainage.
+    !
+    ! !USES:
+    use decompMod                 , only : bounds_type
+    use elm_varctl                , only : use_var_soil_thick
+    use shr_kind_mod              , only : r8 => shr_kind_r8
+    use shr_const_mod             , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
+    use decompMod                 , only : bounds_type
+    use elm_varcon                , only : wimp,grav,hfus,tfrz
+    use elm_varcon                , only : e_ice,denh2o, denice
+    use elm_varpar                , only : nlevsoi, max_patch_per_col, nlevgrnd
+    use clm_time_manager          , only : get_step_size
+    use column_varcon             , only : icol_roof, icol_road_imperv
+    use TridiagonalMod            , only : Tridiagonal
+    use SoilStateType             , only : soilstate_type
+    use SoilHydrologyType         , only : soilhydrology_type
+    use VegetationType            , only : veg_pp
+    use ColumnType                , only : col_pp
+    use GridCellConnectionSetType , only : conn, get_natveg_column_id
+    use GridcellType              , only : grc_pp
+    use TopounitType              , only : top_pp
+    !
+    ! !ARGUMENTS:
+    type(bounds_type)        , intent(in)    :: bounds
+    integer                  , intent(in)    :: num_hydrologyc       ! number of column soil points in column filter
+    integer                  , intent(in)    :: num_urbanc           ! number of column urban points in column filter
+    integer                  , intent(in)    :: filter_urbanc(:)     ! column filter for urban points
+    integer                  , intent(in)    :: filter_hydrologyc(:) ! column filter for soil points
+    type(soilhydrology_type) , intent(inout) :: soilhydrology_vars
+    type(soilstate_type)     , intent(in)    :: soilstate_vars
+    integer                  , intent(in)    :: jwt(:)
+    real(r8)                 , intent(out)   :: qflx_lateral_s(:,:)
+    !
+    ! !LOCAL VARIABLES:
+    integer :: j,iconn, grid_id_up, grid_id_dn, col_id_up, col_id_dn
+    real(r8) :: h2osoi_vol_up, h2osoi_vol_dn
+    real(r8) :: watsat_up, watsat_dn
+    real(r8) :: bsw_up, bsw_dn
+    real(r8) :: hksat_up, hksat_dn
+    real(r8) :: fracice_up, fracice_dn
+    real(r8) :: icefrac_up, icefrac_dn
+    real(r8) :: smp_up, smp_dn
+    real(r8) :: dzgmm, bswl, den, s1, s2, hkl, impedl, qflx_up_to_dn
+
+    !-----------------------------------------------------------------------
+
+    associate(                                          &
+         nbedrock   => col_pp%nlevbed                 , & ! Input:  [real(r8) (:,:) ]  depth to bedrock (m)
+         dz         => col_pp%dz                      , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
+         z          => col_pp%z                       , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
+         zi         => col_pp%zi                      , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)
+         h2osoi_liq => col_ws%h2osoi_liq              , & ! Output: [real(r8) (:,:) ]  liquid water (kg/m2)
+         h2osoi_ice => col_ws%h2osoi_ice              , & ! Output: [real(r8) (:,:) ]  ice lens (kg/m2)
+         h2osoi_vol => col_ws%h2osoi_vol              , & ! Input:  [real(r8) (:,:) ]  volumetric soil water (0<=h2osoi_vol<=watsat) [m3/m3]
+         bsw        => soilstate_vars%bsw_col         , & ! Input:  [real(r8) (:,:) ]  Clapp and Hornberger "b"
+         hksat      => soilstate_vars%hksat_col       , & ! Input:  [real(r8) (:,:) ]  Clapp and Hornberger "b"
+         smp_l      => soilstate_vars%smp_l_col       , & ! Input:  [real(r8) (:,:) ]  soil matrix potential [mm]
+         watsat     => soilstate_vars%watsat_col      , & ! Input:  [real(r8) (:,:) ] volumetric soil water at saturation (porosity)
+         origflag   => soilhydrology_vars%origflag    , & ! Input:  constant
+         fracice    => soilhydrology_vars%fracice_col , & ! Input:  [real(r8) (:,:) ]  fractional impermeability (-)
+         icefrac    => soilhydrology_vars%icefrac_col , & ! Input:  [real(r8) (:,:) ]  fraction of ice
+         zwt        => soilhydrology_vars%zwt_col       & ! Output: [real(r8) (:)   ]  water table depth (m)
+         )
+
+      ! loop over connections: NOT loop over grid cells
+      qflx_lateral_s(:,:) = 0._r8
+
+      do iconn = 1, conn%nconn
+         grid_id_up = conn%grid_id_up(iconn); !g1
+         grid_id_dn = conn%grid_id_dn(iconn); !g2
+
+         col_id_up = get_natveg_column_id(grid_id_up,bounds)
+         col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
+         den = conn%dist(iconn)*1000._r8
+
+         do j = 1, nlevgrnd
+
+            !it's the same for all the neighboring up-down layers
+            !dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele in a grid since the vertical discretization is the same
+            dzgmm = conn%dzg(iconn)*1000._r8
+
+            if ((j > jwt(col_id_up)-1).or.(j > jwt(col_id_dn)-1)) then
+               qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
+               qflx_lateral_s(col_id_dn, j) = 0._r8;
+            else
+
+               !hydraulic conductivity hkl(iconn,j) is
+               !the lateral hydraulic conductivity is calculated using the geometric mean of the
+               !neighbouring lateral cells and is approximated as 1000 times of the vertical hydraulic conductivity
+               h2osoi_vol_up = h2osoi_vol(col_id_up,j)
+               h2osoi_vol_dn = h2osoi_vol(col_id_dn,j)
+               watsat_up     = watsat(col_id_up,j)
+               watsat_dn     = watsat(col_id_dn,j)
+               bsw_up        = bsw(col_id_up,j)
+               bsw_dn        = bsw(col_id_dn,j)
+               hksat_up      = hksat(col_id_up,j)
+               hksat_dn      = hksat(col_id_dn,j)
+               fracice_up    = fracice(col_id_up,j)
+               fracice_dn    = fracice(col_id_dn,j)
+               icefrac_up    = icefrac(col_id_up,j)
+               icefrac_dn    = icefrac(col_id_dn,j)
+               smp_up        = smp_l(col_id_up,j)
+               smp_dn        = smp_l(col_id_dn,j)
+
+               s1 = (h2osoi_vol_up + h2osoi_vol_dn)/(watsat_up + watsat_dn)
+               s1 = min(1._r8, s1)
+
+               bswl = (bsw_up + bsw_dn)/2._r8
+
+               s2 = sqrt(hksat_up*hksat_dn)*s1**(2._r8*bswl + 3._r8)
+
+               ! replace fracice with impedance factor, as in zhao 97,99
+               if (origflag == 1) then
+                  impedl = (1._r8-0.5_r8*(fracice_up + fracice_dn))
+               else
+                  impedl = 10._r8**(-e_ice*(0.5_r8*(icefrac_up + icefrac_dn)))
+               endif
+
+               hkl = impedl*s1*s2*10.0_r8
+
+               qflx_up_to_dn = -hkl*(smp_dn - smp_up + dzgmm)/den
+               qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn)
+               qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
+
+            endif
+         enddo
+      enddo
+
+    end associate
+
+  end subroutine ComputeLateralFlux
 
   !-----------------------------------------------------------------------
   subroutine ThetaBasedWaterTable(bounds, num_hydrologyc, filter_hydrologyc, &
