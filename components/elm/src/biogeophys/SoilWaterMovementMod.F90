@@ -324,7 +324,7 @@ contains
     real(r8) :: qout(bounds%begc:bounds%endc,1:nlevgrnd+1)    ! flux of water out of soil layer [mm h2o/s]
     real(r8) :: s_node                                       ! soil wetness
     real(r8) :: s1                                           ! "s" at interface of layer
-    real(r8) :: s2,s3,s4                                          ! k*s**(2b+2)
+    real(r8) :: s2                                           ! k*s**(2b+2)
     real(r8) :: smp(bounds%begc:bounds%endc,1:nlevgrnd)       ! soil matrix potential [mm]
     real(r8) :: sdamp                                        ! extrapolates soiwat dependence of evaporation
     integer  :: pi                                           ! pft index
@@ -358,7 +358,6 @@ contains
     real(r8) :: hkl(1:conn%nconn,1:nlevgrnd)                                          !lateral hydraulic conductivity [mm h2o/s]
     real(r8) :: bswl                                         !lateral bsw, set it temporary
     real(r8) :: impedl(1:conn%nconn, 1:nlevgrnd)             !lateral imped
-    real(r8) :: dx = 10.0_r8                               !dx [m]   ! in this case dx = dy = 10.0
     real(r8) :: depth_up, depth_down,trans
     real(r8) :: rous                                    ! aquifer yield (-)
     real(r8) :: qlat_temp                                     
@@ -532,13 +531,9 @@ contains
             else
                s1 = 0.5_r8*(vwc_liq(c,j) + vwc_liq(c,min(nlevsoi, j+1))) / &
                     (0.5_r8*(watsat(c,j)+watsat(c,min(nlevsoi, j+1))))
-               s3 = (vwc_liq(c,j)*vwc_liq(c,min(nlevsoi, j+1))) / &
-                    ((watsat(c,j)*watsat(c,min(nlevsoi, j+1))))
             endif
             s1 = min(1._r8, s1)
-            !s3 = min(1._r8, s3)
             s2 = hksat(c,j)*s1**(2._r8*bsw(c,j)+2._r8)
-            !s4 = hksat(c,j)*s3**(1._r8*bsw(c,j)+1.5_r8)
             ! replace fracice with impedance factor, as in zhao 97,99
             if (origflag == 1) then
                imped(c,j)=(1._r8-0.5_r8*(fracice(c,j)+fracice(c,min(nlevsoi, j+1))))
@@ -549,8 +544,6 @@ contains
             hk(c,j) = imped(c,j)*s1*s2  
             dhkdw(c,j) = imped(c,j)*(2._r8*bsw(c,j)+3._r8)*s2* &
                  (1._r8/(watsat(c,j)+watsat(c,min(nlevsoi, j+1))))
-            !dhkdw(c,j) = imped(c,j)*hksat(c,j)*(bsw(c,j)+1.5_r8)*s3**(bsw(c,j)+0.5_r8) &
-            !     *(vwc_liq(c,min(nlevsoi, j+1))/(watsat(c,j)*watsat(c,min(nlevsoi, j+1))))
             !compute un-restricted hydraulic conductivity
             !call soil_water_retention_curve%soil_hk(hksat(c,j), imped(c,j), s1, bsw(c,j), hktmp, dhkds)
             !if(hktmp/=hk(c,j))write(10,*)'diff',hktmp,hk(c,j)
@@ -611,18 +604,13 @@ contains
          col_id_dn = get_natveg_column_id(grid_id_dn,bounds)
          den = conn%dist(iconn)*1000._r8
 
-         !do j = 1, nlevsoi
          do j = 1, nlevgrnd
 
-            !dzg(iconn,j) =  grc_pp%elevation(grid_id_up) - grc_pp%elevation(grid_id_dn)  !gravity potential here is the elevation change
             !it's the same for all the neighboring up-down layers
-            dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele							    !in a grid since the vertical discretization is the same
+            dzg(iconn,j) = conn%dzg(iconn)  	!iconn+1 ele - iconn ele or down cell ele- up cell ele in a grid since the vertical discretization is the same
             dzgmm(iconn,j) = conn%dzg(iconn)*1000._r8
 
             if ((j > jwt(col_id_up)-1).or.(j > jwt(col_id_dn)-1)) then
-               !if ((j > jwt(col_id_up)).or.(j > jwt(col_id_dn))) then
-               !if (j > max(jwt(col_id_dn),jwt(col_id_up))+1) then
-               !if ((zwt(col_id_up) < zi(j,col_id_up)).or.(zwt(col_id_dn)< zi(j,col_id_dn))) then
                qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
                qflx_lateral_s(col_id_dn, j) = 0._r8;
             else
@@ -630,6 +618,7 @@ contains
                !hydraulic conductivity hkl(iconn,j) is
                !the lateral hydraulic conductivity is calculated using the geometric mean of the
                !neighbouring lateral cells and is approximated as 1000 times of the vertical hydraulic conductivity
+
                s1 = 0.5_r8*(h2osoi_vol(col_id_up,j) + h2osoi_vol(col_id_dn,j)) / &
                     (0.5_r8*(watsat(col_id_up,j)+watsat(col_id_dn,j)))
                s1 = min(1._r8, s1)
@@ -647,8 +636,6 @@ contains
                qflx_up_to_dn = -hkl(iconn,j)*(smp(col_id_dn,j) - smp(col_id_up,j) + dzgmm(iconn,j))/den
                qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) ! weighted by projected normal area to the cell interface
                qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
-               !qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-               !qflx_lateral_s(col_id_dn, j) = 0._r8;
             endif
          enddo
       enddo
@@ -668,8 +655,7 @@ contains
          qout(c,j)   = -hk(c,j)*num/den
          dqodw1(c,j) = -(-hk(c,j)*dsmpdw(c,j)   + num*dhkdw(c,j))/den
          dqodw2(c,j) = -( hk(c,j)*dsmpdw(c,j+1) + num*dhkdw(c,j))/den
-         !rmx(c,j) =  qin(c,j) - qout(c,j) - qflx_rootsoi_col(c,j) + qflx_lateral_s(c,j)/dx*dz(c,j)  !remove source sink, dx=dy = 10 here
-         rmx(c,j) =  - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)  !/dx*dz(c,j)
+         rmx(c,j) =  - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)
          amx(c,j) =  0._r8
          bmx(c,j) =  dzmm(c,j)*(sdamp+1._r8/dtime) + dqodw1(c,j)
          cmx(c,j) =  dqodw2(c,j)
@@ -695,8 +681,7 @@ contains
             qout(c,j)   = -hk(c,j)*num/den
             dqodw1(c,j) = -(-hk(c,j)*dsmpdw(c,j)   + num*dhkdw(c,j))/den
             dqodw2(c,j) = -( hk(c,j)*dsmpdw(c,j+1) + num*dhkdw(c,j))/den
-            !rmx(c,j)    =  qin(c,j) - qout(c,j) -  qflx_rootsoi_col(c,j) + qflx_lateral_s(c,j)/dx*dz(c,j) 
-            rmx(c,j)    =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)  !/dx*dz(c,j)
+            rmx(c,j)    =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)
             amx(c,j)    = -dqidw0(c,j)
             bmx(c,j)    =  dzmm(c,j)/dtime - dqidw1(c,j) + dqodw1(c,j)
             cmx(c,j)    =  dqodw2(c,j)
@@ -720,7 +705,7 @@ contains
             qout(c,j)   =  0._r8
             dqodw1(c,j) =  0._r8
 
-            rmx(c,j)    =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j) !/dx*dz(c,j) 
+            rmx(c,j)    =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)
             amx(c,j)    = -dqidw0(c,j)
             bmx(c,j)    =  dzmm(c,j)/dtime - dqidw1(c,j) + dqodw1(c,j)
             cmx(c,j)    =  0._r8
@@ -730,6 +715,7 @@ contains
             amx(c,j+1) = 0._r8
             bmx(c,j+1) = dzmm(c,j+1)/dtime
             cmx(c,j+1) = 0._r8
+
          else ! water table is below soil column
 
             ! compute aquifer soil moisture as average of layer 10 and saturation
@@ -765,9 +751,6 @@ contains
                dqodw1(c,j) = 0._r8
                dqodw2(c,j) = 0._r8
             else
-                !qout(c,j)   = -hk(c,j)*num/den
-                !dqodw1(c,j) = -(-hk(c,j)*dsmpdw(c,j)   + num*dhkdw(c,j))/den
-                !dqodw2(c,j) = -( hk(c,j)*dsmpdw1 + num*dhkdw(c,j))/den
                !Han Qiu test
                qout(c,j) = 0._r8
                dqodw1(c,j) = 0._r8
@@ -775,8 +758,7 @@ contains
 
             end if
 
-            !rmx(c,j) =  qin(c,j) - qout(c,j) - qflx_rootsoi_col(c,j) + qflx_lateral_s(c,j)/dx*dz(c,j)
-            rmx(c,j) =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)    !/dx*dz(c,j) 
+            rmx(c,j) =  qin(c,j)*conn%vertcos(c) - qout(c,j)*conn%vertcos(c) + qflx_lateral_s(c,j)
             amx(c,j) = -dqidw0(c,j)
             bmx(c,j) =  dzmm(c,j)/dtime - dqidw1(c,j) + dqodw1(c,j)
             cmx(c,j) =  dqodw2(c,j)
@@ -793,10 +775,6 @@ contains
                bmx(c,j+1) = dzmm(c,j+1)/dtime
                cmx(c,j+1) = 0._r8
             else
-               !rmx(c,j+1) = 0._r8
-               !amx(c,j+1) = 0._r8
-               !bmx(c,j+1) = dzmm(c,j+1)/dtime
-               !cmx(c,j+1) = 0._r8
                 rmx(c,j+1) =  qin(c,j+1) - qout(c,j+1)
                 amx(c,j+1) = -dqidw0(c,j+1)
                 bmx(c,j+1) =  dzmm(c,j+1)/dtime - dqidw1(c,j+1) + dqodw1(c,j+1)
