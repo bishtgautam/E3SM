@@ -31,7 +31,9 @@ module GridCellConnectionSetType
      procedure, public :: Init => col_connect_init
   end type gridcell_connection_set_type
 
-  public :: get_natveg_column_id 
+  public :: IsConnGridLocal
+  public :: ConnGridIDToGIndex
+  public :: ConnGridIDToNatColIndex
 
   type (gridcell_connection_set_type), public, target :: conn   ! connection type
 
@@ -279,7 +281,8 @@ contains
 
   end subroutine col_connect_init_default
 
-  function get_natveg_column_id(id, bounds) result(id_out)
+  !-----------------------------------------------------------------------
+  function get_natveg_column_id(bounds, id) result(id_out)
 
     implicit none
 
@@ -293,7 +296,63 @@ contains
 
     id_out=begg*16-16+id ! for 2D transect 1 processor for 3d need beg or use filter_hydrologyc
 
-
   end function get_natveg_column_id
+
+  !-----------------------------------------------------------------------
+  function IsConnGridLocal(bounds, grid_id)
+
+    implicit none
+
+    type(bounds_type), intent(in) :: bounds
+    integer, intent(in)           :: grid_id
+    logical                       :: IsConnGridLocal
+    integer                       :: ngrids
+
+    ngrids = bounds%endg - bounds%begg + 1
+
+    IsConnGridLocal = (grid_id <= ngrids)
+
+    return
+
+  end function IsConnGridLocal
+
+  !-----------------------------------------------------------------------
+  function ConnGridIDToGIndex(bounds, grid_id)
+
+    implicit none
+
+    type(bounds_type), intent(in) :: bounds
+    integer, intent(in)           :: grid_id
+    integer                       :: ConnGridIDToGIndex
+    integer                       :: ngrids
+
+    if (IsConnGridLocal(bounds, grid_id)) then
+       ConnGridIDToGIndex = grid_id + bounds%begg - 1
+    else
+       ngrids = bounds%endg - bounds%begg + 1
+       ConnGridIDToGIndex = grid_id - ngrids
+    end if
+    return
+  end function ConnGridIDToGIndex
+
+  !-----------------------------------------------------------------------
+  function ConnGridIDToNatColIndex(bounds, grid_id)
+
+    implicit none
+
+    type(bounds_type), intent(in) :: bounds
+    integer, intent(in)           :: grid_id
+    integer                       :: ConnGridIDToNatColIndex
+    integer                       :: ngrids
+
+    if (IsConnGridLocal(bounds, grid_id)) then
+       ConnGridIDToNatColIndex = get_natveg_column_id(bounds, grid_id)
+    else
+       ngrids = bounds%endg - bounds%begg + 1
+       ConnGridIDToNatColIndex = grid_id - ngrids
+    end if
+    return
+  end function ConnGridIDToNatColIndex
+
 end module GridCellConnectionSetType
 

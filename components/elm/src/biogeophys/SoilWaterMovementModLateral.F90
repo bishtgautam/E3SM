@@ -2,12 +2,12 @@ module SoilWaterMovementLateralMod
 
 #include <petsc/finclude/petsc.h>
   use petscsys
-  use ColumnDataType    , only : col_es, col_ws, col_wf
-  use VegetationDataType, only : veg_wf
-  use shr_log_mod         , only : errMsg => shr_log_errMsg
-  use elm_instMod , only : waterflux_vars, waterstate_vars, temperature_vars
-  use abortutils           , only : endrun
-  use spmdMod                   , only : masterproc, iam, npes, mpicom, comp_id
+  use ColumnDataType     , only : col_es, col_ws, col_wf
+  use VegetationDataType , only : veg_wf
+  use shr_log_mod        , only : errMsg => shr_log_errMsg
+  use elm_instMod        , only : waterflux_vars, waterstate_vars, temperature_vars
+  use abortutils         , only : endrun
+  use spmdMod            , only : masterproc, iam, npes, mpicom, comp_id
 
 
   implicit none
@@ -132,7 +132,7 @@ contains
     use SoilStateType             , only : soilstate_type
     use SoilHydrologyType         , only : soilhydrology_type
     use ColumnDataType , only : column_water_state
-    use GridCellConnectionSetType , only : conn, get_natveg_column_id
+    use GridCellConnectionSetType , only : conn, ConnGridIDToNatColIndex, IsConnGridLocal
 
     implicit none
 
@@ -173,14 +173,10 @@ contains
 
       ngrids = bounds%endg - bounds%begg + 1
 
-      if (grid_id <= ngrids) then
+      c = ConnGridIDToNatColIndex(bounds, grid_id)
+
+      if (IsConnGridLocal(bounds, grid_id)) then
          ! It is a local grid
-
-         ! Converting 'grid_id' (which is within [1,ngrids]) to
-         ! 'g' (which is within [begg,endg]
-         g = grid_id + bounds%begg - 1
-
-         c = get_natveg_column_id(grid_id, bounds)
 
          h2osoi_vol_1d(1:nlevgrnd) = h2osoi_vol(c,1:nlevgrnd)
          watsat_1D(1:nlevgrnd)     = watsat(c,1:nlevgrnd)
@@ -192,8 +188,6 @@ contains
 
       else
          ! It is a ghost grid
-
-         c = grid_id - ngrids
 
          h2osoi_vol_1d(1:nlevgrnd) = ghost_h2osoi_vol(c,1:nlevgrnd)
          watsat_1D(1:nlevgrnd)     = ghost_watsat(c,1:nlevgrnd)
@@ -233,7 +227,7 @@ contains
     use SoilHydrologyType         , only : soilhydrology_type
     use VegetationType            , only : veg_pp
     use ColumnType                , only : col_pp
-    use GridCellConnectionSetType , only : conn, get_natveg_column_id
+    use GridCellConnectionSetType , only : conn, get_natveg_column_id, IsConnGridLocal, ConnGridIDToNatColIndex
     use GridcellType              , only : grc_pp
     use TopounitType              , only : top_pp
     use spmdMod                   , only : masterproc, iam, npes, mpicom, comp_id
@@ -257,7 +251,6 @@ contains
     ! !LOCAL VARIABLES:
     integer                    :: fc,c,j,iconn, grid_id_up, grid_id_dn, col_id_up, col_id_dn
     integer, pointer           :: ghost_jwt(:)
-    integer                    :: ngrids, g
     real(r8)                   :: h2osoi_vol_up, h2osoi_vol_dn
     real(r8)                   :: watsat_up, watsat_dn
     real(r8)                   :: bsw_up, bsw_dn
@@ -322,14 +315,18 @@ contains
          end do
       end do
 
-      ngrids = bounds%endg - bounds%begg + 1
-
       qflx_lateral_s(bounds%begc:bounds%endc,1:nlevgrnd+1) = 0._r8
 
       ! loop over connections: NOT loop over grid cells
       do iconn = 1, conn%nconn
          grid_id_up = conn%grid_id_up(iconn); !g1
          grid_id_dn = conn%grid_id_dn(iconn); !g2
+
+         up_local = IsConnGridLocal(bounds, grid_id_up)
+         dn_local = IsConnGridLocal(bounds, grid_id_dn)
+
+         col_id_up = ConnGridIDToNatColIndex(bounds, grid_id_up)
+         col_id_dn = ConnGridIDToNatColIndex(bounds, grid_id_dn)
 
          call ExtractUpOrDownHydroVariables(bounds, grid_id_up, col_ws, soilhydrology_vars, soilstate_vars, &
               ghost_col_ws, ghost_soilhydrology_vars, ghost_soilstate_vars, &
@@ -338,26 +335,6 @@ contains
          call ExtractUpOrDownHydroVariables(bounds, grid_id_dn, col_ws, soilhydrology_vars, soilstate_vars, &
               ghost_col_ws, ghost_soilhydrology_vars, ghost_soilstate_vars, &
               h2osoi_vol_dn_1d, watsat_dn_1d, bsw_dn_1d, hksat_dn_1d, fracice_dn_1d, icefrac_dn_1d, smp_dn_1d)
-
-         if (grid_id_up <= ngrids) then
-            ! local grid cell
-            g = grid_id_up + bounds%begg - 1
-            up_local = .true.
-            col_id_up = get_natveg_column_id(grid_id_up, bounds)
-         else
-            up_local = .false.
-            col_id_up = grid_id_up - ngrids
-         end if
-
-         if (grid_id_dn <= ngrids) then
-            ! local grid cell
-            g = grid_id_dn + bounds%begg - 1
-            dn_local = .true.
-            col_id_dn = get_natveg_column_id(grid_id_dn, bounds)
-         else
-            dn_local = .false.
-            col_id_dn = grid_id_dn - ngrids
-         end if
 
          den = conn%dist(iconn)*1000._r8
 
@@ -457,7 +434,7 @@ contains
     use SoilStateType             , only : soilstate_type
     use SoilHydrologyType         , only : soilhydrology_type
     use ColumnType                , only : col_pp
-    use GridCellConnectionSetType , only : conn, get_natveg_column_id
+    use GridCellConnectionSetType , only : conn, IsConnGridLocal, ConnGridIDToNatColIndex
     use elm_instlateralMod        , only : ghost_soilstate_vars, ghost_soilhydrology_vars, ghost_col_pp
     use domainLateralMod          , only : ldomain_lateral
     use SoilWaterMovementMod      , only : zengdecker_2009_with_var_soil_thick
@@ -478,7 +455,6 @@ contains
     integer :: grid_id_up, grid_id_dn, col_id_up, col_id_dn
     integer :: step, nlevbed
     integer :: nstep
-    integer :: ngrids, g
     logical :: up_local, dn_local
     real(r8) :: hksat_up, hksat_dn
     real(r8) :: den, qflx_up_to_dn
@@ -514,7 +490,6 @@ contains
       ! Water table changes due to qlateral in saturated GW
       nstep=1
       dtime = get_step_size()
-      ngrids = bounds%endg - bounds%begg + 1
 
       do step = 1,nstep
          qflx_lateral_s=0._r8
@@ -523,28 +498,25 @@ contains
             grid_id_up = conn%grid_id_up(iconn); !g1
             grid_id_dn = conn%grid_id_dn(iconn); !g2
 
-            if (grid_id_up <= ngrids) then
+            up_local = IsConnGridLocal(bounds, grid_id_up)
+            dn_local = IsConnGridLocal(bounds, grid_id_dn)
+
+            col_id_up = ConnGridIDToNatColIndex(bounds, grid_id_up)
+            col_id_dn = ConnGridIDToNatColIndex(bounds, grid_id_dn)
+
+            if (up_local) then
                ! local grid cell
-               up_local = .true.
-               col_id_up = get_natveg_column_id(grid_id_up, bounds)
                depth_up = zi(col_id_up,nlevgrnd) - zwt(col_id_up)  ! groundwater head(m)
                hksat_up = hksat(col_id_up,15)
             else
-               up_local = .false.
-               col_id_up = grid_id_up - ngrids
                depth_up = ghost_zi(col_id_up,nlevgrnd) - ghost_zwt(col_id_up)  ! groundwater head(m)
                hksat_up = ghost_hksat(col_id_up,15)
             end if
 
-            if (grid_id_dn <= ngrids) then
-               ! local grid cell
-               dn_local = .true.
-               col_id_dn = get_natveg_column_id(grid_id_dn, bounds)
+            if (dn_local) then
                depth_down = zi(col_id_dn,nlevgrnd) - zwt(col_id_dn)
                hksat_dn = hksat(col_id_dn,15)
             else
-               dn_local = .false.
-               col_id_dn = grid_id_dn - ngrids
                depth_down = ghost_zi(col_id_dn,nlevgrnd) - ghost_zwt(col_id_dn)
                hksat_dn = ghost_hksat(col_id_dn,15)
             end if
