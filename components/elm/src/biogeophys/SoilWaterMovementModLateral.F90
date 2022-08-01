@@ -255,28 +255,27 @@ contains
     real(r8)                 , intent(out)   :: qflx_lateral_s(bounds%begc:bounds%endc,1:nlevgrnd+1)
     !
     ! !LOCAL VARIABLES:
-    integer :: fc,c,j,iconn, grid_id_up, grid_id_dn, col_id_up, col_id_dn
-    real(r8) :: h2osoi_vol_up, h2osoi_vol_dn
-    real(r8) :: watsat_up, watsat_dn
-    real(r8) :: bsw_up, bsw_dn
-    real(r8) :: hksat_up, hksat_dn
-    real(r8) :: fracice_up, fracice_dn
-    real(r8) :: icefrac_up, icefrac_dn
-    real(r8) :: smp_up, smp_dn
-    real(r8) :: dzgmm, bswl, den, s1, s2, hkl, impedl, qflx_up_to_dn
-    real(r8) :: h2osoi_vol_up_1d(1:nlevgrnd), h2osoi_vol_dn_1d(1:nlevgrnd)
-    real(r8) :: watsat_up_1d(1:nlevgrnd), watsat_dn_1d(1:nlevgrnd)
-    real(r8) :: bsw_up_1d(1:nlevgrnd), bsw_dn_1d(1:nlevgrnd)
-    real(r8) :: hksat_up_1d(1:nlevgrnd), hksat_dn_1d(1:nlevgrnd)
-    real(r8) :: fracice_up_1d(1:nlevgrnd), fracice_dn_1d(1:nlevgrnd)
-    real(r8) :: icefrac_up_1d(1:nlevgrnd), icefrac_dn_1d(1:nlevgrnd)
-    real(r8) :: smp_up_1d(1:nlevgrnd), smp_dn_1d(1:nlevgrnd)
-    integer, pointer :: ghost_jwt(:)
-    integer :: ngrids, g
-    logical :: up_soil_layer_saturated, dn_soil_layer_saturated
-    logical :: up_local, dn_local
-    type(ugdm_type)  , pointer           :: ugdm
-    type(ugrid_type) , pointer           :: ugrid
+    integer                    :: fc,c,j,iconn, grid_id_up, grid_id_dn, col_id_up, col_id_dn
+    integer, pointer           :: ghost_jwt(:)
+    integer                    :: ngrids, g
+    real(r8)                   :: h2osoi_vol_up, h2osoi_vol_dn
+    real(r8)                   :: watsat_up, watsat_dn
+    real(r8)                   :: bsw_up, bsw_dn
+    real(r8)                   :: hksat_up, hksat_dn
+    real(r8)                   :: fracice_up, fracice_dn
+    real(r8)                   :: icefrac_up, icefrac_dn
+    real(r8)                   :: smp_up, smp_dn
+    real(r8)                   :: dzgmm, bswl, den, s1, s2, hkl, impedl, qflx_up_to_dn
+    real(r8)                   :: h2osoi_vol_up_1d(1:nlevgrnd), h2osoi_vol_dn_1d(1:nlevgrnd)
+    real(r8)                   :: watsat_up_1d(1:nlevgrnd), watsat_dn_1d(1:nlevgrnd)
+    real(r8)                   :: bsw_up_1d(1:nlevgrnd), bsw_dn_1d(1:nlevgrnd)
+    real(r8)                   :: hksat_up_1d(1:nlevgrnd), hksat_dn_1d(1:nlevgrnd)
+    real(r8)                   :: fracice_up_1d(1:nlevgrnd), fracice_dn_1d(1:nlevgrnd)
+    real(r8)                   :: icefrac_up_1d(1:nlevgrnd), icefrac_dn_1d(1:nlevgrnd)
+    real(r8)                   :: smp_up_1d(1:nlevgrnd), smp_dn_1d(1:nlevgrnd)
+    logical                    :: up_soil_layer_saturated, dn_soil_layer_saturated
+    logical                    :: up_local, dn_local
+    type(ugrid_type) , pointer :: ugrid
 
     !-----------------------------------------------------------------------
 
@@ -445,34 +444,22 @@ contains
        num_urbanc, filter_urbanc, soilhydrology_vars, soilstate_vars, jwt)
     !
     ! !DESCRIPTION:
-    ! Calculate watertable, considering aquifer recharge but no drainage.
+    ! Calculate watertable while accounting for lateral flow
     !
     ! !USES:
 #include <petsc/finclude/petsc.h>
     use decompMod                 , only : bounds_type
     use elm_varctl                , only : use_var_soil_thick
     use shr_kind_mod              , only : r8 => shr_kind_r8
-    use shr_const_mod             , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
     use decompMod                 , only : bounds_type
-    use elm_varcon                , only : wimp,grav,hfus,tfrz
-    use elm_varcon                , only : e_ice,denh2o, denice
-    use elm_varpar                , only : nlevsoi, max_patch_per_col, nlevgrnd
+    use elm_varpar                , only : nlevgrnd
     use clm_time_manager          , only : get_step_size
-    use column_varcon             , only : icol_roof, icol_road_imperv
-    use TridiagonalMod            , only : Tridiagonal
     use SoilStateType             , only : soilstate_type
     use SoilHydrologyType         , only : soilhydrology_type
-    use VegetationType            , only : veg_pp
     use ColumnType                , only : col_pp
     use GridCellConnectionSetType , only : conn, get_natveg_column_id
-    use GridcellType              , only : grc_pp
-    use TopounitType              , only : top_pp
-    use spmdMod                   , only : masterproc, iam, npes, mpicom, comp_id
-    use elm_instlateralMod        , only : ghost_soilstate_vars, ghost_soilhydrology_vars, ghost_col_ws, ghost_col_pp
-    use UnstructuredGridType      , only : ugdm_type, ugrid_type
+    use elm_instlateralMod        , only : ghost_soilstate_vars, ghost_soilhydrology_vars, ghost_col_pp
     use domainLateralMod          , only : ldomain_lateral
-    use elm_varctl                , only : iulog
-    use clm_time_manager          , only : get_step_size
     use SoilWaterMovementMod      , only : zengdecker_2009_with_var_soil_thick
     use petscsys
     !
@@ -487,47 +474,26 @@ contains
     integer                  , intent(inout) :: jwt(bounds%begc:bounds%endc)
     !
     ! !LOCAL VARIABLES:
-    integer :: fc,c,j,iconn, grid_id_up, grid_id_dn, col_id_up, col_id_dn
-    real(r8) :: h2osoi_vol_up, h2osoi_vol_dn
-    real(r8) :: watsat_up, watsat_dn
-    real(r8) :: bsw_up, bsw_dn
-    real(r8) :: hksat_up, hksat_dn
-    real(r8) :: fracice_up, fracice_dn
-    real(r8) :: icefrac_up, icefrac_dn
-    real(r8) :: smp_up, smp_dn
-    real(r8) :: dzgmm, bswl, den, s1, s2, hkl, impedl, qflx_up_to_dn
-    real(r8) :: h2osoi_vol_up_1d(1:nlevgrnd), h2osoi_vol_dn_1d(1:nlevgrnd)
-    real(r8) :: watsat_up_1d(1:nlevgrnd), watsat_dn_1d(1:nlevgrnd)
-    real(r8) :: bsw_up_1d(1:nlevgrnd), bsw_dn_1d(1:nlevgrnd)
-    real(r8) :: hksat_up_1d(1:nlevgrnd), hksat_dn_1d(1:nlevgrnd)
-    real(r8) :: fracice_up_1d(1:nlevgrnd), fracice_dn_1d(1:nlevgrnd)
-    real(r8) :: icefrac_up_1d(1:nlevgrnd), icefrac_dn_1d(1:nlevgrnd)
-    real(r8) :: smp_up_1d(1:nlevgrnd), smp_dn_1d(1:nlevgrnd)
+    integer :: fc,c,j,iconn
+    integer :: grid_id_up, grid_id_dn, col_id_up, col_id_dn
+    integer :: step, nlevbed
     integer :: nstep
-    integer, pointer :: ghost_jwt(:)
     integer :: ngrids, g
-    logical :: up_soil_layer_saturated, dn_soil_layer_saturated
     logical :: up_local, dn_local
+    real(r8) :: hksat_up, hksat_dn
+    real(r8) :: den, qflx_up_to_dn
     real(r8) :: depth_up, depth_down
     real(r8) :: dtime, qlat_layer, qlat_tot, qlat_temp, s_y
     real(r8) :: rous, sy, trans
-    integer :: step, nlevbed
-    real(r8)                 :: qflx_lateral_s(bounds%begc:bounds%endc)
-    type(ugdm_type)  , pointer           :: ugdm
-    type(ugrid_type) , pointer           :: ugrid
+    real(r8) :: qflx_lateral_s(bounds%begc:bounds%endc)
 
     !-----------------------------------------------------------------------
 
     associate(                                                &
-         nbedrock       => col_pp%nlevbed                   , & ! Input:  [real(r8) (:,:) ]  depth to bedrock (m)
-         dz             => col_pp%dz                        , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
-         z              => col_pp%z                         , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
          zi             => col_pp%zi                        , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)
          nlev2bed       => col_pp%nlevbed                   , & ! Input:  [integer  (:)   ]  number of layers to bedrock
 
          h2osoi_liq     => col_ws%h2osoi_liq                , & ! Output: [real(r8) (:,:) ]  liquid water (kg/m2)
-         h2osoi_ice     => col_ws%h2osoi_ice                , & ! Output: [real(r8) (:,:) ]  ice lens (kg/m2)
-         h2osoi_vol     => col_ws%h2osoi_vol                , & ! Input:  [real(r8) (:,:) ]  volumetric soil water (0<=h2osoi_vol<=watsat) [m3/m3]
 
          bsw            => soilstate_vars%bsw_col           , & ! Input:  [real(r8) (:,:) ]  Clapp and Hornberger "b"
          sucsat         => soilstate_vars%sucsat_col        , & ! Input:  [real(r8) (:,:) ]  minimum soil suction (mm)
@@ -536,8 +502,6 @@ contains
          watsat         => soilstate_vars%watsat_col        , & ! Input:  [real(r8) (:,:) ] volumetric soil water at saturation (porosity)
 
          origflag       => soilhydrology_vars%origflag      , & ! Input:  constant
-         fracice        => soilhydrology_vars%fracice_col   , & ! Input:  [real(r8) (:,:) ]  fractional impermeability (-)
-         icefrac        => soilhydrology_vars%icefrac_col   , & ! Input:  [real(r8) (:,:) ]  fraction of ice
          zwt            => soilhydrology_vars%zwt_col       , & ! Input: [real(r8) (:)   ]  water table depth (m)
          wa             => soilhydrology_vars%wa_col        , & ! Output: [real(r8) (:)   ]  water in the unconfined aquifer (mm)
 
@@ -587,9 +551,6 @@ contains
 
             den = conn%dist(iconn)*1000._r8
 
-            j = nlevgrnd+1   !lateral flow in saturated zone
-            !hkl(iconn,j) =  sqrt(hksat(col_id_up,j)*hksat(col_id_dn,j))*1000._r8   ! should be multiple layers to the bottom of bedrock
-
             depth_up = max(depth_up, 0._r8)
             depth_down= max(depth_down, 0._r8)
 
@@ -614,7 +575,7 @@ contains
 
             !scs: use analytical expression for aquifer specific yield
             rous = watsat(c,nlevbed) &
-                 * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
+                 * ( 1._r8 - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
             rous=max(rous,0.02_r8)
 
             !--  water table is below the soil column  --------------------------------------
@@ -630,11 +591,11 @@ contains
                !-- water table within soil layers 1-15  -------------------------------------
                ! try to raise water table to account for qlat
                qlat_tot = qflx_lateral_s(c) * dtime/nstep
-               if(qlat_tot > 0.) then !rising water table ! need to modify soil water content also, Han Qiu
+               if(qlat_tot > 0._r8) then !rising water table ! need to modify soil water content also, Han Qiu
                   do j = jwt(c)+1, 1,-1
                      !scs: use analytical expression for specific yield
                      s_y = watsat(c,j) &
-                          * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
+                          * ( 1._r8 -  (1._r8 + 1.e3*zwt(c)/sucsat(c,j))**(-1._r8/bsw(c,j)))
                      s_y=max(s_y,0.02_r8)
                      qlat_layer=min(qlat_tot,(s_y*(zwt(c) - zi(c,j-1))*1.e3))
                      qlat_layer=max(qlat_layer,0._r8)
@@ -644,13 +605,13 @@ contains
                      if(s_y > 0._r8) zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
 
                      qlat_tot = qlat_tot - qlat_layer
-                     if (qlat_tot <= 0.) exit
+                     if (qlat_tot <= 0._r8) exit
                   enddo
                else ! deepening water table (negative qlat)
                   do j = jwt(c)+1, 15
                      !scs: use analytical expression for specific yield
                      s_y = watsat(c,j) &
-                          * ( 1. -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1./bsw(c,j)))
+                          * ( 1._r8 -  (1.+1.e3*zwt(c)/sucsat(c,j))**(-1._r8/bsw(c,j)))
                      s_y=max(s_y,0.02_r8)
 
                      qlat_layer=max(qlat_tot,-(s_y*(zi(c,j) - zwt(c))*1.e3))
@@ -658,7 +619,7 @@ contains
                      h2osoi_liq(c,j) = h2osoi_liq(c,j) + qlat_layer
                      qlat_tot = qlat_tot - qlat_layer
 
-                     if (qlat_tot >= 0.) then
+                     if (qlat_tot >= 0._r8) then
                         zwt(c) = zwt(c) - qlat_layer/s_y/1000._r8
                         exit
                      else
@@ -666,7 +627,7 @@ contains
                      endif
 
                   enddo
-                  if (qlat_tot > 0.) zwt(c) = zwt(c) - qlat_tot/1000._r8/rous
+                  if (qlat_tot > 0._r8) zwt(c) = zwt(c) - qlat_tot/1000._r8/rous
                   !rsub_top(c) = rsub_top(c) + qlat_tot/dtime
 
                endif
