@@ -356,8 +356,9 @@ contains
             end if
 
             if (up_soil_layer_saturated .or. dn_soil_layer_saturated) then
-               qflx_lateral_s(col_id_up, j) = 0._r8;   ! do not recount the lateral flux if a cell is saturated and under water table
-               qflx_lateral_s(col_id_dn, j) = 0._r8;
+               ! Do not compute unsaturated lateral flux because WT in one of
+               ! the column is shallower than 'j'-layer. Saturated lateral
+               ! flux will be accounted for in SolveLateralSatFlow()
             else
 
                !hydraulic conductivity hkl(iconn,j) is
