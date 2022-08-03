@@ -437,7 +437,6 @@ contains
     use GridCellConnectionSetType , only : conn, IsConnGridLocal, ConnGridIDToNatColIndex
     use elm_instlateralMod        , only : ghost_soilstate_vars, ghost_soilhydrology_vars, ghost_col_pp
     use domainLateralMod          , only : ldomain_lateral
-    use SoilWaterMovementMod      , only : zengdecker_2009_with_var_soil_thick
     use petscsys
     !
     ! !ARGUMENTS:
@@ -555,10 +554,8 @@ contains
             qlat_temp = qflx_lateral_s(c)
 
             if(jwt(c) == nlevgrnd) then
-               if (.not. (zengdecker_2009_with_var_soil_thick)) then
-                  wa(c)  = wa(c) + qflx_lateral_s(c)  * dtime/nstep
-                  zwt(c) = zwt(c) - (qflx_lateral_s(c) * dtime)/nstep/1000._r8/rous
-               end if
+               wa(c)  = wa(c) + qflx_lateral_s(c)  * dtime/nstep
+               zwt(c) = zwt(c) - (qflx_lateral_s(c) * dtime)/nstep/1000._r8/rous
             else
                !-- water table within soil layers 1-15  -------------------------------------
                ! try to raise water table to account for qlat
@@ -610,12 +607,8 @@ contains
                jwt(c) = nlevgrnd
                do j = 1,nlevgrnd
                   if(zwt(c) <= zi(c,j)) then
-                     if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
-                        exit
-                     else
-                        jwt(c) = j-1
-                        exit
-                     end if
+                     jwt(c) = j-1
+                     exit
                   end if
                enddo
             endif
