@@ -10,7 +10,7 @@ module histFileMod
   use shr_kind_mod   , only : r8 => shr_kind_r8
   use shr_log_mod    , only : errMsg => shr_log_errMsg
   use shr_sys_mod    , only : shr_sys_flush
-  use spmdMod        , only : masterproc
+  use spmdMod        , only : masterproc, iam
   use abortutils     , only : endrun
   use elm_varctl     , only : iulog, use_vertsoilc, use_fates, use_extrasnowlayers
   use elm_varcon     , only : spval, ispval, dzsoi_decomp 
@@ -2423,6 +2423,8 @@ contains
     real(r8), pointer :: histo(:,:)       ! temporary
     integer :: status
     real(r8) :: zsoi_1d(1)
+    type(bounds_type) :: bounds
+    integer , pointer :: igarr(:)        ! temporary
     character(len=*),parameter :: subname = 'htape_timeconst'
     !-----------------------------------------------------------------------
 
@@ -2769,6 +2771,18 @@ contains
                  imissing_value=ispval, ifill_value=ispval)
           end if
        end if
+       if (ldomain%isgrid2d) then
+          call ncd_defvar(varname='mpi_rank', xtype=ncd_int, &
+               dim1name='lon', dim2name='lat',&
+               long_name='mpi rank that owns the grid cell', units='unitless', &
+               ncid=nfid(t), &
+               imissing_value=ispval, ifill_value=ispval)
+       else
+          call ncd_defvar(varname='mpi_rank', xtype=ncd_int, &
+               dim1name=grlnd, &
+               long_name='mpi rank that owns the grid cell', units='unitless', ncid=nfid(t), &
+               imissing_value=ispval, ifill_value=ispval)
+       end if
 
     else if (mode == 'write') then
 
@@ -2791,6 +2805,13 @@ contains
        if(max_topounits > 1) then
           call ncd_io(varname='topoPerGrid' , data=ldomain%num_tunits_per_grd, dim1name=grlnd, ncid=nfid(t), flag='write')
        end if
+
+       call get_proc_bounds(bounds)
+       allocate(igarr(bounds%begg:bounds%endg))
+       igarr(bounds%begg:bounds%endg) = iam
+       call ncd_io(varname='mpi_rank', data=igarr, dim1name=grlnd, ncid=nfid(t), flag='write')
+       deallocate(igarr)
+
     end if  ! (define/write mode
 
   end subroutine htape_timeconst
