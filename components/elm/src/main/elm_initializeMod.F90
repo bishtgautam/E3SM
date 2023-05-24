@@ -195,6 +195,7 @@ contains
 
     select case (trim(domain_decomp_type))
     case ("round_robin")
+       call endrun(msg="Need to use domain_decomp_type = 'graph_partitioning' in user_nl_elm")
        call decompInit_lnd(ni, nj, amask)
        deallocate(amask)
     case ("graph_partitioning")
