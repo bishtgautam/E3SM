@@ -294,7 +294,8 @@ contains
     begg = bounds%begg;  endg = bounds%endg
 
 
-    id_out=begg*16-16+id ! for 2D transect 1 processor for 3d need beg or use filter_hydrologyc
+    !id_out=begg*16-16+id ! for 2D transect 1 processor for 3d need beg or use filter_hydrologyc
+    id_out = begc + (id - 1)
 
   end function get_natveg_column_id
 
