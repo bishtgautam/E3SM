@@ -269,6 +269,8 @@ contains
     logical                    :: up_soil_layer_saturated, dn_soil_layer_saturated
     logical                    :: up_local, dn_local
     type(ugrid_type) , pointer :: ugrid
+    real(r8), pointer          :: lateral_unsat_fluxes(:,:,:)
+    integer                    :: forder, iedge
 
     !-----------------------------------------------------------------------
 
@@ -316,6 +318,8 @@ contains
       end do
 
       qflx_lateral_s(bounds%begc:bounds%endc,1:nlevgrnd+1) = 0._r8
+      allocate(lateral_unsat_fluxes(bounds%begc:bounds%endc, 1:nlevgrnd+1, ugrid%maxEdges))
+      lateral_unsat_fluxes(:,:,:) = 0._r8
 
       ! loop over connections: NOT loop over grid cells
       do iconn = 1, conn%nconn
@@ -398,12 +402,16 @@ contains
                qflx_up_to_dn = -hkl*(smp_dn - smp_up + dzgmm)/den
 
                if (up_local) then
-                  qflx_lateral_s(col_id_up,j) = qflx_lateral_s(col_id_up,j) &
+                  ! save lateral flux in a temporary variable
+                  forder = conn%grid_up_forder(iconn)
+                  lateral_unsat_fluxes(col_id_up,j,forder) = &
                        - qflx_up_to_dn*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn)
                end if
 
                if (dn_local) then
-                  qflx_lateral_s(col_id_dn,j) = qflx_lateral_s(col_id_dn,j) &
+                  ! save lateral flux in a temporary variable
+                  forder = conn%grid_dn_forder(iconn)
+                  lateral_unsat_fluxes(col_id_dn,j,forder) = &
                        + qflx_up_to_dn*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn)
                end if
 
@@ -411,7 +419,17 @@ contains
          enddo
       enddo
 
+      ! Now accumulate unsat lateral fluxes
+      do c = bounds%begc, bounds%endc
+         do j = 1, nlevgrnd
+            do iedge = 1, ugrid%maxEdges
+               qflx_lateral_s(c,j) = qflx_lateral_s(c,j) + lateral_unsat_fluxes(c,j,iedge)
+            end do
+         end do
+      end do
+
       deallocate(ghost_jwt)
+      deallocate(lateral_unsat_fluxes)
 
     end associate
 
@@ -438,6 +456,7 @@ contains
     use GridCellConnectionSetType , only : conn, IsConnGridLocal, ConnGridIDToNatColIndex
     use elm_instlateralMod        , only : ghost_soilstate_vars, ghost_soilhydrology_vars, ghost_col_pp
     use domainLateralMod          , only : ldomain_lateral
+    use UnstructuredGridType      , only : ugdm_type, ugrid_type
     use petscsys
     !
     ! !ARGUMENTS:
@@ -462,6 +481,9 @@ contains
     real(r8) :: dtime, qlat_layer, qlat_tot, qlat_temp, s_y
     real(r8) :: rous, sy, trans
     real(r8) :: qflx_lateral_s(bounds%begc:bounds%endc)
+    type(ugrid_type) , pointer :: ugrid
+    real(r8), pointer :: lateral_sat_fluxes(:,:)
+    integer :: iedge, forder
 
     !-----------------------------------------------------------------------
 
@@ -487,12 +509,18 @@ contains
          ghost_nlev2bed => ghost_col_pp%nlevbed               & ! Input:  [integer  (:)   ]  number of layers to bedrock
          )
 
+      ugrid => ldomain_lateral%ugrid
+
+      allocate(lateral_sat_fluxes(bounds%begc:bounds%endc, ugrid%maxEdges))
+
       ! Water table changes due to qlateral in saturated GW
       nstep=1
       dtime = get_step_size()
 
       do step = 1,nstep
          qflx_lateral_s=0._r8
+         lateral_sat_fluxes(:,:) = 0._r8
+
          do iconn = 1, conn%nconn
 
             grid_id_up = conn%grid_id_up(iconn); !g1
@@ -531,15 +559,28 @@ contains
             qflx_up_to_dn = -trans*(depth_down-depth_up+conn%dzg(iconn))*1000._r8/den
 
             if (up_local) then
-               qflx_lateral_s(col_id_up) = qflx_lateral_s(col_id_up) - &
-                    qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_up-bounds%begc+1)
+               ! save lateral flux in a temporary variable
+               forder = conn%grid_up_forder(iconn)
+               lateral_sat_fluxes(col_id_up, forder) = &
+                    -qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%uparea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_up-bounds%begc+1)
             end if
 
             if (dn_local) then
-               qflx_lateral_s(col_id_dn) = qflx_lateral_s(col_id_dn) + &
+               ! save lateral flux in a temporary variable
+               forder = conn%grid_dn_forder(iconn)
+               lateral_sat_fluxes(col_id_dn, forder) = &
                     qflx_up_to_dn/1000._r8*conn%face_length(iconn)/conn%downarea(iconn)*conn%facecos(iconn) * conn%vertcos(col_id_dn-bounds%begc+1)
             end if
          enddo
+
+         ! Now accumulate lateral saturated fluxes
+         do fc = 1, num_hydrologyc
+            c = filter_hydrologyc(fc)
+            do iedge = 1, ugrid%maxEdges
+               qflx_lateral_s(c) = qflx_lateral_s(c) + lateral_sat_fluxes(c, iedge)
+            end do
+         end do
+
 
          do fc = 1, num_hydrologyc
             c = filter_hydrologyc(fc)
@@ -619,6 +660,8 @@ contains
               soilhydrology_vars, soilstate_vars)
 
       enddo
+
+      deallocate(lateral_sat_fluxes)
 
     end associate
 
