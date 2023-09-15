@@ -16,16 +16,20 @@ module GridCellConnectionSetType
   public
 
   type, public :: gridcell_connection_set_type
-     Integer, pointer  :: nconn         => null() ! number of connections
-     Integer, pointer  :: grid_id_up(:) => null() ! list of ids of upwind cells
-     Integer, pointer  :: grid_id_dn(:) => null() ! list of ids of downwind cells
-     Real(r8), pointer :: dist(:)       => null() ! list of distance vectors
-     Real(r8), pointer :: face_length(:)=> null() ! list of edge of faces normal to distance vectors
-     Real(r8), pointer :: uparea(:)     => null() ! list of up cell areas of horizaontal faces 
-     Real(r8), pointer :: downarea(:)   => null() ! list of down cell areas of horizaontal faces 
-     Real(r8), pointer :: dzg(:)        => null() ! list of areas of dz between downwind and upwind cells
-     Real(r8), pointer :: facecos(:)    => null() ! dot product of the cell face normal vector and cell centroid vector
-     Real(r8), pointer :: vertcos(:)    => null() ! dot product of the cell face normal vector and cell centroid vector for vertical flux, the rank for vertcos
+     Integer, pointer  :: nconn                => null() ! number of connections
+     Integer, pointer  :: grid_id_up(:)        => null() ! list of ids of upwind cells
+     Integer, pointer  :: grid_id_dn(:)        => null() ! list of ids of downwind cells
+     integer, pointer  :: grid_id_up_norder(:) => null() ! list of ids of upwind cells in natural order
+     integer, pointer  :: grid_id_dn_norder(:) => null() ! list of ids of downwind cells in natural order
+     integer, pointer  :: grid_up_forder(:)    => null() ! the order in which the lateral flux should be added for upwind cells
+     integer, pointer  :: grid_dn_forder(:)    => null() ! the order in which the lateral flux should be added for downwind cells
+     Real(r8), pointer :: dist(:)              => null() ! list of distance vectors
+     Real(r8), pointer :: face_length(:)       => null() ! list of edge of faces normal to distance vectors
+     Real(r8), pointer :: uparea(:)            => null() ! list of up cell areas of horizaontal faces 
+     Real(r8), pointer :: downarea(:)          => null() ! list of down cell areas of horizaontal faces 
+     Real(r8), pointer :: dzg(:)               => null() ! list of areas of dz between downwind and upwind cells
+     Real(r8), pointer :: facecos(:)           => null() ! dot product of the cell face normal vector and cell centroid vector
+     Real(r8), pointer :: vertcos(:)           => null() ! dot product of the cell face normal vector and cell centroid vector for vertical flux, the rank for vertcos
      ! is from 1 to column size which is different from rank of lateral faces
    contains
      procedure, public :: Init => col_connect_init
@@ -87,9 +91,24 @@ contains
     ! !LOCAL VARIABLES:
     PetscInt                  :: icell, iedge, nconn, cell_id
     type(ugrid_type), pointer :: ugrid
+    integer, pointer          :: cellsOnCell_norder(:,:)
+    integer, pointer          :: sort_index(:,:)
+    integer, pointer          :: unsort_to_sort_index(:,:)
+    integer, pointer          :: nNeighbors(:)
+    integer                   :: i, j, temp
+    logical                   :: swapped
     
 
     ugrid => domain_l%ugrid
+
+    allocate (cellsOnCell_norder   (ugrid%ngrid_ghosted,ugrid%maxEdges ));
+    allocate (sort_index           (ugrid%ngrid_ghosted,ugrid%maxEdges ));
+    allocate (unsort_to_sort_index (ugrid%ngrid_ghosted,ugrid%maxEdges ));
+    allocate (nNeighbors           (ugrid%ngrid_ghosted                ));
+
+    cellsOnCell_norder (:,:) = 0
+    sort_index         (:,:) = 0
+    nNeighbors         (:)   = 0
 
     ! Determine the number of connections
     nconn = 0
@@ -103,15 +122,19 @@ contains
     end do
 
     ! Allocate memory
-    allocate(this%nconn)              ;  this%nconn          = nconn
-    allocate(this%grid_id_up(nconn))  ;  this%grid_id_up(:)  = 0
-    allocate(this%grid_id_dn(nconn))  ;  this%grid_id_dn(:)  = 0
-    allocate(this%face_length(nconn)) ;  this%face_length(:) = 0
-    allocate(this%uparea(nconn))      ;  this%uparea(:)      = 0
-    allocate(this%downarea(nconn))    ;  this%downarea(:)    = 0
-    allocate(this%dist(nconn))        ;  this%dist(:)        = 0
-    allocate(this%dzg(nconn))         ;  this%dzg(:)         = 0
-    allocate(this%facecos(nconn))     ;  this%facecos(:)     = 0
+    allocate(this%nconn)                    ;  this%nconn                = nconn
+    allocate(this%grid_id_up(nconn))        ;  this%grid_id_up(:)        = 0
+    allocate(this%grid_id_dn(nconn))        ;  this%grid_id_dn(:)        = 0
+    allocate(this%grid_id_up_norder(nconn)) ;  this%grid_id_up_norder(:) = 0
+    allocate(this%grid_id_dn_norder(nconn)) ;  this%grid_id_dn_norder(:) = 0
+    allocate(this%grid_up_forder(nconn))    ;  this%grid_up_forder(:)    = 0
+    allocate(this%grid_dn_forder(nconn))    ;  this%grid_dn_forder(:)    = 0
+    allocate(this%face_length(nconn))       ;  this%face_length(:)       = 0
+    allocate(this%uparea(nconn))            ;  this%uparea(:)            = 0
+    allocate(this%downarea(nconn))          ;  this%downarea(:)          = 0
+    allocate(this%dist(nconn))              ;  this%dist(:)              = 0
+    allocate(this%dzg(nconn))               ;  this%dzg(:)               = 0
+    allocate(this%facecos(nconn))           ;  this%facecos(:)           = 0
 
     allocate(this%vertcos(ugrid%ngrid_local)) ;  this%vertcos(:) = 0
 
@@ -125,6 +148,19 @@ contains
 
              this%grid_id_up(nconn)  = icell
              this%grid_id_dn(nconn)  = cell_id
+
+             this%grid_id_up_norder(nconn) = ugrid%grid_id_norder(icell)
+             this%grid_id_dn_norder(nconn) = ugrid%grid_id_norder(cell_id)
+
+             ! neighbor of icell-th is cell_id
+             nNeighbors(icell) = nNeighbors(icell) + 1;
+             cellsOnCell_norder(icell,nNeighbors(icell)) = this%grid_id_dn_norder(nconn)
+             sort_index(icell,nNeighbors(icell)) = nNeighbors(icell)
+
+             ! neighbor of cell-th id icell
+             nNeighbors(cell_id) = nNeighbors(cell_id) + 1;
+             cellsOnCell_norder(cell_id,nNeighbors(cell_id)) = this%grid_id_up_norder(nconn)
+             sort_index(cell_id,nNeighbors(cell_id)) = nNeighbors(cell_id)
 
              this%uparea(nconn)      = ugrid%areaGrid_ghosted(icell)
              this%downarea(nconn)    = ugrid%areaGrid_ghosted(cell_id)
@@ -144,6 +180,103 @@ contains
     do icell = 1, ugrid%ngrid_local
        this%vertcos(icell) = ugrid%vcosGrid_ghosted(icell)
     end do
+
+    !
+    ! Need to make sure the order in which lateral fluxes are added to a 'icell' is
+    ! the same irrespective of the number of MPI tasks. The following schematic represents
+    ! connections between icell = 66 and its neigbhors.
+    !
+    !
+    !                    76
+    !                    |
+    !              65 -- 66 --- 67
+    !                    |
+    !                    56
+    !
+    ! Assume the order of four connections in the list is as
+    !
+    ! (1) flux_1: 65 <--> 66
+    ! (2) flux_2: 66 <--> 67
+    ! (3) flux_3: 66 <--> 56
+    ! (4) flux_4: 66 <--> 76
+    !
+    !
+    ! The goal is that the lateral fluxes for icell = 66 should be added in the following order
+    !   flux_3 + flux_1 + flux_2 + flux_4
+    !
+    ! Unsorted cellsOnCell_norder(  icell,:) = [65 67 56 76]
+    ! Sorted   cellsOnCell_norder(  icell,:) = [56 65 67 76]
+    !          sort_index(          icell,:) = [3  1  2   4]
+    !          unsort_to_sort_index(icell,:) = [2  3  1   4]
+    !
+    ! (1) flux_1: 65 <--> 66; grid_dn_forder(1) = 2;
+    ! (2) flux_2: 66 <--> 67; grid_up_forder(2) = 3;
+    ! (3) flux_3: 66 <--> 56; grid_up_forder(3) = 1;
+    ! (4) flux_4: 66 <--> 76; grid_up_forder(4) = 4;
+    !
+
+    ! For each icell, sort cellsOnCell_norder(icell,:)
+    do icell = 1, ugrid%ngrid_local
+
+       if (nNeighbors(icell) > 1) then
+
+          ! Use bubble sort algorithm
+          do j = nNeighbors(icell)-1, 1, -1
+             swapped = .false.
+             do i = 1, j
+                if (cellsOnCell_norder(icell,i) > cellsOnCell_norder(icell,i+1)) then
+                   temp = cellsOnCell_norder(icell,i)
+                   cellsOnCell_norder(icell,i) = cellsOnCell_norder(icell,i+1)
+                   cellsOnCell_norder(icell,i+1) = temp
+
+                   temp = sort_index(icell,i)
+                   sort_index(icell,i) = sort_index(icell,i+1)
+                   sort_index(icell,i+1) = temp
+
+                   swapped = .true.
+                end if
+             end do
+             if (.not. swapped) exit
+          end do
+
+       end if
+
+       do i = 1, nNeighbors(icell)
+          do j = 1, nNeighbors(icell)
+             if (i == sort_index(icell,j)) then
+                unsort_to_sort_index(icell, i) = j
+                exit
+             end if
+          end do
+       end do
+
+    end do
+
+    ! After sorting cellsOnCell_norder(icell,:), save the sort_index in
+    ! grid up/down flux order.
+    nconn          = 0
+    nNeighbors (:) = 0
+
+    do icell = 1, ugrid%ngrid_local
+       do iedge = 1, ugrid%maxEdges
+          cell_id = ugrid%gridsOnGrid_local(iedge,icell)
+          if (cell_id > icell) then
+             nconn = nconn + 1
+
+             nNeighbors(icell) = nNeighbors(icell) + 1;
+             this%grid_up_forder(nconn) = unsort_to_sort_index(icell, nNeighbors(icell))
+
+             nNeighbors(cell_id) = nNeighbors(cell_id) + 1;
+             this%grid_dn_forder(nconn) = unsort_to_sort_index(cell_id, nNeighbors(cell_id))
+
+          end if
+       end do
+    end do
+
+    deallocate(cellsOnCell_norder)
+    deallocate(sort_index)
+    deallocate(unsort_to_sort_index)
+    deallocate(nNeighbors)
 
   end subroutine col_connect_init_from_domainlateral
 
