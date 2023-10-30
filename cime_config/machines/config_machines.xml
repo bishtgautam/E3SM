@@ -242,11 +242,11 @@
         <command name="load">craype-accel-host</command>
         <command name="load">cray-libsci</command>
         <command name="load">craype</command>
-        <command name="load">cray-mpich/8.1.15</command>
-        <command name="load">cray-hdf5-parallel/1.12.1.1</command>
-        <command name="load">cray-netcdf-hdf5parallel/4.8.1.1</command>
-        <command name="load">cray-parallel-netcdf/1.12.2.1</command>
-        <command name="load">cmake/3.22.0</command>
+        <command name="load">cray-mpich/8.1.25</command>
+        <command name="load">cray-hdf5-parallel/1.12.2.3</command>
+        <command name="load">cray-netcdf-hdf5parallel/4.9.0.3</command>
+        <command name="load">cray-parallel-netcdf/1.12.3.3</command>
+        <command name="load">cmake/3.24.3</command>
       </modules>
     </module_system>
 
@@ -362,11 +362,11 @@
       <modules>
         <command name="load">cray-libsci</command>
         <command name="load">craype</command>
-        <command name="load">cray-mpich/8.1.15</command>
-        <command name="load">cray-hdf5-parallel/1.12.1.1</command>
-        <command name="load">cray-netcdf-hdf5parallel/4.8.1.1</command>
-        <command name="load">cray-parallel-netcdf/1.12.2.1</command>
-        <command name="load">cmake/3.22.0</command>
+        <command name="load">cray-mpich/8.1.25</command>
+        <command name="load">cray-hdf5-parallel/1.12.2.3</command>
+        <command name="load">cray-netcdf-hdf5parallel/4.9.0.3</command>
+        <command name="load">cray-parallel-netcdf/1.12.3.3</command>
+        <command name="load">cmake/3.24.3</command>
       </modules>
     </module_system>
 
@@ -447,7 +447,7 @@
       </modules>
       <modules compiler="gnu">
         <command name="load">PrgEnv-gnu/8.0.0</command>
-        <command name="load">cray-mpich/8.1.7</command>
+        <command name="load">cray-mpich/8.1.25</command>
         <command name="load">cray-hdf5-parallel/1.12.0.6</command>
         <command name="load">cray-netcdf-hdf5parallel/4.7.4.6</command>
         <command name="load">cray-parallel-netcdf/1.12.1.5</command>
@@ -532,7 +532,7 @@
         <command name="switch">PrgEnv-cray PrgEnv-gnu/8.2.0</command>
       </modules>
       <modules>
-        <command name="load">cray-mpich/8.1.12</command>
+        <command name="load">cray-mpich/8.1.25</command>
         <command name="load">cray-python/3.9.4.2</command>
         <command name="load">subversion/1.14.0</command>
         <command name="load">git/2.31.1</command>
