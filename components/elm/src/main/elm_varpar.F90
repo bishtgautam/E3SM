@@ -145,7 +145,7 @@ contains
     max_patch_per_col= max(numpft+1, numcft, maxpatch_urb)
     mach_eps       = epsilon(1.0_r8)
 
-    nlevsoifl   =  10
+    nlevsoifl   =  15
     nlevurb     =  5
     if ( .not. more_vertlayers )then
        nlevsoi     =  nlevsoifl
