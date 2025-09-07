@@ -521,6 +521,7 @@ contains
       type(bounds_type)                              :: bounds_clump
       integer                                        :: nmaxcol
       integer                                        :: ndecomp
+      real(r8)                                       :: wt_nat_patch_toposum
 
       ! Initialize the FATES communicators with the HLM
       ! This involves to stages
