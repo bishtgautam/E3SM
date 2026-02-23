@@ -188,6 +188,7 @@ module elm_driver
   use elm_varctl                  , only : use_finetop_rad
 
   use timeinfoMod
+  use ElmDiagnostics
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -255,6 +256,13 @@ contains
        write(iulog,*)'Beginning timestep   : ',trim(dateTimeString)
        call shr_sys_flush(iulog)
     endif
+
+    ! Initialize ELMPy diagnostics on first timestep
+    if (.not. diag_enabled .and. get_nstep() == 1) then
+       call diag_init('elm_diagnostics.bin', .true.)
+    end if
+    call diag_new_timestep()
+
     ! Determine processor bounds and clumps for this processor
 
     call get_proc_bounds(bounds_proc)
@@ -704,6 +712,39 @@ contains
 
        call t_stopf('drvinit')
 
+       ! ---- ELMPy diagnostics: ATM forcings (after downscaling) ----
+       call diag_snapshot_1d('forcing:forc_t', &
+            atm2lnd_vars%forc_t_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_th', &
+            atm2lnd_vars%forc_th_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_q', &
+            atm2lnd_vars%forc_q_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_pbot', &
+            atm2lnd_vars%forc_pbot_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_rho', &
+            atm2lnd_vars%forc_rho_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_rain', &
+            atm2lnd_vars%forc_rain_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_snow', &
+            atm2lnd_vars%forc_snow_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_lwrad', &
+            atm2lnd_vars%forc_lwrad_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('forcing:forc_wind', &
+            atm2lnd_vars%forc_wind_grc(bounds_clump%begg:bounds_clump%endg), &
+            bounds_clump%endg - bounds_clump%begg + 1)
+       call diag_snapshot_1d('forcing:forc_solar', &
+            atm2lnd_vars%forc_solar_grc(bounds_clump%begg:bounds_clump%endg), &
+            bounds_clump%endg - bounds_clump%begg + 1)
+       ! ---- end ELMPy diagnostics: ATM forcings ----
+
        ! ============================================================================
        ! Canopy Hydrology
        ! (1) water storage of intercepted precipitation
@@ -712,6 +753,18 @@ contains
        ! (4) snow layer initialization if the snow accumulation exceeds 10 mm.
        ! ============================================================================
 
+       ! ---- ELMPy diagnostics: CanopyHydrology inputs ----
+       call diag_snapshot_1d('canhydro_in:h2osno', &
+            col_ws%h2osno(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_int_1d('canhydro_in:snl', &
+            col_pp%snl(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('canhydro_in:frac_sno', &
+            col_ws%frac_sno(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       ! ---- end ELMPy diagnostics: CanopyHydrology inputs ----
+
        call t_startf('canhydro')
        call CanopyHydrology(bounds_clump, &
             filter(nc)%num_nolakec, filter(nc)%nolakec, &
@@ -719,6 +772,24 @@ contains
             atm2lnd_vars, canopystate_vars, &
             aerosol_vars )
        call t_stopf('canhydro')
+
+       ! ---- ELMPy diagnostics: CanopyHydrology outputs ----
+       call diag_snapshot_1d('canhydro_out:h2osno', &
+            col_ws%h2osno(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_int_1d('canhydro_out:snl', &
+            col_pp%snl(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('canhydro_out:frac_sno', &
+            col_ws%frac_sno(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('canhydro_out:qflx_rain_grnd', &
+            col_wf%qflx_rain_grnd(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('canhydro_out:qflx_snow_grnd', &
+            col_wf%qflx_snow_grnd(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       ! ---- end ELMPy diagnostics: CanopyHydrology outputs ----
 
        ! ============================================================================
        ! Surface Radiation
@@ -1593,6 +1664,11 @@ contains
 
     if (use_pflotran .and. nstep>=nestep) then
        call elm_pf_finalize()
+    end if
+
+    ! Finalize ELMPy diagnostics on last timestep
+    if (nlend) then
+       call diag_finalize()
     end if
 
   end subroutine elm_drv
