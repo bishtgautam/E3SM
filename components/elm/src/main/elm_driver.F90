@@ -56,7 +56,9 @@ module elm_driver
   use SurfaceAlbedoMod       , only : SurfaceAlbedo
   use UrbanAlbedoMod         , only : UrbanAlbedo
   !
-  use SurfaceRadiationMod    , only : SurfaceRadiation, CanopySunShadeFractions
+  use SurfaceRadiationMod    , only : SurfaceRadiation, CanopySunShadeFractions, &
+                                       CanopySunShadeFractions_diag_inputs, &
+                                       CanopySunShadeFractions_diag_outputs
   use UrbanRadiationMod      , only : UrbanRadiation
   !
   use SedFluxType            , only : sedflux_type
@@ -761,9 +763,17 @@ contains
        if(use_fates) then
           call alm_fates%wrap_sunfrac(bounds_clump, top_af, canopystate_vars)
        else
+          ! ---- ELMPy diagnostics: CanopySunShadeFractions inputs ----
+          call CanopySunShadeFractions_diag_inputs(bounds_clump, surfalb_vars, &
+               canopystate_vars)
+
           call CanopySunShadeFractions(filter(nc)%num_nourbanp, filter(nc)%nourbanp,    &
                                        atm2lnd_vars, surfalb_vars, canopystate_vars,    &
                                        solarabs_vars)
+
+          ! ---- ELMPy diagnostics: CanopySunShadeFractions outputs ----
+          call CanopySunShadeFractions_diag_outputs(bounds_clump, &
+               canopystate_vars, solarabs_vars)
        end if
 
        call SurfaceRadiation(bounds_clump,                                 &
