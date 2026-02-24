@@ -61,7 +61,9 @@ module elm_driver
                                        CanopySunShadeFractions_diag_outputs, &
                                        SurfaceRadiation_diag_inputs, &
                                        SurfaceRadiation_diag_outputs
-  use UrbanRadiationMod      , only : UrbanRadiation
+  use UrbanRadiationMod      , only : UrbanRadiation, &
+                                      UrbanRadiation_diag_inputs, &
+                                      UrbanRadiation_diag_outputs
   !
   use SedFluxType            , only : sedflux_type
   !clm_interface
@@ -797,6 +799,13 @@ contains
 
        ! Surface Radiation for only urban columns
 
+       ! ---- ELMPy diagnostics: UrbanRadiation inputs ----
+       call UrbanRadiation_diag_inputs(bounds_clump, &
+            filter(nc)%num_urbanl, filter(nc)%urbanl, &
+            filter(nc)%num_urbanc, filter(nc)%urbanc, &
+            filter(nc)%num_urbanp, filter(nc)%urbanp, &
+            urbanparams_vars, solarabs_vars)
+
        call UrbanRadiation(bounds_clump,                                       &
             filter(nc)%num_nourbanl, filter(nc)%nourbanl,                      &
             filter(nc)%num_urbanl, filter(nc)%urbanl,                          &
@@ -804,6 +813,10 @@ contains
             filter(nc)%num_urbanp, filter(nc)%urbanp,                          &
             atm2lnd_vars, urbanparams_vars, &
             solarabs_vars, surfalb_vars, energyflux_vars)
+
+       ! ---- ELMPy diagnostics: UrbanRadiation outputs ----
+       call UrbanRadiation_diag_outputs(bounds_clump, &
+            solarabs_vars, energyflux_vars)
 
        call t_stopf('surfrad')
 
