@@ -23,6 +23,9 @@ module HydrologyDrainageMod
   use elm_instMod   , only : ep_betr
 
   use timeinfoMod
+  use ElmDiagnostics  , only : diag_enabled, diag_snapshot_1d, &
+                                diag_snapshot_2d, diag_snapshot_int_1d, &
+                                diag_snapshot_logical_1d
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -161,6 +164,90 @@ contains
         call ep_betr%RetrieveBiogeoFlux(bounds, 1, nlevsoi, waterflux_vars=col_wf)
       endif
 #endif
+
+      ! ── HydrologyDrainage diagnostics: INPUTS (after Drainage) ──
+      if (diag_enabled) then
+         block
+            integer :: nc, nt, ng, ic
+            integer :: lun_itype_col(bounds%endc - bounds%begc + 1)
+            logical :: lun_urbpoi_col(bounds%endc - bounds%begc + 1)
+            real(r8) :: f_surf_col(bounds%endc - bounds%begc + 1)
+            real(r8) :: dtime_arr(1)
+            nc = bounds%endc - bounds%begc + 1
+            nt = bounds%endt - bounds%begt + 1
+            ng = bounds%endg - bounds%begg + 1
+
+            ! Compute column-level landunit type and urbpoi
+            do ic = 1, nc
+               c = bounds%begc + ic - 1
+               l = col_pp%landunit(c)
+               lun_itype_col(ic) = lun_pp%itype(l)
+               lun_urbpoi_col(ic) = lun_pp%urbpoi(l)
+            end do
+
+            ! Compute column-level f_surf
+            do ic = 1, nc
+               c = bounds%begc + ic - 1
+               t = col_pp%topounit(c)
+               g = col_pp%gridcell(c)
+               tpu_ind = top_pp%topo_grc_ind(t)
+               f_surf_col(ic) = f_surf(g, tpu_ind)
+            end do
+
+            dtime_arr(1) = dtime
+            call diag_snapshot_1d('hydrodrain_in:dtime', dtime_arr, 1)
+
+            ! Column metadata
+            call diag_snapshot_int_1d('hydrodrain_in:ctype', ctype(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('hydrodrain_in:col_landunit', col_pp%landunit(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('hydrodrain_in:col_topounit', col_pp%topounit(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('hydrodrain_in:col_gridcell', col_pp%gridcell(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('hydrodrain_in:lun_itype', lun_itype_col, nc)
+            call diag_snapshot_logical_1d('hydrodrain_in:lun_urbpoi', lun_urbpoi_col, nc)
+            call diag_snapshot_logical_1d('hydrodrain_in:col_is_soil', col_pp%is_soil(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_logical_1d('hydrodrain_in:col_is_crop', col_pp%is_crop(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_logical_1d('hydrodrain_in:col_active', col_pp%active(bounds%begc:bounds%endc), nc)
+
+            ! Column state
+            call diag_snapshot_1d('hydrodrain_in:h2ocan', h2ocan(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:h2osno', h2osno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:h2osfc', h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:wa', wa(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:begwb', begwb(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:total_plant_stored_h2o', total_plant_stored_h2o(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:h2osoi_liq_depth_intg', h2osoi_liq_depth_intg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:h2osoi_ice_depth_intg', h2osoi_ice_depth_intg(bounds%begc:bounds%endc), nc)
+
+            ! Water fluxes (from Drainage or prior)
+            call diag_snapshot_1d('hydrodrain_in:qflx_drain', qflx_drain(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_drain_perched', qflx_drain_perched(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_surf', qflx_surf(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_h2osfc_surf', qflx_h2osfc_surf(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_infl', qflx_infl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_rsub_sat', qflx_rsub_sat(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_lnd2ocn', qflx_lnd2ocn(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_qrgwl', qflx_qrgwl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_evap_tot', qflx_evap_tot(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_snwcp_ice', qflx_snwcp_ice(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:qflx_irrig', qflx_irrig(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_in:f_surf_col', f_surf_col, nc)
+
+            ! Atmospheric forcing (topounit)
+            call diag_snapshot_1d('hydrodrain_in:forc_rain', forc_rain(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('hydrodrain_in:forc_snow', forc_snow(bounds%begt:bounds%endt), nt)
+
+            ! Gridcell
+            call diag_snapshot_1d('hydrodrain_in:qflx_floodg', qflx_floodg(bounds%begg:bounds%endg), ng)
+
+            ! 2D soil arrays (1:nlevgrnd only)
+            call diag_snapshot_2d('hydrodrain_in:dz', dz(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('hydrodrain_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('hydrodrain_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+
+            ! Filter
+            call diag_snapshot_int_1d('hydrodrain_in:filter_nolakec', filter_nolakec(1:num_nolakec), num_nolakec)
+         end block
+      end if
 
       do j = 1, nlevgrnd
          do fc = 1, num_nolakec
@@ -347,6 +434,33 @@ contains
          end if
 
       end do
+
+      ! ── HydrologyDrainage diagnostics: OUTPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc
+            nc = bounds%endc - bounds%begc + 1
+
+            call diag_snapshot_2d('hydrodrain_out:h2osoi_vol', h2osoi_vol(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_1d('hydrodrain_out:endwb', endwb(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:h2osoi_liq_depth_intg', h2osoi_liq_depth_intg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:h2osoi_ice_depth_intg', h2osoi_ice_depth_intg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_drain', qflx_drain(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_drain_perched', qflx_drain_perched(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_surf', qflx_surf(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_h2osfc_surf', qflx_h2osfc_surf(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_infl', qflx_infl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_rsub_sat', qflx_rsub_sat(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_lnd2ocn', qflx_lnd2ocn(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_qrgwl', qflx_qrgwl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_runoff', qflx_runoff(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_runoff_u', qflx_runoff_u(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_runoff_r', qflx_runoff_r(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_snwcp_ice', qflx_snwcp_ice(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_glcice_frz', qflx_glcice_frz(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('hydrodrain_out:qflx_irr_demand', qflx_irr_demand(bounds%begc:bounds%endc), nc)
+         end block
+      end if
 
     end associate
 
