@@ -34,6 +34,8 @@ module SurfaceRadiationMod
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: SurfaceRadiation         ! Solar fluxes absorbed by veg and ground surface
   public :: CanopySunShadeFractions  ! Sun/Shade fractions and some area index computations
+  public :: CanopySunShadeFractions_diag_inputs   ! ELMPy diagnostics
+  public :: CanopySunShadeFractions_diag_outputs  ! ELMPy diagnostics
   !
   ! !PRIVATE DATA:
   type, public :: surfrad_type
@@ -962,5 +964,109 @@ contains
       return
 
    end subroutine CanopySunShadeFractions
+
+   !-----------------------------------------------------------------------
+   subroutine CanopySunShadeFractions_diag_inputs(bounds, surfalb_vars, canopystate_vars)
+      !
+      ! !DESCRIPTION:
+      ! Write ELMPy diagnostic snapshots of CanopySunShadeFractions input variables.
+      ! Since nlevcan=1, 2D arrays (p, nlevcan) are written as 1D using layer 1.
+      !
+      ! !USES:
+      use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_int_1d, diag_enabled
+      !
+      ! !ARGUMENTS:
+      type(bounds_type),      intent(in) :: bounds
+      type(surfalb_type),     intent(in) :: surfalb_vars
+      type(canopystate_type), intent(in) :: canopystate_vars
+      !
+      ! !LOCAL VARIABLES:
+      integer :: np, nt, p, t
+      real(r8), allocatable :: forc_solad_patch(:), forc_solai_patch(:)
+      integer, parameter :: ipar = 1
+      !-----------------------------------------------------------------------
+
+      if (.not. diag_enabled) return
+
+      np = bounds%endp - bounds%begp + 1
+      nt = bounds%endt - bounds%begt + 1
+
+      ! Patch-level inputs from surfalb_vars (layer 1 only, since nlevcan=1)
+      call diag_snapshot_1d('sunshade_in:tlai_z', &
+           surfalb_vars%tlai_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_in:fsun_z', &
+           surfalb_vars%fsun_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_in:fabd_sun_z', &
+           surfalb_vars%fabd_sun_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_in:fabd_sha_z', &
+           surfalb_vars%fabd_sha_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_in:fabi_sun_z', &
+           surfalb_vars%fabi_sun_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_in:fabi_sha_z', &
+           surfalb_vars%fabi_sha_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_int_1d('sunshade_in:nrad', &
+           surfalb_vars%nrad_patch(bounds%begp:bounds%endp), np)
+
+      ! Patch-level input from canopystate_vars
+      call diag_snapshot_1d('sunshade_in:elai', &
+           canopystate_vars%elai_patch(bounds%begp:bounds%endp), np)
+
+      ! Topounit-level radiation forcings, gathered per-patch
+      ! forc_solad(t, ipar) and forc_solai(t, ipar) for each patch's topounit
+      allocate(forc_solad_patch(np), forc_solai_patch(np))
+      do p = bounds%begp, bounds%endp
+         t = veg_pp%topounit(p)
+         forc_solad_patch(p - bounds%begp + 1) = top_af%solad(t, ipar)
+         forc_solai_patch(p - bounds%begp + 1) = top_af%solai(t, ipar)
+      end do
+      call diag_snapshot_1d('sunshade_in:forc_solad', forc_solad_patch, np)
+      call diag_snapshot_1d('sunshade_in:forc_solai', forc_solai_patch, np)
+      deallocate(forc_solad_patch, forc_solai_patch)
+
+   end subroutine CanopySunShadeFractions_diag_inputs
+
+   !-----------------------------------------------------------------------
+   subroutine CanopySunShadeFractions_diag_outputs(bounds, &
+        canopystate_vars, solarabs_vars)
+      !
+      ! !DESCRIPTION:
+      ! Write ELMPy diagnostic snapshots of CanopySunShadeFractions output variables.
+      ! Since nlevcan=1, 2D arrays (p, nlevcan) are written as 1D using layer 1.
+      !
+      ! !USES:
+      use ElmDiagnostics, only : diag_snapshot_1d, diag_enabled
+      !
+      ! !ARGUMENTS:
+      type(bounds_type),      intent(in) :: bounds
+      type(canopystate_type), intent(in) :: canopystate_vars
+      type(solarabs_type),    intent(in) :: solarabs_vars
+      !
+      ! !LOCAL VARIABLES:
+      integer :: np
+      !-----------------------------------------------------------------------
+
+      if (.not. diag_enabled) return
+
+      np = bounds%endp - bounds%begp + 1
+
+      ! Patch-level outputs (per-layer arrays: layer 1 only)
+      call diag_snapshot_1d('sunshade_out:parsun_z', &
+           solarabs_vars%parsun_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_out:parsha_z', &
+           solarabs_vars%parsha_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_out:laisun_z', &
+           canopystate_vars%laisun_z_patch(bounds%begp:bounds%endp, 1), np)
+      call diag_snapshot_1d('sunshade_out:laisha_z', &
+           canopystate_vars%laisha_z_patch(bounds%begp:bounds%endp, 1), np)
+
+      ! Patch-level scalar outputs
+      call diag_snapshot_1d('sunshade_out:laisun', &
+           canopystate_vars%laisun_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('sunshade_out:laisha', &
+           canopystate_vars%laisha_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('sunshade_out:fsun', &
+           canopystate_vars%fsun_patch(bounds%begp:bounds%endp), np)
+
+   end subroutine CanopySunShadeFractions_diag_outputs
 
 end module SurfaceRadiationMod
