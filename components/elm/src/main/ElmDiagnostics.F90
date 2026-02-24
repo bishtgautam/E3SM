@@ -41,6 +41,7 @@ module ElmDiagnostics
   public :: diag_snapshot_1d
   public :: diag_snapshot_2d
   public :: diag_snapshot_int_1d
+  public :: diag_snapshot_logical_1d
 
 contains
 
@@ -213,5 +214,44 @@ contains
     write(diag_unit) array(1:n)
 
   end subroutine diag_snapshot_int_1d
+
+  !-----------------------------------------------------------------------
+  subroutine diag_snapshot_logical_1d(label, array, n)
+    !
+    ! !DESCRIPTION:
+    ! Write a 1D logical array snapshot as integers (0=false, 1=true).
+    !
+    ! !ARGUMENTS:
+    character(len=*), intent(in) :: label
+    logical,          intent(in) :: array(:)
+    integer,          intent(in) :: n      ! number of elements to write
+    !
+    ! !LOCAL VARIABLES:
+    character(len=LABEL_LEN) :: padded_label
+    integer :: ndims_tag
+    integer :: int_array(n)
+    integer :: i
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    padded_label = label
+    ndims_tag = -1   ! negative ndims signals integer data
+
+    do i = 1, n
+       if (array(i)) then
+          int_array(i) = 1
+       else
+          int_array(i) = 0
+       end if
+    end do
+
+    write(diag_unit) diag_timestep
+    write(diag_unit) padded_label
+    write(diag_unit) ndims_tag
+    write(diag_unit) n
+    write(diag_unit) int_array(1:n)
+
+  end subroutine diag_snapshot_logical_1d
 
 end module ElmDiagnostics

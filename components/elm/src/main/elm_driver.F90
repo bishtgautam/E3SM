@@ -249,6 +249,7 @@ contains
     character(len=256)   :: dateTimeString
     type(bounds_type)    :: bounds_clump
     type(bounds_type)    :: bounds_proc
+    integer, allocatable :: diag_lunit_itype(:)    ! landunit type per column (for diagnostics)
     !-----------------------------------------------------------------------
 
     call get_curr_time_string(dateTimeString)
@@ -711,6 +712,37 @@ contains
             atm2lnd_vars)
 
        call t_stopf('drvinit')
+
+       ! ---- ELMPy diagnostics: column metadata ----
+       call diag_snapshot_int_1d('colmeta:itype', &
+            col_pp%itype(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_logical_1d('colmeta:active', &
+            col_pp%active(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_int_1d('colmeta:gridcell', &
+            col_pp%gridcell(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_int_1d('colmeta:landunit', &
+            col_pp%landunit(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       ! Build per-column landunit type array for diagnostics
+       allocate(diag_lunit_itype(bounds_clump%endc - bounds_clump%begc + 1))
+       do c = bounds_clump%begc, bounds_clump%endc
+          l = col_pp%landunit(c)
+          diag_lunit_itype(c - bounds_clump%begc + 1) = lun_pp%itype(l)
+       end do
+       call diag_snapshot_int_1d('colmeta:lunit_itype', &
+            diag_lunit_itype, &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       deallocate(diag_lunit_itype)
+       call diag_snapshot_1d('colmeta:wtgcell', &
+            col_pp%wtgcell(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       call diag_snapshot_1d('colmeta:wtlunit', &
+            col_pp%wtlunit(bounds_clump%begc:bounds_clump%endc), &
+            bounds_clump%endc - bounds_clump%begc + 1)
+       ! ---- end ELMPy diagnostics: column metadata ----
 
        ! ---- ELMPy diagnostics: ATM forcings (after downscaling) ----
        call diag_snapshot_1d('forcing:forc_t', &
