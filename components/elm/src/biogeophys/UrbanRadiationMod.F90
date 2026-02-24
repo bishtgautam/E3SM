@@ -716,6 +716,7 @@ contains
      use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
                                  diag_snapshot_int_1d, diag_enabled
      use elm_varpar, only : numrad
+     use elm_varctl, only : use_finetop_rad
      use column_varcon, only : icol_roof, icol_sunwall, icol_shadewall, &
                                icol_road_imperv, icol_road_perv
      !
@@ -821,13 +822,24 @@ contains
      ! --- Forcings per urban patch ---
      allocate(forc_solad_patch(np, numrad), forc_solai_patch(np, numrad))
      allocate(forc_lwrad_patch(np))
+     ! NOTE: UrbanRadiation overwrites *_pp with non-PP values when
+     ! use_finetop_rad=.false.  Capture the values the subroutine will
+     ! actually use.
      do p = bounds%begp, bounds%endp
         t = veg_pp%topounit(p)
-        forc_solad_patch(p - bounds%begp + 1, 1) = top_af%solad_pp(t, 1)
-        forc_solad_patch(p - bounds%begp + 1, 2) = top_af%solad_pp(t, 2)
-        forc_solai_patch(p - bounds%begp + 1, 1) = top_af%solai_pp(t, 1)
-        forc_solai_patch(p - bounds%begp + 1, 2) = top_af%solai_pp(t, 2)
-        forc_lwrad_patch(p - bounds%begp + 1) = top_af%lwrad_pp(t)
+        if (use_finetop_rad) then
+           forc_solad_patch(p - bounds%begp + 1, 1) = top_af%solad_pp(t, 1)
+           forc_solad_patch(p - bounds%begp + 1, 2) = top_af%solad_pp(t, 2)
+           forc_solai_patch(p - bounds%begp + 1, 1) = top_af%solai_pp(t, 1)
+           forc_solai_patch(p - bounds%begp + 1, 2) = top_af%solai_pp(t, 2)
+           forc_lwrad_patch(p - bounds%begp + 1) = top_af%lwrad_pp(t)
+        else
+           forc_solad_patch(p - bounds%begp + 1, 1) = top_af%solad(t, 1)
+           forc_solad_patch(p - bounds%begp + 1, 2) = top_af%solad(t, 2)
+           forc_solai_patch(p - bounds%begp + 1, 1) = top_af%solai(t, 1)
+           forc_solai_patch(p - bounds%begp + 1, 2) = top_af%solai(t, 2)
+           forc_lwrad_patch(p - bounds%begp + 1) = top_af%lwrad(t)
+        end if
      end do
      call diag_snapshot_2d('urbanrad_in:forc_solad', forc_solad_patch, np, numrad)
      call diag_snapshot_2d('urbanrad_in:forc_solai', forc_solai_patch, np, numrad)
