@@ -34,6 +34,8 @@ module UrbanRadiationMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: UrbanRadiation    ! Urban physics - radiative fluxes
+  public :: UrbanRadiation_diag_inputs   ! ELMPy diagnostics
+  public :: UrbanRadiation_diag_outputs  ! ELMPy diagnostics
   !
   ! PRIVATE MEMBER FUNCTIONS
   private :: net_longwave     ! Net longwave radiation for road and both walls in urban canyon
@@ -700,5 +702,187 @@ contains
     end associate
 
   end subroutine net_longwave
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanRadiation_diag_inputs(bounds, &
+       num_urbanl, filter_urbanl, num_urbanc, filter_urbanc, &
+       num_urbanp, filter_urbanp, &
+       urbanparams_vars, solarabs_vars)
+     !
+     ! !DESCRIPTION:
+     ! Write ELMPy diagnostic snapshots of UrbanRadiation input variables.
+     !
+     ! !USES:
+     use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                 diag_snapshot_int_1d, diag_enabled
+     use elm_varpar, only : numrad
+     use column_varcon, only : icol_roof, icol_sunwall, icol_shadewall, &
+                               icol_road_imperv, icol_road_perv
+     !
+     ! !ARGUMENTS:
+     type(bounds_type),      intent(in) :: bounds
+     integer,                intent(in) :: num_urbanl
+     integer,                intent(in) :: filter_urbanl(:)
+     integer,                intent(in) :: num_urbanc
+     integer,                intent(in) :: filter_urbanc(:)
+     integer,                intent(in) :: num_urbanp
+     integer,                intent(in) :: filter_urbanp(:)
+     type(urbanparams_type), intent(in) :: urbanparams_vars
+     type(solarabs_type),    intent(in) :: solarabs_vars
+     !
+     ! !LOCAL VARIABLES:
+     integer :: nl, nc, np, fl, l, c, p, t
+     real(r8), allocatable :: forc_solad_patch(:,:), forc_solai_patch(:,:)
+     real(r8), allocatable :: forc_lwrad_patch(:)
+     !-----------------------------------------------------------------------
+
+     if (.not. diag_enabled) return
+
+     nl = bounds%endl - bounds%begl + 1
+     nc = bounds%endc - bounds%begc + 1
+     np = bounds%endp - bounds%begp + 1
+
+     ! --- Filter arrays ---
+     call diag_snapshot_int_1d('urbanrad_in:filter_urbanl', &
+          filter_urbanl(1:num_urbanl), num_urbanl)
+     call diag_snapshot_int_1d('urbanrad_in:filter_urbanc', &
+          filter_urbanc(1:num_urbanc), num_urbanc)
+     call diag_snapshot_int_1d('urbanrad_in:filter_urbanp', &
+          filter_urbanp(1:num_urbanp), num_urbanp)
+
+     ! --- Landunit-level canyon geometry and emissivity ---
+     call diag_snapshot_1d('urbanrad_in:canyon_hwr', &
+          lun_pp%canyon_hwr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:wtroad_perv', &
+          lun_pp%wtroad_perv(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:em_roof', &
+          urbanparams_vars%em_roof(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:em_improad', &
+          urbanparams_vars%em_improad(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:em_perroad', &
+          urbanparams_vars%em_perroad(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:em_wall', &
+          urbanparams_vars%em_wall(bounds%begl:bounds%endl), nl)
+
+     ! --- Landunit-level view factors ---
+     call diag_snapshot_1d('urbanrad_in:vf_sr', &
+          urbanparams_vars%vf_sr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:vf_wr', &
+          urbanparams_vars%vf_wr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:vf_sw', &
+          urbanparams_vars%vf_sw(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:vf_rw', &
+          urbanparams_vars%vf_rw(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanrad_in:vf_ww', &
+          urbanparams_vars%vf_ww(bounds%begl:bounds%endl), nl)
+
+     ! --- Landunit-level solar absorption factors (lun, numrad) ---
+     call diag_snapshot_2d('urbanrad_in:sabs_roof_dir', &
+          solarabs_vars%sabs_roof_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_roof_dif', &
+          solarabs_vars%sabs_roof_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_sunwall_dir', &
+          solarabs_vars%sabs_sunwall_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_sunwall_dif', &
+          solarabs_vars%sabs_sunwall_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_shadewall_dir', &
+          solarabs_vars%sabs_shadewall_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_shadewall_dif', &
+          solarabs_vars%sabs_shadewall_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_improad_dir', &
+          solarabs_vars%sabs_improad_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_improad_dif', &
+          solarabs_vars%sabs_improad_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_perroad_dir', &
+          solarabs_vars%sabs_perroad_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanrad_in:sabs_perroad_dif', &
+          solarabs_vars%sabs_perroad_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+
+     ! --- Column-level inputs ---
+     call diag_snapshot_int_1d('urbanrad_in:ctype', &
+          col_pp%itype(bounds%begc:bounds%endc), nc)
+     call diag_snapshot_1d('urbanrad_in:t_grnd', &
+          col_es%t_grnd(bounds%begc:bounds%endc), nc)
+     call diag_snapshot_1d('urbanrad_in:frac_sno', &
+          col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+
+     ! --- Column-to-landunit mapping ---
+     call diag_snapshot_int_1d('urbanrad_in:col_landunit', &
+          col_pp%landunit(bounds%begc:bounds%endc), nc)
+
+     ! --- Landunit column range ---
+     call diag_snapshot_int_1d('urbanrad_in:lun_coli', &
+          lun_pp%coli(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_int_1d('urbanrad_in:lun_colf', &
+          lun_pp%colf(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_int_1d('urbanrad_in:lun_topounit', &
+          lun_pp%topounit(bounds%begl:bounds%endl), nl)
+
+     ! --- Forcings per urban patch ---
+     allocate(forc_solad_patch(np, numrad), forc_solai_patch(np, numrad))
+     allocate(forc_lwrad_patch(np))
+     do p = bounds%begp, bounds%endp
+        t = veg_pp%topounit(p)
+        forc_solad_patch(p - bounds%begp + 1, 1) = top_af%solad_pp(t, 1)
+        forc_solad_patch(p - bounds%begp + 1, 2) = top_af%solad_pp(t, 2)
+        forc_solai_patch(p - bounds%begp + 1, 1) = top_af%solai_pp(t, 1)
+        forc_solai_patch(p - bounds%begp + 1, 2) = top_af%solai_pp(t, 2)
+        forc_lwrad_patch(p - bounds%begp + 1) = top_af%lwrad_pp(t)
+     end do
+     call diag_snapshot_2d('urbanrad_in:forc_solad', forc_solad_patch, np, numrad)
+     call diag_snapshot_2d('urbanrad_in:forc_solai', forc_solai_patch, np, numrad)
+     call diag_snapshot_1d('urbanrad_in:forc_lwrad', forc_lwrad_patch, np)
+     deallocate(forc_solad_patch, forc_solai_patch, forc_lwrad_patch)
+
+     ! --- Patch mapping ---
+     call diag_snapshot_int_1d('urbanrad_in:patch_column', &
+          veg_pp%column(bounds%begp:bounds%endp), np)
+     call diag_snapshot_int_1d('urbanrad_in:patch_landunit', &
+          veg_pp%landunit(bounds%begp:bounds%endp), np)
+
+  end subroutine UrbanRadiation_diag_inputs
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanRadiation_diag_outputs(bounds, &
+       solarabs_vars, energyflux_vars)
+     !
+     ! !DESCRIPTION:
+     ! Write ELMPy diagnostic snapshots of UrbanRadiation output variables.
+     !
+     ! !USES:
+     use ElmDiagnostics, only : diag_snapshot_1d, diag_enabled
+     !
+     ! !ARGUMENTS:
+     type(bounds_type),     intent(in) :: bounds
+     type(solarabs_type),   intent(in) :: solarabs_vars
+     type(energyflux_type), intent(in) :: energyflux_vars
+     !
+     ! !LOCAL VARIABLES:
+     integer :: np
+     !-----------------------------------------------------------------------
+
+     if (.not. diag_enabled) return
+
+     np = bounds%endp - bounds%begp + 1
+
+     ! --- Patch-level solar absorption outputs ---
+     call diag_snapshot_1d('urbanrad_out:sabg', &
+          solarabs_vars%sabg_patch(bounds%begp:bounds%endp), np)
+     call diag_snapshot_1d('urbanrad_out:sabv', &
+          solarabs_vars%sabv_patch(bounds%begp:bounds%endp), np)
+     call diag_snapshot_1d('urbanrad_out:fsa', &
+          solarabs_vars%fsa_patch(bounds%begp:bounds%endp), np)
+     call diag_snapshot_1d('urbanrad_out:fsa_u', &
+          solarabs_vars%fsa_u_patch(bounds%begp:bounds%endp), np)
+
+     ! --- Patch-level longwave outputs ---
+     call diag_snapshot_1d('urbanrad_out:eflx_lwrad_out', &
+          veg_ef%eflx_lwrad_out(bounds%begp:bounds%endp), np)
+     call diag_snapshot_1d('urbanrad_out:eflx_lwrad_net', &
+          veg_ef%eflx_lwrad_net(bounds%begp:bounds%endp), np)
+     call diag_snapshot_1d('urbanrad_out:eflx_lwrad_net_u', &
+          veg_ef%eflx_lwrad_net_u(bounds%begp:bounds%endp), np)
+
+  end subroutine UrbanRadiation_diag_outputs
 
 end module UrbanRadiationMod
