@@ -927,6 +927,7 @@ contains
     ! !USES:
     use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_int_1d, diag_enabled
     use CanopyStateType, only : canopystate_type
+    use TopounitDataType, only : top_af, top_as
     !
     ! !ARGUMENTS:
     type(bounds_type)      , intent(in) :: bounds
@@ -937,7 +938,11 @@ contains
     type(canopystate_type) , intent(in) :: canopystate_vars
     !
     ! !LOCAL VARIABLES:
-    integer :: nc, np
+    integer  :: nc, np, c, t
+    real(r8) :: forc_rain_col(bounds%begc:bounds%endc)
+    real(r8) :: forc_snow_col(bounds%begc:bounds%endc)
+    real(r8) :: forc_t_col(bounds%begc:bounds%endc)
+    integer  :: do_capsnow_int(bounds%begc:bounds%endc)
     !-----------------------------------------------------------------------
 
     if (.not. diag_enabled) return
@@ -962,6 +967,35 @@ contains
          col_es%t_grnd(bounds%begc:bounds%endc), nc)
     call diag_snapshot_1d('canhydro_in:micro_sigma', &
          col_pp%micro_sigma(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:n_melt', &
+         col_pp%n_melt(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:qflx_snow_melt', &
+         col_wf%qflx_snow_melt(bounds%begc:bounds%endc), nc)
+
+    ! do_capsnow is logical; convert to int for diagnostics
+    do c = bounds%begc, bounds%endc
+       if (col_ws%do_capsnow(c)) then
+          do_capsnow_int(c) = 1
+       else
+          do_capsnow_int(c) = 0
+       end if
+    end do
+    call diag_snapshot_int_1d('canhydro_in:do_capsnow', &
+         do_capsnow_int(bounds%begc:bounds%endc), nc)
+
+    ! Topounit-level forcings mapped to columns
+    do c = bounds%begc, bounds%endc
+       t = col_pp%topounit(c)
+       forc_rain_col(c) = top_af%rain(t)
+       forc_snow_col(c) = top_af%snow(t)
+       forc_t_col(c)    = top_as%tbot(t)
+    end do
+    call diag_snapshot_1d('canhydro_in:forc_rain_topo', &
+         forc_rain_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:forc_snow_topo', &
+         forc_snow_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:forc_t_topo', &
+         forc_t_col(bounds%begc:bounds%endc), nc)
 
     ! Patch-level inputs
     call diag_snapshot_1d('canhydro_in:elai', &
@@ -974,6 +1008,8 @@ contains
          canopystate_vars%dewmx_patch(bounds%begp:bounds%endp), np)
     call diag_snapshot_1d('canhydro_in:h2ocan', &
          veg_ws%h2ocan(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_in:wtcol', &
+         veg_pp%wtcol(bounds%begp:bounds%endp), np)
 
     ! Patch-to-column mapping
     call diag_snapshot_int_1d('canhydro_in:patch_column', &
