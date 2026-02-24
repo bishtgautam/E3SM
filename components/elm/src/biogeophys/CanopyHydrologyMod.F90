@@ -36,8 +36,10 @@ module CanopyHydrologyMod
   save
   !
   ! !PUBLIC MEMBER FUNCTIONS:
-  public :: CanopyHydrology_readnl ! Read namelist
-  public :: CanopyHydrology        ! Run
+  public :: CanopyHydrology_readnl       ! Read namelist
+  public :: CanopyHydrology              ! Run
+  public :: CanopyHydrology_diag_inputs  ! ELMPy diagnostics: snapshot inputs
+  public :: CanopyHydrology_diag_outputs ! ELMPy diagnostics: snapshot outputs
   !
   ! !PRIVATE MEMBER FUNCTIONS:
   private :: FracWet    ! Determine fraction of vegetated surface that is wet
@@ -913,5 +915,139 @@ contains
      end associate
 
    end subroutine FracH2OSfc
+
+  !-----------------------------------------------------------------------
+  subroutine CanopyHydrology_diag_inputs(bounds, &
+       num_nolakec, filter_nolakec, num_nolakep, filter_nolakep, &
+       canopystate_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of CanopyHydrology input variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_int_1d, diag_enabled
+    use CanopyStateType, only : canopystate_type
+    !
+    ! !ARGUMENTS:
+    type(bounds_type)      , intent(in) :: bounds
+    integer                , intent(in) :: num_nolakec
+    integer                , intent(in) :: filter_nolakec(:)
+    integer                , intent(in) :: num_nolakep
+    integer                , intent(in) :: filter_nolakep(:)
+    type(canopystate_type) , intent(in) :: canopystate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc = bounds%endc - bounds%begc + 1
+    np = bounds%endp - bounds%begp + 1
+
+    ! Column-level inputs
+    call diag_snapshot_1d('canhydro_in:h2osno', &
+         col_ws%h2osno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('canhydro_in:snl', &
+         col_pp%snl(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:frac_sno', &
+         col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:snow_depth', &
+         col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:int_snow', &
+         col_ws%int_snow(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:h2osfc', &
+         col_ws%h2osfc(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:t_grnd', &
+         col_es%t_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_in:micro_sigma', &
+         col_pp%micro_sigma(bounds%begc:bounds%endc), nc)
+
+    ! Patch-level inputs
+    call diag_snapshot_1d('canhydro_in:elai', &
+         canopystate_vars%elai_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_in:esai', &
+         canopystate_vars%esai_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('canhydro_in:frac_veg_nosno', &
+         canopystate_vars%frac_veg_nosno_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_in:dewmx', &
+         canopystate_vars%dewmx_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_in:h2ocan', &
+         veg_ws%h2ocan(bounds%begp:bounds%endp), np)
+
+    ! Patch-to-column mapping
+    call diag_snapshot_int_1d('canhydro_in:patch_column', &
+         veg_pp%column(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('canhydro_in:patch_itype', &
+         veg_pp%itype(bounds%begp:bounds%endp), np)
+
+    ! Filter arrays
+    call diag_snapshot_int_1d('canhydro_in:nolakec', &
+         filter_nolakec(1:num_nolakec), num_nolakec)
+    call diag_snapshot_int_1d('canhydro_in:nolakep', &
+         filter_nolakep(1:num_nolakep), num_nolakep)
+
+  end subroutine CanopyHydrology_diag_inputs
+
+  !-----------------------------------------------------------------------
+  subroutine CanopyHydrology_diag_outputs(bounds)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of CanopyHydrology output variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_int_1d, diag_enabled
+    !
+    ! !ARGUMENTS:
+    type(bounds_type), intent(in) :: bounds
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc = bounds%endc - bounds%begc + 1
+    np = bounds%endp - bounds%begp + 1
+
+    ! Column-level outputs
+    call diag_snapshot_1d('canhydro_out:h2osno', &
+         col_ws%h2osno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('canhydro_out:snl', &
+         col_pp%snl(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:frac_sno', &
+         col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:frac_sno_eff', &
+         col_ws%frac_sno_eff(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:snow_depth', &
+         col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:int_snow', &
+         col_ws%int_snow(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:h2osfc', &
+         col_ws%h2osfc(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:frac_h2osfc', &
+         col_ws%frac_h2osfc(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:qflx_rain_grnd', &
+         col_wf%qflx_rain_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('canhydro_out:qflx_snow_grnd', &
+         col_wf%qflx_snow_grnd(bounds%begc:bounds%endc), nc)
+
+    ! Patch-level outputs
+    call diag_snapshot_1d('canhydro_out:h2ocan', &
+         veg_ws%h2ocan(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:qflx_prec_intr', &
+         veg_wf%qflx_prec_intr(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:qflx_prec_grnd', &
+         veg_wf%qflx_prec_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:qflx_rain_grnd_patch', &
+         veg_wf%qflx_rain_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:qflx_snow_grnd_patch', &
+         veg_wf%qflx_snow_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:fwet', &
+         veg_ws%fwet(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('canhydro_out:fdry', &
+         veg_ws%fdry(bounds%begp:bounds%endp), np)
+
+  end subroutine CanopyHydrology_diag_outputs
 
 end module CanopyHydrologyMod

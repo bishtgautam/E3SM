@@ -47,7 +47,8 @@ module elm_driver
   !
   use HydrologyNoDrainageMod , only : HydrologyNoDrainage ! (formerly Hydrology2Mod)
   use HydrologyDrainageMod   , only : HydrologyDrainage   ! (formerly Hydrology2Mod)
-  use CanopyHydrologyMod     , only : CanopyHydrology     ! (formerly Hydrology1Mod)
+  use CanopyHydrologyMod     , only : CanopyHydrology, &     ! (formerly Hydrology1Mod)
+                                       CanopyHydrology_diag_inputs, CanopyHydrology_diag_outputs
   use LakeHydrologyMod       , only : LakeHydrology
   !
   use AerosolMod             , only : AerosolMasses
@@ -188,7 +189,9 @@ module elm_driver
   use elm_varctl                  , only : use_finetop_rad
 
   use timeinfoMod
-  use ElmDiagnostics
+  use ElmDiagnostics, only : diag_init, diag_finalize, diag_new_timestep, &
+                              diag_snapshot_colmeta, diag_snapshot_forcings, &
+                              diag_enabled
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -249,7 +252,6 @@ contains
     character(len=256)   :: dateTimeString
     type(bounds_type)    :: bounds_clump
     type(bounds_type)    :: bounds_proc
-    integer, allocatable :: diag_lunit_itype(:)    ! landunit type per column (for diagnostics)
     !-----------------------------------------------------------------------
 
     call get_curr_time_string(dateTimeString)
@@ -713,69 +715,9 @@ contains
 
        call t_stopf('drvinit')
 
-       ! ---- ELMPy diagnostics: column metadata ----
-       call diag_snapshot_int_1d('colmeta:itype', &
-            col_pp%itype(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_logical_1d('colmeta:active', &
-            col_pp%active(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_int_1d('colmeta:gridcell', &
-            col_pp%gridcell(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_int_1d('colmeta:landunit', &
-            col_pp%landunit(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       ! Build per-column landunit type array for diagnostics
-       allocate(diag_lunit_itype(bounds_clump%endc - bounds_clump%begc + 1))
-       do c = bounds_clump%begc, bounds_clump%endc
-          l = col_pp%landunit(c)
-          diag_lunit_itype(c - bounds_clump%begc + 1) = lun_pp%itype(l)
-       end do
-       call diag_snapshot_int_1d('colmeta:lunit_itype', &
-            diag_lunit_itype, &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       deallocate(diag_lunit_itype)
-       call diag_snapshot_1d('colmeta:wtgcell', &
-            col_pp%wtgcell(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('colmeta:wtlunit', &
-            col_pp%wtlunit(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       ! ---- end ELMPy diagnostics: column metadata ----
-
-       ! ---- ELMPy diagnostics: ATM forcings (after downscaling) ----
-       call diag_snapshot_1d('forcing:forc_t', &
-            atm2lnd_vars%forc_t_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_th', &
-            atm2lnd_vars%forc_th_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_q', &
-            atm2lnd_vars%forc_q_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_pbot', &
-            atm2lnd_vars%forc_pbot_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_rho', &
-            atm2lnd_vars%forc_rho_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_rain', &
-            atm2lnd_vars%forc_rain_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_snow', &
-            atm2lnd_vars%forc_snow_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_lwrad', &
-            atm2lnd_vars%forc_lwrad_downscaled_col(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('forcing:forc_wind', &
-            atm2lnd_vars%forc_wind_grc(bounds_clump%begg:bounds_clump%endg), &
-            bounds_clump%endg - bounds_clump%begg + 1)
-       call diag_snapshot_1d('forcing:forc_solar', &
-            atm2lnd_vars%forc_solar_grc(bounds_clump%begg:bounds_clump%endg), &
-            bounds_clump%endg - bounds_clump%begg + 1)
-       ! ---- end ELMPy diagnostics: ATM forcings ----
+       ! ---- ELMPy diagnostics: column metadata & ATM forcings ----
+       call diag_snapshot_colmeta(bounds_clump)
+       call diag_snapshot_forcings(bounds_clump, atm2lnd_vars)
 
        ! ============================================================================
        ! Canopy Hydrology
@@ -786,62 +728,10 @@ contains
        ! ============================================================================
 
        ! ---- ELMPy diagnostics: CanopyHydrology inputs ----
-       ! Column-level inputs
-       call diag_snapshot_1d('canhydro_in:h2osno', &
-            col_ws%h2osno(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_int_1d('canhydro_in:snl', &
-            col_pp%snl(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:frac_sno', &
-            col_ws%frac_sno(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:snow_depth', &
-            col_ws%snow_depth(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:int_snow', &
-            col_ws%int_snow(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:h2osfc', &
-            col_ws%h2osfc(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:t_grnd', &
-            col_es%t_grnd(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_in:micro_sigma', &
-            col_pp%micro_sigma(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       ! Patch-level inputs
-       call diag_snapshot_1d('canhydro_in:elai', &
-            canopystate_vars%elai_patch(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_in:esai', &
-            canopystate_vars%esai_patch(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_int_1d('canhydro_in:frac_veg_nosno', &
-            canopystate_vars%frac_veg_nosno_patch(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_in:dewmx', &
-            canopystate_vars%dewmx_patch(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_in:h2ocan', &
-            veg_ws%h2ocan(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       ! Patch-to-column mapping
-       call diag_snapshot_int_1d('canhydro_in:patch_column', &
-            veg_pp%column(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_int_1d('canhydro_in:patch_itype', &
-            veg_pp%itype(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       ! Filter arrays
-       call diag_snapshot_int_1d('canhydro_in:nolakec', &
-            filter(nc)%nolakec(1:filter(nc)%num_nolakec), &
-            filter(nc)%num_nolakec)
-       call diag_snapshot_int_1d('canhydro_in:nolakep', &
-            filter(nc)%nolakep(1:filter(nc)%num_nolakep), &
-            filter(nc)%num_nolakep)
-       ! ---- end ELMPy diagnostics: CanopyHydrology inputs ----
+       call CanopyHydrology_diag_inputs(bounds_clump, &
+            filter(nc)%num_nolakec, filter(nc)%nolakec, &
+            filter(nc)%num_nolakep, filter(nc)%nolakep, &
+            canopystate_vars)
 
        call t_startf('canhydro')
        call CanopyHydrology(bounds_clump, &
@@ -852,60 +742,7 @@ contains
        call t_stopf('canhydro')
 
        ! ---- ELMPy diagnostics: CanopyHydrology outputs ----
-       ! Column-level outputs
-       call diag_snapshot_1d('canhydro_out:h2osno', &
-            col_ws%h2osno(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_int_1d('canhydro_out:snl', &
-            col_pp%snl(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:frac_sno', &
-            col_ws%frac_sno(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:frac_sno_eff', &
-            col_ws%frac_sno_eff(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:snow_depth', &
-            col_ws%snow_depth(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:int_snow', &
-            col_ws%int_snow(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:h2osfc', &
-            col_ws%h2osfc(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:frac_h2osfc', &
-            col_ws%frac_h2osfc(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_rain_grnd', &
-            col_wf%qflx_rain_grnd(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_snow_grnd', &
-            col_wf%qflx_snow_grnd(bounds_clump%begc:bounds_clump%endc), &
-            bounds_clump%endc - bounds_clump%begc + 1)
-       ! Patch-level outputs
-       call diag_snapshot_1d('canhydro_out:h2ocan', &
-            veg_ws%h2ocan(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_prec_intr', &
-            veg_wf%qflx_prec_intr(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_prec_grnd', &
-            veg_wf%qflx_prec_grnd(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_rain_grnd_patch', &
-            veg_wf%qflx_rain_grnd(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:qflx_snow_grnd_patch', &
-            veg_wf%qflx_snow_grnd(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:fwet', &
-            veg_ws%fwet(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       call diag_snapshot_1d('canhydro_out:fdry', &
-            veg_ws%fdry(bounds_clump%begp:bounds_clump%endp), &
-            bounds_clump%endp - bounds_clump%begp + 1)
-       ! ---- end ELMPy diagnostics: CanopyHydrology outputs ----
+       call CanopyHydrology_diag_outputs(bounds_clump)
 
        ! ============================================================================
        ! Surface Radiation

@@ -42,6 +42,8 @@ module ElmDiagnostics
   public :: diag_snapshot_2d
   public :: diag_snapshot_int_1d
   public :: diag_snapshot_logical_1d
+  public :: diag_snapshot_colmeta
+  public :: diag_snapshot_forcings
 
 contains
 
@@ -253,5 +255,99 @@ contains
     write(diag_unit) int_array(1:n)
 
   end subroutine diag_snapshot_logical_1d
+
+  !-----------------------------------------------------------------------
+  subroutine diag_snapshot_colmeta(bounds)
+    !
+    ! !DESCRIPTION:
+    ! Write column metadata diagnostics (type, active, gridcell, landunit, weights).
+    !
+    ! !USES:
+    use decompMod    , only : bounds_type
+    use ColumnType   , only : col_pp
+    use LandunitType , only : lun_pp
+    !
+    ! !ARGUMENTS:
+    type(bounds_type), intent(in) :: bounds
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, c, l
+    integer, allocatable :: lunit_itype(:)
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc = bounds%endc - bounds%begc + 1
+
+    call diag_snapshot_int_1d('colmeta:itype', &
+         col_pp%itype(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_logical_1d('colmeta:active', &
+         col_pp%active(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('colmeta:gridcell', &
+         col_pp%gridcell(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('colmeta:landunit', &
+         col_pp%landunit(bounds%begc:bounds%endc), nc)
+
+    ! Build per-column landunit type array
+    allocate(lunit_itype(nc))
+    do c = bounds%begc, bounds%endc
+       l = col_pp%landunit(c)
+       lunit_itype(c - bounds%begc + 1) = lun_pp%itype(l)
+    end do
+    call diag_snapshot_int_1d('colmeta:lunit_itype', lunit_itype, nc)
+    deallocate(lunit_itype)
+
+    call diag_snapshot_1d('colmeta:wtgcell', &
+         col_pp%wtgcell(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('colmeta:wtlunit', &
+         col_pp%wtlunit(bounds%begc:bounds%endc), nc)
+
+  end subroutine diag_snapshot_colmeta
+
+  !-----------------------------------------------------------------------
+  subroutine diag_snapshot_forcings(bounds, atm2lnd_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write atmospheric forcing diagnostics (after downscaling).
+    !
+    ! !USES:
+    use decompMod  , only : bounds_type
+    use atm2lndType, only : atm2lnd_type
+    !
+    ! !ARGUMENTS:
+    type(bounds_type) , intent(in) :: bounds
+    type(atm2lnd_type), intent(in) :: atm2lnd_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, ng
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc = bounds%endc - bounds%begc + 1
+    ng = bounds%endg - bounds%begg + 1
+
+    call diag_snapshot_1d('forcing:forc_t', &
+         atm2lnd_vars%forc_t_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_th', &
+         atm2lnd_vars%forc_th_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_q', &
+         atm2lnd_vars%forc_q_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_pbot', &
+         atm2lnd_vars%forc_pbot_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_rho', &
+         atm2lnd_vars%forc_rho_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_rain', &
+         atm2lnd_vars%forc_rain_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_snow', &
+         atm2lnd_vars%forc_snow_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_lwrad', &
+         atm2lnd_vars%forc_lwrad_downscaled_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('forcing:forc_wind', &
+         atm2lnd_vars%forc_wind_grc(bounds%begg:bounds%endg), ng)
+    call diag_snapshot_1d('forcing:forc_solar', &
+         atm2lnd_vars%forc_solar_grc(bounds%begg:bounds%endg), ng)
+
+  end subroutine diag_snapshot_forcings
 
 end module ElmDiagnostics
