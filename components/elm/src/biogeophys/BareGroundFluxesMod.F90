@@ -20,6 +20,9 @@ module BareGroundFluxesMod
   use ColumnDataType       , only : col_es, col_ef, col_ws
   use VegetationType       , only : veg_pp
   use VegetationDataType   , only : veg_es, veg_ef, veg_ws, veg_wf
+  use ElmDiagnostics       , only : diag_enabled, diag_snapshot_1d, &
+                                     diag_snapshot_2d, diag_snapshot_int_1d, &
+                                     diag_snapshot_logical_1d
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -44,7 +47,7 @@ contains
       !$acc routine seq
     use shr_const_mod        , only : SHR_CONST_RGAS
     use shr_flux_mod         , only : shr_flux_update_stress
-    use elm_varpar           , only : nlevgrnd
+    use elm_varpar           , only : nlevgrnd, nlevsno
     use elm_varcon           , only : cpair, vkc, grav, denice, denh2o
     use elm_varctl           , only : iulog, use_lch4
     use landunit_varcon      , only : istsoil, istcrop
@@ -195,6 +198,68 @@ contains
          begp             =>    bounds%begp                           , &
          endp             =>    bounds%endp                             &
          )
+
+      ! ── BareGroundFluxes diagnostics: INPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np, nt
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+            nt = bounds%endt - bounds%begt + 1
+
+            ! Column-level inputs
+            call diag_snapshot_int_1d('bgflux_in:snl', snl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:t_grnd', t_grnd(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:thv', thv(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:zii', zii(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:emg', col_es%emg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:htvp', htvp(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:z0mg', z0mg_col(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:z0hg', z0hg_col(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:z0qg', z0qg_col(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:qg', qg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:qg_snow', qg_snow(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:qg_soil', qg_soil(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:qg_h2osfc', qg_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:dqgdT', dqgdT(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:soilbeta', soilbeta(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:frac_sno', frac_sno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('bgflux_in:t_h2osfc', t_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('bgflux_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('bgflux_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('bgflux_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('bgflux_in:dz', col_pp%dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('bgflux_in:watsat', watsat(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+
+            ! Topounit-level atmospheric forcing
+            call diag_snapshot_1d('bgflux_in:forc_u', forc_u(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:forc_v', forc_v(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:forc_th', forc_th(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:forc_pbot', forc_pbot(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:forc_rho', forc_rho(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:forc_q', forc_q(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('bgflux_in:ugust', ugust(bounds%begt:bounds%endt), nt)
+
+            ! Patch-level inputs
+            call diag_snapshot_1d('bgflux_in:thm', thm(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('bgflux_in:frac_veg_nosno', frac_veg_nosno(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_in:forc_hgt_u_patch', forc_hgt_u_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_in:forc_hgt_t_patch', frictionvel_vars%forc_hgt_t_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_in:forc_hgt_q_patch', frictionvel_vars%forc_hgt_q_patch(bounds%begp:bounds%endp), np)
+
+            ! Patch mapping indices
+            call diag_snapshot_int_1d('bgflux_in:patch_column', veg_pp%column(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('bgflux_in:patch_topounit', veg_pp%topounit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('bgflux_in:patch_gridcell', veg_pp%gridcell(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('bgflux_in:patch_landunit', veg_pp%landunit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('bgflux_in:patch_active', veg_pp%active(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('bgflux_in:is_on_soil_col', veg_pp%is_on_soil_col(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('bgflux_in:is_on_crop_col', veg_pp%is_on_crop_col(bounds%begp:bounds%endp), np)
+
+            ! Filter
+            call diag_snapshot_int_1d('bgflux_in:filter_nolakeurbanp', filter_nolakeurbanp(1:num_nolakeurbanp), num_nolakeurbanp)
+         end block
+      end if
 
       !---------------------------------------------------
       ! Filter patches where frac_veg_nosno IS ZERO
@@ -430,6 +495,39 @@ contains
          end if
 
       end do
+
+      ! ── BareGroundFluxes diagnostics: OUTPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: np
+            np = bounds%endp - bounds%begp + 1
+
+            ! Patch-level outputs
+            call diag_snapshot_1d('bgflux_out:dlrad', dlrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:ulrad', ulrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:cgrnds', cgrnds(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:cgrndl', cgrndl(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:cgrnd', cgrnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:taux', taux(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:tauy', tauy(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:eflx_sh_grnd', eflx_sh_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:eflx_sh_tot', eflx_sh_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:eflx_sh_snow', eflx_sh_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:eflx_sh_soil', eflx_sh_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:eflx_sh_h2osfc', eflx_sh_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:qflx_evap_soi', qflx_evap_soi(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:qflx_evap_tot', qflx_evap_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:qflx_ev_snow', qflx_ev_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:qflx_ev_soil', qflx_ev_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:qflx_ev_h2osfc', qflx_ev_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:t_ref2m', t_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:q_ref2m', q_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:rh_ref2m', rh_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:t_ref2m_r', t_ref2m_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:rh_ref2m_r', rh_ref2m_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('bgflux_out:ram1', ram1(bounds%begp:bounds%endp), np)
+         end block
+      end if
 
     end associate
 
