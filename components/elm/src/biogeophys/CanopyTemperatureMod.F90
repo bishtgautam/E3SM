@@ -30,6 +30,9 @@ module CanopyTemperatureMod
   use VegetationType       , only : veg_pp
   use VegetationDataType   , only : veg_es, veg_ef, veg_wf
   use GridcellType         , only : grc_pp
+  use ElmDiagnostics       , only : diag_enabled, diag_snapshot_1d, &
+                                     diag_snapshot_2d, diag_snapshot_int_1d, &
+                                     diag_snapshot_logical_1d
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -202,6 +205,91 @@ contains
          thm              =>    veg_es%thm                            , & ! Output: [real(r8) (:)   ] intermediate variable (forc_t+0.0098*forc_hgt_t_patch)
          tssbef           =>    col_es%t_ssbef                          & ! Output: [real(r8) (:,:) ] soil/snow temperature before update (K)
          )
+
+      ! ── CanopyTemperature diagnostics: INPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np, nt, nl
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+            nt = bounds%endt - bounds%begt + 1
+            nl = bounds%endl - bounds%begl + 1
+
+            ! Column-level inputs
+            call diag_snapshot_int_1d('cantemp_in:snl', snl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:h2osno', h2osno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:frac_sno', frac_sno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:frac_h2osfc', frac_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:h2osfc', h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_in:t_h2osfc', t_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('cantemp_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:dz', col_pp%dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_int_1d('cantemp_in:col_itype', col_pp%itype(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('cantemp_in:nlevbed', col_pp%nlevbed(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('cantemp_in:col_landunit', col_pp%landunit(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('cantemp_in:col_topounit', col_pp%topounit(bounds%begc:bounds%endc), nc)
+
+            ! Soil properties (column, 2D for top layers)
+            call diag_snapshot_2d('cantemp_in:watsat', watsat(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:watfc', watfc(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:watdry', watdry(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:watopt', watopt(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:sucsat', sucsat(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_2d('cantemp_in:bsw', bsw(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_1d('cantemp_in:smpmin', smpmin(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('cantemp_in:rootfr_road_perv', rootfr_road_perv(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+            call diag_snapshot_1d('cantemp_in:soilbeta', soilstate_vars%soilbeta_col(bounds%begc:bounds%endc), nc)
+
+            ! Atmospheric forcings (topounit-level)
+            call diag_snapshot_1d('cantemp_in:forc_t', forc_t(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('cantemp_in:forc_th', forc_th(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('cantemp_in:forc_pbot', forc_pbot(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('cantemp_in:forc_q', forc_q(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('cantemp_in:forc_hgt', forc_hgt_t(bounds%begt:bounds%endt), nt)
+
+            ! Existing column-level state (for variables not recomputed on urban columns)
+            call diag_snapshot_1d('cantemp_in:emg', emg(bounds%begc:bounds%endc), nc)
+
+            ! Landunit info
+            call diag_snapshot_int_1d('cantemp_in:lunit_itype', lun_pp%itype(bounds%begl:bounds%endl), nl)
+            call diag_snapshot_logical_1d('cantemp_in:urbpoi', urbpoi(bounds%begl:bounds%endl), nl)
+            call diag_snapshot_1d('cantemp_in:z_0_town', z_0_town(bounds%begl:bounds%endl), nl)
+            call diag_snapshot_1d('cantemp_in:z_d_town', z_d_town(bounds%begl:bounds%endl), nl)
+
+            ! Patch-level inputs
+            call diag_snapshot_1d('cantemp_in:elai', elai(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_in:esai', esai(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:frac_veg_nosno', frac_veg_nosno(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_in:htop', htop(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:patch_column', veg_pp%column(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:patch_itype', veg_pp%itype(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:patch_landunit', veg_pp%landunit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:patch_topounit', veg_pp%topounit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('cantemp_in:patch_gridcell', veg_pp%gridcell(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('cantemp_in:patch_active', veg_pp%active(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('cantemp_in:is_on_soil_col', veg_pp%is_on_soil_col(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('cantemp_in:is_on_crop_col', veg_pp%is_on_crop_col(bounds%begp:bounds%endp), np)
+
+            ! PFT-level parameters (indexed by PFT type, small table)
+            call diag_snapshot_1d('cantemp_in:z0mr_pft', veg_vp%z0mr(0:16), 17)
+            call diag_snapshot_1d('cantemp_in:displar_pft', veg_vp%displar(0:16), 17)
+
+            ! Column type helpers
+            call diag_snapshot_logical_1d('cantemp_in:col_is_soil', col_pp%is_soil(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_logical_1d('cantemp_in:col_is_crop', col_pp%is_crop(bounds%begc:bounds%endc), nc)
+
+            ! Gridcell slope
+            call diag_snapshot_1d('cantemp_in:slope_deg', &
+                 grc_pp%slope_deg(bounds%begg:bounds%endg), bounds%endg-bounds%begg+1)
+
+            ! Filters
+            call diag_snapshot_int_1d('cantemp_in:filter_nolakec', filter_nolakec(1:num_nolakec), num_nolakec)
+            call diag_snapshot_int_1d('cantemp_in:filter_nolakep', filter_nolakep(1:num_nolakep), num_nolakep)
+         end block
+      end if
 
       deg2rad = SHR_CONST_PI/180._r8
       do j = -nlevsno+1, nlevgrnd
@@ -500,6 +588,57 @@ contains
 
          thm(p)  = forc_t(t) + 0.0098_r8*forc_hgt_t_patch(p)
       end do
+
+      ! ── CanopyTemperature diagnostics: OUTPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+
+            ! Column-level outputs
+            call diag_snapshot_1d('cantemp_out:t_grnd', t_grnd(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:thv', thv(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:emg', emg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:htvp', htvp(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:zii', zii(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:z0mg', z0mg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:z0hg', z0hg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:z0qg', z0qg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:qg', qg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:qg_snow', qg_snow(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:qg_soil', qg_soil(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:qg_h2osfc', qg_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:dqgdT', dqgdT(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:soilalpha', soilalpha(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:soilalpha_u', soilalpha_u(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('cantemp_out:soilbeta', soilstate_vars%soilbeta_col(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('cantemp_out:t_ssbef', tssbef(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_1d('cantemp_out:t_h2osfc_bef', t_h2osfc_bef(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('cantemp_out:rootr_road_perv', rootr_road_perv(bounds%begc:bounds%endc, 1:nlevsoi), nc, nlevsoi)
+
+            ! Patch-level outputs
+            call diag_snapshot_1d('cantemp_out:emv', emv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:thm', thm(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:z0m', z0m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:z0mv', z0mv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:z0hv', z0hv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:z0qv', z0qv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:displa', displa(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:forc_hgt_u_patch', forc_hgt_u_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:forc_hgt_t_patch', forc_hgt_t_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:forc_hgt_q_patch', forc_hgt_q_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:eflx_sh_tot', eflx_sh_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:eflx_lh_tot', eflx_lh_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:cgrnd', cgrnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:cgrnds', cgrnds(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:cgrndl', cgrndl(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:qflx_evap_tot', qflx_evap_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:qflx_evap_veg', qflx_evap_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:qflx_tran_veg', qflx_tran_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('cantemp_out:eflx_sh_veg', eflx_sh_veg(bounds%begp:bounds%endp), np)
+         end block
+      end if
 
     end associate
 
