@@ -36,6 +36,8 @@ module SurfaceRadiationMod
   public :: CanopySunShadeFractions  ! Sun/Shade fractions and some area index computations
   public :: CanopySunShadeFractions_diag_inputs   ! ELMPy diagnostics
   public :: CanopySunShadeFractions_diag_outputs  ! ELMPy diagnostics
+  public :: SurfaceRadiation_diag_inputs          ! ELMPy diagnostics
+  public :: SurfaceRadiation_diag_outputs         ! ELMPy diagnostics
   !
   ! !PRIVATE DATA:
   type, public :: surfrad_type
@@ -964,6 +966,221 @@ contains
       return
 
    end subroutine CanopySunShadeFractions
+
+   !-----------------------------------------------------------------------
+   subroutine SurfaceRadiation_diag_inputs(bounds, &
+        num_nourbanp, filter_nourbanp, num_urbanp, filter_urbanp, &
+        num_urbanc, filter_urbanc, &
+        canopystate_vars, surfalb_vars)
+      !
+      ! !DESCRIPTION:
+      ! Write ELMPy diagnostic snapshots of SurfaceRadiation input variables.
+      ! Captures column-level albedos/state and patch-level canopy transmittance
+      ! needed to reproduce the non-urban SurfaceRadiation calculation.
+      !
+      ! !USES:
+      use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                  diag_snapshot_int_1d, diag_enabled
+      use elm_varpar, only : numrad, nlevsno
+      !
+      ! !ARGUMENTS:
+      type(bounds_type),      intent(in) :: bounds
+      integer,                intent(in) :: num_nourbanp
+      integer,                intent(in) :: filter_nourbanp(:)
+      integer,                intent(in) :: num_urbanp
+      integer,                intent(in) :: filter_urbanp(:)
+      integer,                intent(in) :: num_urbanc
+      integer,                intent(in) :: filter_urbanc(:)
+      type(canopystate_type), intent(in) :: canopystate_vars
+      type(surfalb_type),     intent(in) :: surfalb_vars
+      !
+      ! !LOCAL VARIABLES:
+      integer :: nc, np, p, c, t
+      real(r8), allocatable :: forc_solad_patch(:,:), forc_solai_patch(:,:)
+      !-----------------------------------------------------------------------
+
+      if (.not. diag_enabled) return
+
+      nc = bounds%endc - bounds%begc + 1
+      np = bounds%endp - bounds%begp + 1
+
+      ! --- Filter arrays ---
+      call diag_snapshot_int_1d('surfrad_in:filter_nourbanp', &
+           filter_nourbanp(1:num_nourbanp), num_nourbanp)
+      call diag_snapshot_int_1d('surfrad_in:filter_urbanp', &
+           filter_urbanp(1:num_urbanp), num_urbanp)
+      call diag_snapshot_int_1d('surfrad_in:filter_urbanc', &
+           filter_urbanc(1:num_urbanc), num_urbanc)
+
+      ! --- Column-level inputs from col_pp ---
+      call diag_snapshot_int_1d('surfrad_in:snl', &
+           col_pp%snl(bounds%begc:bounds%endc), nc)
+
+      ! --- Column-level inputs from col_ws (water state) ---
+      call diag_snapshot_1d('surfrad_in:snow_depth', &
+           col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+      call diag_snapshot_1d('surfrad_in:frac_sno', &
+           col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+
+      ! --- Column-level surface albedos (col, numrad) ---
+      call diag_snapshot_2d('surfrad_in:albgrd', &
+           surfalb_vars%albgrd_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+      call diag_snapshot_2d('surfrad_in:albgri', &
+           surfalb_vars%albgri_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+      call diag_snapshot_2d('surfrad_in:albsod', &
+           surfalb_vars%albsod_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+      call diag_snapshot_2d('surfrad_in:albsoi', &
+           surfalb_vars%albsoi_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+      call diag_snapshot_2d('surfrad_in:albsnd_hst', &
+           surfalb_vars%albsnd_hst_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+      call diag_snapshot_2d('surfrad_in:albsni_hst', &
+           surfalb_vars%albsni_hst_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+
+      ! --- Column-level SNICAR layer absorption factors (col, -nlevsno+1:1) ---
+      call diag_snapshot_2d('surfrad_in:flx_absdv', &
+           surfalb_vars%flx_absdv_col(bounds%begc:bounds%endc, -nlevsno+1:1), nc, nlevsno+1)
+      call diag_snapshot_2d('surfrad_in:flx_absdn', &
+           surfalb_vars%flx_absdn_col(bounds%begc:bounds%endc, -nlevsno+1:1), nc, nlevsno+1)
+      call diag_snapshot_2d('surfrad_in:flx_absiv', &
+           surfalb_vars%flx_absiv_col(bounds%begc:bounds%endc, -nlevsno+1:1), nc, nlevsno+1)
+      call diag_snapshot_2d('surfrad_in:flx_absin', &
+           surfalb_vars%flx_absin_col(bounds%begc:bounds%endc, -nlevsno+1:1), nc, nlevsno+1)
+
+      ! --- Patch-level surface albedo / transmittance (patch, numrad) ---
+      call diag_snapshot_2d('surfrad_in:albd', &
+           surfalb_vars%albd_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:albi', &
+           surfalb_vars%albi_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:fabd', &
+           surfalb_vars%fabd_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:fabi', &
+           surfalb_vars%fabi_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:ftdd', &
+           surfalb_vars%ftdd_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:ftid', &
+           surfalb_vars%ftid_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+      call diag_snapshot_2d('surfrad_in:ftii', &
+           surfalb_vars%ftii_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+
+      ! --- Patch-level canopy state ---
+      call diag_snapshot_1d('surfrad_in:elai', &
+           canopystate_vars%elai_patch(bounds%begp:bounds%endp), np)
+
+      ! --- Topounit forcings gathered per-patch (patch, numrad) ---
+      allocate(forc_solad_patch(np, numrad), forc_solai_patch(np, numrad))
+      do p = bounds%begp, bounds%endp
+         t = veg_pp%topounit(p)
+         forc_solad_patch(p - bounds%begp + 1, 1) = top_af%solad(t, 1)
+         forc_solad_patch(p - bounds%begp + 1, 2) = top_af%solad(t, 2)
+         forc_solai_patch(p - bounds%begp + 1, 1) = top_af%solai(t, 1)
+         forc_solai_patch(p - bounds%begp + 1, 2) = top_af%solai(t, 2)
+      end do
+      call diag_snapshot_2d('surfrad_in:forc_solad', forc_solad_patch, np, numrad)
+      call diag_snapshot_2d('surfrad_in:forc_solai', forc_solai_patch, np, numrad)
+      deallocate(forc_solad_patch, forc_solai_patch)
+
+      ! --- Patch-to-column mapping ---
+      call diag_snapshot_int_1d('surfrad_in:patch_column', &
+           veg_pp%column(bounds%begp:bounds%endp), np)
+      call diag_snapshot_int_1d('surfrad_in:patch_landunit', &
+           veg_pp%landunit(bounds%begp:bounds%endp), np)
+      call diag_snapshot_int_1d('surfrad_in:patch_gridcell', &
+           veg_pp%gridcell(bounds%begp:bounds%endp), np)
+      call diag_snapshot_int_1d('surfrad_in:patch_topounit', &
+           veg_pp%topounit(bounds%begp:bounds%endp), np)
+
+   end subroutine SurfaceRadiation_diag_inputs
+
+   !-----------------------------------------------------------------------
+   subroutine SurfaceRadiation_diag_outputs(bounds, &
+        canopystate_vars, solarabs_vars, surfrad_vars)
+      !
+      ! !DESCRIPTION:
+      ! Write ELMPy diagnostic snapshots of SurfaceRadiation output variables.
+      ! Captures all key radiation fluxes for both non-urban and urban patches.
+      !
+      ! !USES:
+      use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, diag_enabled
+      use elm_varpar, only : nlevsno
+      !
+      ! !ARGUMENTS:
+      type(bounds_type),      intent(in) :: bounds
+      type(canopystate_type), intent(in) :: canopystate_vars
+      type(solarabs_type),    intent(in) :: solarabs_vars
+      type(surfrad_type),     intent(in) :: surfrad_vars
+      !
+      ! !LOCAL VARIABLES:
+      integer :: np, nc
+      !-----------------------------------------------------------------------
+
+      if (.not. diag_enabled) return
+
+      np = bounds%endp - bounds%begp + 1
+      nc = bounds%endc - bounds%begc + 1
+
+      ! --- Patch-level solarabs outputs (1D) ---
+      call diag_snapshot_1d('surfrad_out:fsa', &
+           solarabs_vars%fsa_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsr', &
+           solarabs_vars%fsr_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:sabv', &
+           solarabs_vars%sabv_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:sabg', &
+           solarabs_vars%sabg_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:sabg_pen', &
+           solarabs_vars%sabg_pen_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:sabg_soil', &
+           solarabs_vars%sabg_soil_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:sabg_snow', &
+           solarabs_vars%sabg_snow_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsa_r', &
+           solarabs_vars%fsa_r_patch(bounds%begp:bounds%endp), np)
+
+      ! --- Patch-level reflected/incident NIR ---
+      call diag_snapshot_1d('surfrad_out:fsr_nir_d', &
+           solarabs_vars%fsr_nir_d_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsr_nir_i', &
+           solarabs_vars%fsr_nir_i_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsr_nir_d_ln', &
+           solarabs_vars%fsr_nir_d_ln_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_nir_d', &
+           solarabs_vars%fsds_nir_d_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_nir_d_ln', &
+           solarabs_vars%fsds_nir_d_ln_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_nir_i', &
+           solarabs_vars%fsds_nir_i_patch(bounds%begp:bounds%endp), np)
+
+      ! --- Patch-level reflected/incident VIS (from surfrad_vars) ---
+      call diag_snapshot_1d('surfrad_out:fsr_vis_d', &
+           surfrad_vars%fsr_vis_d_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsr_vis_i', &
+           surfrad_vars%fsr_vis_i_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsr_vis_d_ln', &
+           surfrad_vars%fsr_vis_d_ln_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_vis_d', &
+           surfrad_vars%fsds_vis_d_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_vis_i', &
+           surfrad_vars%fsds_vis_i_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_vis_d_ln', &
+           surfrad_vars%fsds_vis_d_ln_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsds_vis_i_ln', &
+           surfrad_vars%fsds_vis_i_ln_patch(bounds%begp:bounds%endp), np)
+
+      ! --- PAR and canopy state ---
+      call diag_snapshot_1d('surfrad_out:parveg_ln', &
+           surfrad_vars%parveg_ln_patch(bounds%begp:bounds%endp), np)
+      call diag_snapshot_1d('surfrad_out:fsun', &
+           canopystate_vars%fsun_patch(bounds%begp:bounds%endp), np)
+
+      ! --- Column-level output ---
+      call diag_snapshot_1d('surfrad_out:sub_surf_abs_SW', &
+           solarabs_vars%sub_surf_abs_SW_col(bounds%begc:bounds%endc), nc)
+
+      ! --- Patch-level sabg_lyr (patch, -nlevsno+1:1) ---
+      call diag_snapshot_2d('surfrad_out:sabg_lyr', &
+           solarabs_vars%sabg_lyr_patch(bounds%begp:bounds%endp, -nlevsno+1:1), np, nlevsno+1)
+
+   end subroutine SurfaceRadiation_diag_outputs
 
    !-----------------------------------------------------------------------
    subroutine CanopySunShadeFractions_diag_inputs(bounds, surfalb_vars, canopystate_vars)
