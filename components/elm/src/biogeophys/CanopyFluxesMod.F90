@@ -42,6 +42,9 @@ module CanopyFluxesMod
   use ColumnDataType        , only : col_es, col_ef, col_ws
   use VegetationType        , only : veg_pp
   use VegetationDataType    , only : veg_es, veg_ef, veg_ws, veg_wf
+  use ElmDiagnostics        , only : diag_enabled, diag_snapshot_1d, &
+                                      diag_snapshot_2d, diag_snapshot_int_1d, &
+                                      diag_snapshot_logical_1d, diag_snapshot_scalar
 
   !!! using elm_instMod messes with the compilation order
   use elm_instMod           , only : alm_fates, soil_water_retention_curve
@@ -316,6 +319,10 @@ contains
     real(r8) :: prev_tau(bounds%begp:bounds%endp) ! Previous iteration tau
     real(r8) :: prev_tau_diff(bounds%begp:bounds%endp) ! Previous difference in iteration tau
     real(r8) :: slope_rad, deg2rad
+
+    ! Per-iteration diagnostic arrays for Photosynthesis outputs
+    real(r8) :: rssun_iter(bounds%begp:bounds%endp, itmax)
+    real(r8) :: rssha_iter(bounds%begp:bounds%endp, itmax)
 
     ! Indices for raw and rah
     integer, parameter :: above_canopy = 1         ! Above canopy
@@ -776,6 +783,98 @@ contains
          
       end do
 
+      ! ── CanopyFluxes diagnostics: INPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np, nt, ng
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+            nt = bounds%endt - bounds%begt + 1
+            ng = bounds%endg - bounds%begg + 1
+
+            ! Column-level inputs
+            call diag_snapshot_int_1d('canflx_in:snl', snl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:t_grnd', t_grnd(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:thv', thv(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:emg', emg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:t_h2osfc', t_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:frac_sno_eff', frac_sno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:frac_h2osfc', frac_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:snow_depth', snow_depth(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:qg', qg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:qg_snow', qg_snow(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:qg_soil', qg_soil(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:qg_h2osfc', qg_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:dqgdT', dqgdT(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:z0mg', z0mg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:soilbeta', soilbeta(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('canflx_in:htvp', htvp(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('canflx_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+
+            ! Topounit-level atmospheric forcing
+            call diag_snapshot_1d('canflx_in:forc_lwrad', forc_lwrad(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_q', forc_q(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_pbot', forc_pbot(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_th', forc_th(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_rho', forc_rho(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_t', forc_t(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_u', forc_u(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_v', forc_v(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_pco2', forc_pco2(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:forc_po2', forc_po2(bounds%begt:bounds%endt), nt)
+            call diag_snapshot_1d('canflx_in:ugust', ugust(bounds%begt:bounds%endt), nt)
+
+            ! Patch-level inputs (after aerodynamic modification and btran calc)
+            call diag_snapshot_int_1d('canflx_in:frac_veg_nosno', frac_veg_nosno(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:elai', elai(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:esai', esai(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:laisun', laisun(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:laisha', laisha(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:displa', displa(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:z0mv', z0mv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:z0hv', z0hv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:z0qv', z0qv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:forc_hgt_u_patch', forc_hgt_u_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:sabv', sabv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:emv', emv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:thm', thm(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:t_veg', t_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:h2ocan', h2ocan(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:fwet', fwet(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:fdry', fdry(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:btran', btran(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:dayl_factor', dayl_factor(bounds%begp:bounds%endp), np)
+
+            ! Pre-compute dleaf_patch so diagnostic snapshot has valid values
+            ! (Normally set inside the iteration loop from PFT parameter)
+            do f = 1, fn
+               p = filterp(f)
+               if (.not. veg_pp%is_fates(p)) then
+                  dleaf_patch(p) = dleaf(veg_pp%itype(p))
+               end if
+            end do
+            call diag_snapshot_1d('canflx_in:dleaf_patch', dleaf_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_in:htop', htop(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('canflx_in:itype', veg_pp%itype(bounds%begp:bounds%endp), np)
+
+            ! Gridcell-level
+            call diag_snapshot_1d('canflx_in:slope_deg', slope_deg(bounds%begg:bounds%endg), ng)
+
+            ! Patch mapping indices
+            call diag_snapshot_int_1d('canflx_in:patch_column', veg_pp%column(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('canflx_in:patch_topounit', veg_pp%topounit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('canflx_in:patch_gridcell', veg_pp%gridcell(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('canflx_in:patch_active', veg_pp%active(bounds%begp:bounds%endp), np)
+
+            ! Filter
+            call diag_snapshot_int_1d('canflx_in:filter_nolakeurbanp', filter_nolakeurbanp(1:num_nolakeurbanp), num_nolakeurbanp)
+         end block
+      end if
+
+      ! Initialize per-iteration diagnostic arrays
+      rssun_iter(:,:) = 0._r8
+      rssha_iter(:,:) = 0._r8
+
       ! Set counter for leaf temperature iteration (itlef)
 
       itlef = 1
@@ -959,6 +1058,12 @@ contains
             end if
 
          end if ! end of if use_fates
+
+         ! Record per-iteration Photosynthesis outputs for diagnostics
+         if (diag_enabled) then
+            rssun_iter(begp:endp, itlef) = rssun(begp:endp)
+            rssha_iter(begp:endp, itlef) = rssha(begp:endp)
+         end if
 
          do f = 1, fn
             p = filterp(f)
@@ -1345,6 +1450,60 @@ contains
             write(iulog,*) 'energy balance in canopy ',p,', err=',err(p)
          end do
 
+      end if
+
+      ! ── CanopyFluxes diagnostics: OUTPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+
+            ! Patch-level outputs
+            call diag_snapshot_1d('canflx_out:t_veg', t_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:btran', btran(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:h2ocan', h2ocan(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:taux', taux(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:tauy', tauy(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:eflx_sh_veg', eflx_sh_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:eflx_sh_grnd', eflx_sh_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:eflx_sh_snow', eflx_sh_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:eflx_sh_soil', eflx_sh_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:eflx_sh_h2osfc', eflx_sh_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_evap_veg', qflx_evap_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_evap_soi', qflx_evap_soi(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_tran_veg', qflx_tran_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_ev_snow', qflx_ev_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_ev_soil', qflx_ev_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:qflx_ev_h2osfc', qflx_ev_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:dlrad', dlrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:ulrad', ulrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:cgrnds', cgrnds(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:cgrndl', cgrndl(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:cgrnd', cgrnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:t_ref2m', t_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:q_ref2m', q_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:rh_ref2m', rh_ref2m(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:t_ref2m_r', t_ref2m_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:rh_ref2m_r', rh_ref2m_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:ram1', ram1(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:rb1', rb1(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:ustar', ustar(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:obu', obu(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:um', um(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:z0mv', z0mv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:z0hv', z0hv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:z0qv', z0qv(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:displa', displa(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:rssun', rssun(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:rssha', rssha(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:lbl_rsc_h2o', lbl_rsc_h2o(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('canflx_out:num_iter', num_iter(bounds%begp:bounds%endp), np)
+
+            ! Per-iteration Photosynthesis outputs (2D: npatches × itmax)
+            call diag_snapshot_2d('canflx_iter:rssun', rssun_iter(bounds%begp:bounds%endp, 1:itmax), np, itmax)
+            call diag_snapshot_2d('canflx_iter:rssha', rssha_iter(bounds%begp:bounds%endp, 1:itmax), np, itmax)
+         end block
       end if
 
     end associate
