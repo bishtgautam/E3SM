@@ -24,6 +24,9 @@ module SoilFluxesMod
   use GridcellType      , only : grc_pp
 
   use timeinfoMod , only : dtime_mod
+  use ElmDiagnostics       , only : diag_enabled, diag_snapshot_1d, &
+                                     diag_snapshot_2d, diag_snapshot_int_1d, &
+                                     diag_snapshot_logical_1d
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -169,6 +172,108 @@ contains
       deg2rad = SHR_CONST_PI/180._r8
 
          dtime = dtime_mod
+
+      ! ── SoilFluxes diagnostics: INPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np, nt
+            integer :: do_capsnow_int(bounds%begc:bounds%endc)
+            real(r8) :: forc_lwrad_col(bounds%begc:bounds%endc)
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+            nt = bounds%endt - bounds%begt + 1
+
+            ! Column-level inputs
+            call diag_snapshot_int_1d('soilflx_in:snl', col_pp%snl(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('soilflx_in:col_itype', col_pp%itype(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:frac_sno', frac_sno(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:frac_h2osfc', frac_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:h2osfc', h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:t_grnd', t_grnd(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:t_h2osfc', t_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:t_h2osfc_bef', t_h2osfc_bef(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:emg', emg(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:htvp', htvp(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:xmf', xmf(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:xmf_h2osfc', xmf_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:c_h2osfc', c_h2osfc(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:eflx_building_heat', eflx_building_heat(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_1d('soilflx_in:eflx_h2osfc_to_snow', eflx_h2osfc_to_snow_col(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_2d('soilflx_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('soilflx_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('soilflx_in:tssbef', tssbef(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('soilflx_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+            call diag_snapshot_2d('soilflx_in:fact', fact(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlevsno+nlevgrnd)
+
+            ! Logical → int conversion for diagnostics
+            do c = bounds%begc, bounds%endc
+               if (do_capsnow(c)) then
+                  do_capsnow_int(c) = 1
+               else
+                  do_capsnow_int(c) = 0
+               end if
+            end do
+            call diag_snapshot_int_1d('soilflx_in:do_capsnow', do_capsnow_int(bounds%begc:bounds%endc), nc)
+
+            ! Topounit forcings mapped to columns for lwrad
+            do c = bounds%begc, bounds%endc
+               t = col_pp%topounit(c)
+               forc_lwrad_col(c) = forc_lwrad(t)
+            end do
+            call diag_snapshot_1d('soilflx_in:forc_lwrad', forc_lwrad_col(bounds%begc:bounds%endc), nc)
+
+            ! Patch-level inputs
+            call diag_snapshot_int_1d('soilflx_in:frac_veg_nosno', frac_veg_nosno(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:sabg_soil', sabg_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:sabg_snow', sabg_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:sabg', sabg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:dlrad', dlrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:ulrad', ulrad(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:cgrnds', cgrnds(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:cgrndl', cgrndl(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_sh_grnd', eflx_sh_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_sh_veg', eflx_sh_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_evap_soi', qflx_evap_soi(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_evap_veg', qflx_evap_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_tran_veg', qflx_tran_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_ev_snow', qflx_ev_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_ev_soil', qflx_ev_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_ev_h2osfc', qflx_ev_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_snwcp_liq', qflx_snwcp_liq(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:qflx_snwcp_ice', qflx_snwcp_ice(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_lwrad_net', eflx_lwrad_net(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_lwrad_out', eflx_lwrad_out(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_wasteheat', eflx_wasteheat_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_heat_from_ac', eflx_heat_from_ac_patch(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_traffic', eflx_traffic_patch(bounds%begp:bounds%endp), np)
+
+            ! Patch mapping indices
+            call diag_snapshot_int_1d('soilflx_in:patch_column', veg_pp%column(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('soilflx_in:patch_topounit', veg_pp%topounit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('soilflx_in:patch_gridcell', veg_pp%gridcell(bounds%begp:bounds%endp), np)
+            call diag_snapshot_int_1d('soilflx_in:patch_landunit', veg_pp%landunit(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('soilflx_in:patch_active', veg_pp%active(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('soilflx_in:is_on_soil_col', veg_pp%is_on_soil_col(bounds%begp:bounds%endp), np)
+            call diag_snapshot_logical_1d('soilflx_in:is_on_crop_col', veg_pp%is_on_crop_col(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:wtcol', veg_pp%wtcol(bounds%begp:bounds%endp), np)
+
+            ! Column-patch topology for p2c
+            call diag_snapshot_int_1d('soilflx_in:col_npfts', col_pp%npfts(bounds%begc:bounds%endc), nc)
+            call diag_snapshot_int_1d('soilflx_in:col_pfti', col_pp%pfti(bounds%begc:bounds%endc), nc)
+
+            ! Landunit flags (mapped to column via landunit)
+            call diag_snapshot_logical_1d('soilflx_in:urbpoi', lun_pp%urbpoi(bounds%begl:bounds%endl), bounds%endl - bounds%begl + 1)
+
+            ! Filters
+            call diag_snapshot_int_1d('soilflx_in:nolakec', filter_nolakec(1:num_nolakec), num_nolakec)
+            call diag_snapshot_int_1d('soilflx_in:nolakep', filter_nolakep(1:num_nolakep), num_nolakep)
+
+            ! Gridcell-level slope
+            call diag_snapshot_1d('soilflx_in:slope_deg', slope_deg(bounds%begg:bounds%endg), bounds%endg - bounds%begg + 1)
+         end block
+      end if
+
       event = 'bgp2_loop_1'
       call t_start_lnd(event)
       do fc = 1,num_nolakec
@@ -472,6 +577,54 @@ contains
            errsoi_patch(bounds%begp:bounds%endp), &
            errsoi_col(bounds%begc:bounds%endc))
       call t_stop_lnd(event)
+
+      ! ── SoilFluxes diagnostics: OUTPUTS ──
+      if (diag_enabled) then
+         block
+            integer :: nc, np
+            nc = bounds%endc - bounds%begc + 1
+            np = bounds%endp - bounds%begp + 1
+
+            ! Patch-level outputs
+            call diag_snapshot_1d('soilflx_out:eflx_sh_grnd', eflx_sh_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_sh_tot', eflx_sh_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_sh_tot_r', eflx_sh_tot_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_sh_tot_u', eflx_sh_tot_u(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_tot', eflx_lh_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_tot_r', eflx_lh_tot_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_tot_u', eflx_lh_tot_u(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_soil_grnd', eflx_soil_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_soil_grnd_r', eflx_soil_grnd_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_soil_grnd_u', eflx_soil_grnd_u(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_out', eflx_lwrad_out(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_net', eflx_lwrad_net(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_net_r', eflx_lwrad_net_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_out_r', eflx_lwrad_out_r(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_net_u', eflx_lwrad_net_u(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lwrad_out_u', eflx_lwrad_out_u(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_vege', eflx_lh_vege(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_vegt', eflx_lh_vegt(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:eflx_lh_grnd', eflx_lh_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_evap_soi', qflx_evap_soi(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_evap_tot', qflx_evap_tot(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_evap_veg', qflx_evap_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_evap_can', qflx_evap_can(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_tran_veg', qflx_tran_veg(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_evap_grnd', qflx_evap_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_sub_snow', qflx_sub_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_dew_snow', qflx_dew_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_dew_grnd', qflx_dew_grnd(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_ev_snow', qflx_ev_snow(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_ev_soil', qflx_ev_soil(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_ev_h2osfc', qflx_ev_h2osfc(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_snwcp_liq', qflx_snwcp_liq(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:qflx_snwcp_ice', qflx_snwcp_ice(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_out:errsoi_patch', errsoi_patch(bounds%begp:bounds%endp), np)
+
+            ! Column-level outputs
+            call diag_snapshot_1d('soilflx_out:errsoi_col', errsoi_col(bounds%begc:bounds%endc), nc)
+         end block
+      end if
 
     end associate
 
