@@ -14,6 +14,8 @@ module SoilTemperatureMod
   use abortutils        , only : endrun
   use elm_varctl        , only : iulog, use_finetop_rad
   use elm_varcon        , only : spval
+  use ElmDiagnostics    , only : diag_begin_routine, diag_end_routine, &
+                                   diag_snapshot_1d, diag_snapshot_2d
   use UrbanParamsType   , only : urbanparams_type
   use atm2lndType       , only : atm2lnd_type
   use CanopyStateType   , only : canopystate_type
@@ -378,6 +380,24 @@ contains
       ! Compute ground surface and soil temperatures
       !------------------------------------------------------
 
+      ! ---- Diagnostic Capture: SoilTemperature Inputs ----
+      call diag_begin_routine('soiltemp')
+      call diag_snapshot_1d('soiltemp_in:snl', snl(begc:endc), endc-begc+1)
+      call diag_snapshot_2d('soiltemp_in:dz', dz(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_in:z', z(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_in:zi', zi(begc:endc,-nlevsno:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno+1)
+      call diag_snapshot_2d('soiltemp_in:t_soisno', t_soisno(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_1d('soiltemp_in:t_h2osfc', t_h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_2d('soiltemp_in:h2osoi_liq', h2osoi_liq(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_in:h2osoi_ice', h2osoi_ice(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_1d('soiltemp_in:h2osfc', h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:frac_sno_eff', frac_sno_eff(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:frac_h2osfc', frac_h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:emg', emg(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:htvp', htvp(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:t_grnd', t_grnd(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_in:eflx_bot', eflx_bot(begc:endc), endc-begc+1)
+
       ! Thermal conductivity and Heat capacity
 
       tk_h2osfc(begc:endc) = spval
@@ -386,6 +406,11 @@ contains
            cv(begc:endc, :), &
            tk_h2osfc(begc:endc), &
            urbanparams_vars, soilstate_vars)
+
+      ! ---- Diagnostic Capture: Thermal Properties ----
+      call diag_snapshot_2d('soiltemp_mid:tk', tk(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_mid:cv', cv(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_1d('soiltemp_mid:tk_h2osfc', tk_h2osfc(begc:endc), endc-begc+1)
 
       ! Net ground heat flux into the surface and its temperature derivative
       ! Added a patches loop here to get the average of hs and dhsdT over
@@ -635,6 +660,17 @@ contains
       call Phasechange_beta (bounds, num_nolakec, filter_nolakec, &
            dhsdT(bounds%begc:bounds%endc), soilstate_vars, energyflux_vars, dtime)
 
+      ! ---- Diagnostic Capture: SoilTemperature Outputs ----
+      call diag_snapshot_2d('soiltemp_out:t_soisno', t_soisno(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_1d('soiltemp_out:t_h2osfc', t_h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_out:t_grnd', t_grnd(begc:endc), endc-begc+1)
+      call diag_snapshot_2d('soiltemp_out:h2osoi_liq', h2osoi_liq(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_out:h2osoi_ice', h2osoi_ice(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_1d('soiltemp_out:xmf', xmf(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_out:xmf_h2osfc', xmf_h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_2d('soiltemp_out:fact', fact(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
+      call diag_end_routine('soiltemp')
+
       do fc = 1,num_nolakec
          c = filter_nolakec(fc)
          ! this expression will (should) work whether there is snow or not
@@ -803,6 +839,9 @@ contains
          num_filter, filter, nband, bmatrix(begc:endc, :, :), &
          rvector(begc:endc, :), tvector(begc:endc, :))
     call t_stopf('SoilTempBandDiag')
+
+    ! ---- Diagnostic Capture: Temperatures After Solve ----
+    call diag_snapshot_2d('soiltemp_mid:t_soisno_solved', tvector(begc:endc,-nlevsno:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno+1)
 
   end associate
 
