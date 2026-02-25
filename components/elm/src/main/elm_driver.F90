@@ -42,7 +42,9 @@ module elm_driver
   use CanopyFluxesMod        , only : CanopyFluxes
   use SedYieldMod            , only : SoilErosion
   use SoilFluxesMod          , only : SoilFluxes ! (formerly Biogeophysics2Mod)
-  use UrbanFluxesMod         , only : UrbanFluxes
+  use UrbanFluxesMod         , only : UrbanFluxes, &
+                                      UrbanFluxes_diag_inputs, &
+                                      UrbanFluxes_diag_outputs
   use LakeFluxesMod          , only : LakeFluxes
   !
   use HydrologyNoDrainageMod , only : HydrologyNoDrainage ! (formerly Hydrology2Mod)
@@ -863,6 +865,13 @@ contains
 
        ! Fluxes for all urban landunits
 
+       call UrbanFluxes_diag_inputs(bounds_clump, &
+            filter(nc)%num_nourbanl, filter(nc)%nourbanl, &
+            filter(nc)%num_urbanl, filter(nc)%urbanl, &
+            filter(nc)%num_urbanc, filter(nc)%urbanc, &
+            filter(nc)%num_urbanp, filter(nc)%urbanp, &
+            urbanparams_vars, soilstate_vars, frictionvel_vars)
+
        call t_startf('uflux')
        call UrbanFluxes(bounds_clump,                        &
             filter(nc)%num_nourbanl, filter(nc)%nourbanl,    &
@@ -872,6 +881,8 @@ contains
             atm2lnd_vars, urbanparams_vars, soilstate_vars,  &
             frictionvel_vars, energyflux_vars)
        call t_stopf('uflux')
+
+       call UrbanFluxes_diag_outputs(bounds_clump, frictionvel_vars)
 
        ! Fluxes for all lake landunits
 
