@@ -40,7 +40,9 @@ module UrbanFluxesMod
   private
   !
   ! !PUBLIC MEMBER FUNCTIONS:
-  public :: UrbanFluxes       ! Urban physics - turbulent fluxes
+  public :: UrbanFluxes               ! Urban physics - turbulent fluxes
+  public :: UrbanFluxes_diag_inputs   ! ELMPy diagnostics
+  public :: UrbanFluxes_diag_outputs  ! ELMPy diagnostics
   !-----------------------------------------------------------------------
 
 contains
@@ -1036,5 +1038,237 @@ contains
     end associate
 
   end subroutine UrbanFluxes
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanFluxes_diag_inputs(bounds, &
+       num_nourbanl, filter_nourbanl, &
+       num_urbanl, filter_urbanl, &
+       num_urbanc, filter_urbanc, &
+       num_urbanp, filter_urbanp, &
+       urbanparams_vars, soilstate_vars, frictionvel_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of UrbanFluxes input variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_int_1d, diag_enabled
+    use elm_varpar, only : nlevurb
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),       intent(in) :: bounds
+    integer,                 intent(in) :: num_nourbanl
+    integer,                 intent(in) :: filter_nourbanl(:)
+    integer,                 intent(in) :: num_urbanl
+    integer,                 intent(in) :: filter_urbanl(:)
+    integer,                 intent(in) :: num_urbanc
+    integer,                 intent(in) :: filter_urbanc(:)
+    integer,                 intent(in) :: num_urbanp
+    integer,                 intent(in) :: filter_urbanp(:)
+    type(urbanparams_type),  intent(in) :: urbanparams_vars
+    type(soilstate_type),    intent(in) :: soilstate_vars
+    type(frictionvel_type),  intent(in) :: frictionvel_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nl, nc, np, nt
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nl = bounds%endl - bounds%begl + 1
+    nc = bounds%endc - bounds%begc + 1
+    np = bounds%endp - bounds%begp + 1
+    nt = bounds%endt - bounds%begt + 1
+
+    ! --- Filters ---
+    call diag_snapshot_int_1d('urbanflux_in:filter_nourbanl', &
+         filter_nourbanl(1:num_nourbanl), num_nourbanl)
+    call diag_snapshot_int_1d('urbanflux_in:filter_urbanl', &
+         filter_urbanl(1:num_urbanl), num_urbanl)
+    call diag_snapshot_int_1d('urbanflux_in:filter_urbanc', &
+         filter_urbanc(1:num_urbanc), num_urbanc)
+    call diag_snapshot_int_1d('urbanflux_in:filter_urbanp', &
+         filter_urbanp(1:num_urbanp), num_urbanp)
+
+    ! --- Landunit-level geometry ---
+    call diag_snapshot_1d('urbanflux_in:z_0_town', &
+         lun_pp%z_0_town(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:z_d_town', &
+         lun_pp%z_d_town(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:ht_roof', &
+         lun_pp%ht_roof(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:wtlunit_roof', &
+         lun_pp%wtlunit_roof(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:canyon_hwr', &
+         lun_pp%canyon_hwr(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:wtroad_perv', &
+         lun_pp%wtroad_perv(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:wind_hgt_canyon', &
+         urbanparams_vars%wind_hgt_canyon(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:eflx_traffic_factor', &
+         urbanparams_vars%eflx_traffic_factor(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_int_1d('urbanflux_in:lun_topounit', &
+         lun_pp%topounit(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_int_1d('urbanflux_in:lun_gridcell', &
+         lun_pp%gridcell(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_int_1d('urbanflux_in:lun_pfti', &
+         lun_pp%pfti(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_int_1d('urbanflux_in:lun_pftf', &
+         lun_pp%pftf(bounds%begl:bounds%endl), nl)
+
+    ! --- Initial canopy air state from previous timestep ---
+    call diag_snapshot_1d('urbanflux_in:taf', &
+         lun_es%taf(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_in:qaf', &
+         lun_ws%qaf(bounds%begl:bounds%endl), nl)
+
+    ! --- Topounit-level forcings ---
+    call diag_snapshot_1d('urbanflux_in:forc_t', &
+         top_as%tbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_th', &
+         top_as%thbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_rho', &
+         top_as%rhobot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_q', &
+         top_as%qbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_pbot', &
+         top_as%pbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_u', &
+         top_as%ubot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:forc_v', &
+         top_as%vbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('urbanflux_in:ugust', &
+         top_as%ugust(bounds%begt:bounds%endt), nt)
+
+    ! --- Column-level inputs ---
+    call diag_snapshot_int_1d('urbanflux_in:ctype', &
+         col_pp%itype(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('urbanflux_in:col_landunit', &
+         col_pp%landunit(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:t_grnd', &
+         col_es%t_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:t_soisno_nlevurb', &
+         col_es%t_soisno(bounds%begc:bounds%endc, nlevurb), nc)
+    call diag_snapshot_1d('urbanflux_in:qg', &
+         col_ws%qg(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:dqgdT', &
+         col_ws%dqgdT(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:frac_sno', &
+         col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:snow_depth', &
+         col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:h2osoi_liq1', &
+         col_ws%h2osoi_liq(bounds%begc:bounds%endc, 1), nc)
+    call diag_snapshot_1d('urbanflux_in:h2osoi_ice1', &
+         col_ws%h2osoi_ice(bounds%begc:bounds%endc, 1), nc)
+    call diag_snapshot_1d('urbanflux_in:htvp', &
+         col_ef%htvp(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:eflx_urban_ac', &
+         col_ef%eflx_urban_ac(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:eflx_urban_heat', &
+         col_ef%eflx_urban_heat(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:soilalpha_u', &
+         soilstate_vars%soilalpha_u_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('urbanflux_in:soilbeta', &
+         soilstate_vars%soilbeta_col(bounds%begc:bounds%endc), nc)
+
+    ! --- Patch-level inputs ---
+    call diag_snapshot_1d('urbanflux_in:forc_hgt_u_patch', &
+         frictionvel_vars%forc_hgt_u_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_in:forc_hgt_t_patch', &
+         frictionvel_vars%forc_hgt_t_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('urbanflux_in:patch_column', &
+         veg_pp%column(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('urbanflux_in:patch_landunit', &
+         veg_pp%landunit(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('urbanflux_in:patch_topounit', &
+         veg_pp%topounit(bounds%begp:bounds%endp), np)
+
+  end subroutine UrbanFluxes_diag_inputs
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanFluxes_diag_outputs(bounds, frictionvel_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of UrbanFluxes output variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_enabled
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),      intent(in) :: bounds
+    type(frictionvel_type), intent(in) :: frictionvel_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nl, np
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nl = bounds%endl - bounds%begl + 1
+    np = bounds%endp - bounds%begp + 1
+
+    ! --- Landunit-level outputs ---
+    call diag_snapshot_1d('urbanflux_out:taf', &
+         lun_es%taf(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_out:qaf', &
+         lun_ws%qaf(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_out:eflx_wasteheat', &
+         lun_ef%eflx_wasteheat(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_out:eflx_heat_from_ac', &
+         lun_ef%eflx_heat_from_ac(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_out:eflx_traffic', &
+         lun_ef%eflx_traffic(bounds%begl:bounds%endl), nl)
+    call diag_snapshot_1d('urbanflux_out:t_building', &
+         lun_es%t_building(bounds%begl:bounds%endl), nl)
+
+    ! --- Patch-level outputs ---
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_grnd', &
+         veg_ef%eflx_sh_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_tot', &
+         veg_ef%eflx_sh_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_tot_u', &
+         veg_ef%eflx_sh_tot_u(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_snow', &
+         veg_ef%eflx_sh_snow(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_soil', &
+         veg_ef%eflx_sh_soil(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:eflx_sh_h2osfc', &
+         veg_ef%eflx_sh_h2osfc(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:taux', &
+         veg_ef%taux(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:tauy', &
+         veg_ef%tauy(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:cgrnds', &
+         veg_ef%cgrnds(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:cgrndl', &
+         veg_ef%cgrndl(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:cgrnd', &
+         veg_ef%cgrnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:dlrad', &
+         veg_ef%dlrad(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:ulrad', &
+         veg_ef%ulrad(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:ram1', &
+         frictionvel_vars%ram1_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:qflx_evap_soi', &
+         veg_wf%qflx_evap_soi(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:qflx_tran_veg', &
+         veg_wf%qflx_tran_veg(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:qflx_evap_veg', &
+         veg_wf%qflx_evap_veg(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:t_ref2m', &
+         veg_es%t_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:t_ref2m_u', &
+         veg_es%t_ref2m_u(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:q_ref2m', &
+         veg_ws%q_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:rh_ref2m', &
+         veg_ws%rh_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:rh_ref2m_u', &
+         veg_ws%rh_ref2m_u(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('urbanflux_out:t_veg', &
+         veg_es%t_veg(bounds%begp:bounds%endp), np)
+
+  end subroutine UrbanFluxes_diag_outputs
 
 end module UrbanFluxesMod
