@@ -23,6 +23,7 @@ Module HydrologyNoDrainageMod
   use VegetationType    , only : veg_pp
   use TopounitDataType  , only : top_as, top_af ! Atmospheric state and flux variables
   use elm_instMod       , only : alm_fates , ep_betr
+  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_snapshot_int_1d, diag_enabled
 
 
   use timeinfoMod
@@ -172,6 +173,32 @@ contains
          )
 
          dtime = dtime_mod
+
+      ! ========== DIAGNOSTICS: HydrologyNoDrainage INPUTS ==========
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('hydro_in:snl', snl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('hydro_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_in:watsat', watsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_in:sucsat', sucsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_in:bsw', bsw(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_1d('hydro_in:t_grnd', t_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:t_h2osfc', t_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:frac_h2osfc', frac_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:snow_depth', snow_depth(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+      end if
+      ! ================================================================
+
       ! Determine initial snow/no-snow filters (will be modified possibly by
       ! routines CombineSnowLayers and DivideSnowLayers below
 
@@ -582,6 +609,37 @@ contains
          snw_rds_top(c)     = spval
          sno_liq_top(c)     = spval
       end do
+
+      ! ========== DIAGNOSTICS: HydrologyNoDrainage OUTPUTS ==========
+      if (diag_enabled) then
+         call diag_snapshot_2d('hydro_out:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_out:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('hydro_out:h2osoi_vol', h2osoi_vol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_out:h2osoi_liqvol', h2osoi_liqvol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_out:h2osoi_icevol', h2osoi_icevol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_out:air_vol', air_vol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('hydro_out:eff_porosity', eff_porosity(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_1d('hydro_out:t_grnd', t_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_out:t_soi_10cm', t_soi_10cm(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_out:tsoi17', tsoi17(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_out:snowice', snowice(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_out:snowliq', snowliq(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_out:snowdp', snowdp(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         if (use_cn .or. use_fates) then
+            call diag_snapshot_2d('hydro_out:soilpsi', soilpsi(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                 bounds%endc-bounds%begc+1, nlevgrnd)
+            call diag_snapshot_1d('hydro_out:wf', wf(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+            call diag_snapshot_1d('hydro_out:wf2', wf2(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         end if
+      end if
+      ! ================================================================
 
     end associate
 
