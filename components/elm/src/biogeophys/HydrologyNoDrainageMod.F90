@@ -196,6 +196,15 @@ contains
          call diag_snapshot_1d('hydro_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
          call diag_snapshot_1d('hydro_in:frac_h2osfc', frac_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
          call diag_snapshot_1d('hydro_in:snow_depth', snow_depth(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Additional flux inputs needed for Python validation (added for elmpy)
+         call diag_snapshot_1d('hydro_in:qflx_top_soil', col_wf%qflx_top_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:qflx_evap_grnd', col_wf%qflx_evap_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:qflx_tran_veg', col_wf%qflx_tran_veg(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:qflx_dew_grnd', col_wf%qflx_dew_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:qflx_dew_snow', col_wf%qflx_dew_snow(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:qflx_sub_snow', col_wf%qflx_sub_snow(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_in:forc_rain', top_af%rain(bounds%begt:bounds%endt), bounds%endt-bounds%begt+1)
+         call diag_snapshot_1d('hydro_in:forc_snow', top_af%snow(bounds%begt:bounds%endt), bounds%endt-bounds%begt+1)
       end if
       ! ================================================================
 
