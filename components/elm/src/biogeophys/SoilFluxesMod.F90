@@ -244,6 +244,7 @@ contains
             call diag_snapshot_1d('soilflx_in:qflx_snwcp_ice', qflx_snwcp_ice(bounds%begp:bounds%endp), np)
             call diag_snapshot_1d('soilflx_in:eflx_lwrad_net', eflx_lwrad_net(bounds%begp:bounds%endp), np)
             call diag_snapshot_1d('soilflx_in:eflx_lwrad_out', eflx_lwrad_out(bounds%begp:bounds%endp), np)
+            call diag_snapshot_1d('soilflx_in:eflx_lwrad_net_u', eflx_lwrad_net_u(bounds%begp:bounds%endp), np)
             call diag_snapshot_1d('soilflx_in:eflx_wasteheat', eflx_wasteheat_patch(bounds%begp:bounds%endp), np)
             call diag_snapshot_1d('soilflx_in:eflx_heat_from_ac', eflx_heat_from_ac_patch(bounds%begp:bounds%endp), np)
             call diag_snapshot_1d('soilflx_in:eflx_traffic', eflx_traffic_patch(bounds%begp:bounds%endp), np)
