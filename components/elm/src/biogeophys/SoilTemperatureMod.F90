@@ -423,6 +423,13 @@ contains
            atm2lnd_vars, urbanparams_vars, canopystate_vars, &
            solarabs_vars, energyflux_vars)
 
+      ! ---- Diagnostic Capture: Ground Heat Flux ----
+      call diag_snapshot_1d('soiltemp_mid:hs_soil', hs_soil(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_mid:hs_h2osfc', hs_h2osfc(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_mid:hs_top', hs_top(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_mid:hs_top_snow', hs_top_snow(begc:endc), endc-begc+1)
+      call diag_snapshot_1d('soiltemp_mid:dhsdT', dhsdT(begc:endc), endc-begc+1)
+
       ! Determine heat diffusion through the layer interface and factor used in computing
       ! banded diagonal matrix and set up vector r and vectors a, b, c that define banded
       ! diagonal matrix and solve system
@@ -434,6 +441,10 @@ contains
            fn( begc:endc, -nlevsno+1: ),                                     &
            fact( begc:endc, -nlevsno+1: ),                                   &
            energyflux_vars)
+
+      ! ---- Diagnostic Capture: Heat Diffusion Flux ----
+      call diag_snapshot_2d('soiltemp_mid:fn', fn(begc:endc,-nlevsno+1:nlevgrnd), &
+                            endc-begc+1, nlevsno+nlevgrnd)
 
       ! compute thermal properties of h2osfc
 
@@ -831,6 +842,10 @@ contains
     ! Solve the system
     event = 'SoilTempBandDiag'
     call t_start_lnd(event)
+
+    ! ---- Diagnostic Capture: RHS vector before solve ----
+    call diag_snapshot_2d('soiltemp_mid:rvector', rvector(begc:endc,-nlevsno:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno+1)
+
     call BandDiagonal(bounds, -nlevsno, nlevgrnd, jtop(begc:endc), jbot(begc:endc), &
          num_filter, filter, nband, bmatrix(begc:endc, :, :), &
          rvector(begc:endc, :), tvector(begc:endc, :))
@@ -953,6 +968,8 @@ contains
                             bounds%endc-bounds%begc+1, nlevgrnd)
       call diag_snapshot_2d('soiltemp_therm:csol', csol(bounds%begc:bounds%endc,1:nlevgrnd), &
                             bounds%endc-bounds%begc+1, nlevgrnd)
+      call diag_snapshot_int_1d('soiltemp_therm:nlevbed', nlev2bed(bounds%begc:bounds%endc), &
+                                bounds%endc-bounds%begc+1)
 
       ! Thermal conductivity of soil from Farouki (1981)
       ! Urban values are from Masson et al. 2002, Evaluation of the Town Energy Balance (TEB)
@@ -1069,6 +1086,24 @@ contains
             end if
          end do
       end do
+
+      ! ---- Diagnostic Capture: within-layer TK and landunit type ----
+      call diag_snapshot_2d('soiltemp_therm:thk', thk(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+      ! Capture landunit itype per column (useful for istwet/istice identification)
+      block
+        integer :: fc_blk, c_blk, l_blk
+        integer, allocatable :: lun_itype_col(:)
+        allocate(lun_itype_col(bounds%endc-bounds%begc+1))
+        lun_itype_col = 0
+        do fc_blk = 1, num_nolakec
+          c_blk = filter_nolakec(fc_blk)
+          l_blk = col_pp%landunit(c_blk)
+          lun_itype_col(c_blk - bounds%begc + 1) = lun_pp%itype(l_blk)
+        end do
+        call diag_snapshot_int_1d('soiltemp_therm:lun_itype', lun_itype_col, bounds%endc-bounds%begc+1)
+        deallocate(lun_itype_col)
+      end block
 
       ! calculate thermal conductivity of h2osfc
       do fc = 1, num_nolakec
