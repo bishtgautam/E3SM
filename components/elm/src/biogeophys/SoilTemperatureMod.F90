@@ -14,8 +14,8 @@ module SoilTemperatureMod
   use abortutils        , only : endrun
   use elm_varctl        , only : iulog, use_finetop_rad
   use elm_varcon        , only : spval
-  use ElmDiagnostics    , only : diag_begin_routine, diag_end_routine, &
-                                   diag_snapshot_1d, diag_snapshot_2d
+  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, &
+                                   diag_snapshot_int_1d
   use UrbanParamsType   , only : urbanparams_type
   use atm2lndType       , only : atm2lnd_type
   use CanopyStateType   , only : canopystate_type
@@ -381,15 +381,12 @@ contains
       !------------------------------------------------------
 
       ! ---- Diagnostic Capture: SoilTemperature Inputs ----
-      call diag_begin_routine('soiltemp')
-      call diag_snapshot_1d('soiltemp_in:snl', snl(begc:endc), endc-begc+1)
+      call diag_snapshot_int_1d('soiltemp_in:snl', snl(begc:endc), endc-begc+1)
       call diag_snapshot_2d('soiltemp_in:dz', dz(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_2d('soiltemp_in:z', z(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_2d('soiltemp_in:zi', zi(begc:endc,-nlevsno:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno+1)
       call diag_snapshot_2d('soiltemp_in:t_soisno', t_soisno(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_1d('soiltemp_in:t_h2osfc', t_h2osfc(begc:endc), endc-begc+1)
-      call diag_snapshot_2d('soiltemp_in:h2osoi_liq', h2osoi_liq(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
-      call diag_snapshot_2d('soiltemp_in:h2osoi_ice', h2osoi_ice(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_1d('soiltemp_in:h2osfc', h2osfc(begc:endc), endc-begc+1)
       call diag_snapshot_1d('soiltemp_in:frac_sno_eff', frac_sno_eff(begc:endc), endc-begc+1)
       call diag_snapshot_1d('soiltemp_in:frac_h2osfc', frac_h2osfc(begc:endc), endc-begc+1)
@@ -664,12 +661,9 @@ contains
       call diag_snapshot_2d('soiltemp_out:t_soisno', t_soisno(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_1d('soiltemp_out:t_h2osfc', t_h2osfc(begc:endc), endc-begc+1)
       call diag_snapshot_1d('soiltemp_out:t_grnd', t_grnd(begc:endc), endc-begc+1)
-      call diag_snapshot_2d('soiltemp_out:h2osoi_liq', h2osoi_liq(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
-      call diag_snapshot_2d('soiltemp_out:h2osoi_ice', h2osoi_ice(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_1d('soiltemp_out:xmf', xmf(begc:endc), endc-begc+1)
       call diag_snapshot_1d('soiltemp_out:xmf_h2osfc', xmf_h2osfc(begc:endc), endc-begc+1)
       call diag_snapshot_2d('soiltemp_out:fact', fact(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
-      call diag_end_routine('soiltemp')
 
       do fc = 1,num_nolakec
          c = filter_nolakec(fc)
