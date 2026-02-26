@@ -933,6 +933,22 @@ contains
          thk          =>    soilstate_vars%thk_col             & ! Output: [real(r8) (:,:) ]  thermal conductivity of each layer  [W/m-K]
          )
 
+      ! ---- Diagnostic Capture: Water content for thermal properties ----
+      call diag_snapshot_2d('soiltemp_therm:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc,-nlevsno+1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_therm:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc,-nlevsno+1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd+nlevsno)
+      call diag_snapshot_2d('soiltemp_therm:watsat', watsat(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+      call diag_snapshot_2d('soiltemp_therm:tkmg', tkmg(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+      call diag_snapshot_2d('soiltemp_therm:tkdry', tkdry(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+      call diag_snapshot_2d('soiltemp_therm:tksatu', tksatu(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+      call diag_snapshot_2d('soiltemp_therm:csol', csol(bounds%begc:bounds%endc,1:nlevgrnd), &
+                            bounds%endc-bounds%begc+1, nlevgrnd)
+
       ! Thermal conductivity of soil from Farouki (1981)
       ! Urban values are from Masson et al. 2002, Evaluation of the Town Energy Balance (TEB)
       ! scheme with direct measurements from dry districts in two cities, J. Appl. Meteorol.,
