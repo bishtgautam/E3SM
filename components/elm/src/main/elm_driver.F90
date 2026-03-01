@@ -45,7 +45,9 @@ module elm_driver
   use UrbanFluxesMod         , only : UrbanFluxes, &
                                       UrbanFluxes_diag_inputs, &
                                       UrbanFluxes_diag_outputs
-  use LakeFluxesMod          , only : LakeFluxes
+  use LakeFluxesMod          , only : LakeFluxes, &
+                                      LakeFluxes_diag_inputs, &
+                                      LakeFluxes_diag_outputs
   !
   use HydrologyNoDrainageMod , only : HydrologyNoDrainage ! (formerly Hydrology2Mod)
   use HydrologyDrainageMod   , only : HydrologyDrainage   ! (formerly Hydrology2Mod)
@@ -886,12 +888,23 @@ contains
 
        ! Fluxes for all lake landunits
 
+       call LakeFluxes_diag_inputs(bounds_clump, &
+            filter(nc)%num_lakec, filter(nc)%lakec, &
+            filter(nc)%num_lakep, filter(nc)%lakep, &
+            solarabs_vars, frictionvel_vars, lakestate_vars)
+
        call t_startf('bgplake')
        call LakeFluxes(bounds_clump,                                         &
             filter(nc)%num_lakec, filter(nc)%lakec,                          &
             filter(nc)%num_lakep, filter(nc)%lakep,                          &
             atm2lnd_vars, solarabs_vars, frictionvel_vars,  &
             energyflux_vars, lakestate_vars)
+
+       ! (LakeTemperature will be called later, after dust/voc emissions)
+       ! Diagnostic outputs after the full LakeFluxes call but still within bgplake timer
+
+       call LakeFluxes_diag_outputs(bounds_clump, &
+            solarabs_vars, frictionvel_vars, lakestate_vars)
 
        ! ============================================================================
        ! DUST and VOC emissions

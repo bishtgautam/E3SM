@@ -31,6 +31,8 @@ module LakeFluxesMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: LakeFluxes
+  public :: LakeFluxes_diag_inputs
+  public :: LakeFluxes_diag_outputs
   !-----------------------------------------------------------------------
 
 contains
@@ -707,5 +709,233 @@ contains
     end associate
 
   end subroutine LakeFluxes
+
+  !-----------------------------------------------------------------------
+  subroutine LakeFluxes_diag_inputs(bounds, &
+       num_lakec, filter_lakec, num_lakep, filter_lakep, &
+       solarabs_vars, frictionvel_vars, lakestate_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of LakeFluxes input variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                diag_snapshot_int_1d, diag_enabled
+    use elm_varpar, only : nlevlak
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),       intent(in) :: bounds
+    integer,                 intent(in) :: num_lakec
+    integer,                 intent(in) :: filter_lakec(:)
+    integer,                 intent(in) :: num_lakep
+    integer,                 intent(in) :: filter_lakep(:)
+    type(solarabs_type),     intent(in) :: solarabs_vars
+    type(frictionvel_type),  intent(in) :: frictionvel_vars
+    type(lakestate_type),    intent(in) :: lakestate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np, nt, ng, nlay
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc  = bounds%endc - bounds%begc + 1
+    np  = bounds%endp - bounds%begp + 1
+    nt  = bounds%endt - bounds%begt + 1
+    ng  = bounds%endg - bounds%begg + 1
+
+    ! --- Filters ---
+    call diag_snapshot_int_1d('lakeflux_in:filter_lakec', &
+         filter_lakec(1:num_lakec), num_lakec)
+    call diag_snapshot_int_1d('lakeflux_in:filter_lakep', &
+         filter_lakep(1:num_lakep), num_lakep)
+
+    ! --- Subgrid mapping ---
+    call diag_snapshot_int_1d('lakeflux_in:col_gridcell', &
+         col_pp%gridcell(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_int_1d('lakeflux_in:patch_column', &
+         veg_pp%column(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('lakeflux_in:patch_topounit', &
+         veg_pp%topounit(bounds%begp:bounds%endp), np)
+    call diag_snapshot_int_1d('lakeflux_in:patch_gridcell', &
+         veg_pp%gridcell(bounds%begp:bounds%endp), np)
+
+    ! --- Column structure ---
+    call diag_snapshot_int_1d('lakeflux_in:snl', &
+         col_pp%snl(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_in:lakedepth', &
+         col_pp%lakedepth(bounds%begc:bounds%endc), nc)
+    nlay = size(col_pp%dz, 2)
+    call diag_snapshot_2d('lakeflux_in:dz', &
+         col_pp%dz(bounds%begc:bounds%endc, :), nc, nlay)
+    call diag_snapshot_2d('lakeflux_in:dz_lake', &
+         col_pp%dz_lake(bounds%begc:bounds%endc, :), nc, nlevlak)
+
+    ! --- Topounit-level forcings ---
+    call diag_snapshot_1d('lakeflux_in:forc_t', &
+         top_as%tbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_th', &
+         top_as%thbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_q', &
+         top_as%qbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_u', &
+         top_as%ubot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_v', &
+         top_as%vbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_rho', &
+         top_as%rhobot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_pbot', &
+         top_as%pbot(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_lwrad', &
+         top_af%lwrad(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_rain', &
+         top_af%rain(bounds%begt:bounds%endt), nt)
+    call diag_snapshot_1d('lakeflux_in:forc_snow', &
+         top_af%snow(bounds%begt:bounds%endt), nt)
+
+    ! --- Patch-level heights ---
+    call diag_snapshot_1d('lakeflux_in:forc_hgt_u_patch', &
+         frictionvel_vars%forc_hgt_u_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_in:forc_hgt_t_patch', &
+         frictionvel_vars%forc_hgt_t_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_in:forc_hgt_q_patch', &
+         frictionvel_vars%forc_hgt_q_patch(bounds%begp:bounds%endp), np)
+
+    ! --- Solar (patch) ---
+    call diag_snapshot_1d('lakeflux_in:sabg', &
+         solarabs_vars%sabg_patch(bounds%begp:bounds%endp), np)
+    nlay = size(solarabs_vars%sabg_lyr_patch, 2)
+    call diag_snapshot_2d('lakeflux_in:sabg_lyr', &
+         solarabs_vars%sabg_lyr_patch(bounds%begp:bounds%endp, :), np, nlay)
+    call diag_snapshot_1d('lakeflux_in:fsds_nir_d', &
+         solarabs_vars%fsds_nir_d_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_in:fsds_nir_i', &
+         solarabs_vars%fsds_nir_i_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_in:fsr_nir_d', &
+         solarabs_vars%fsr_nir_d_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_in:fsr_nir_i', &
+         solarabs_vars%fsr_nir_i_patch(bounds%begp:bounds%endp), np)
+
+    ! --- Column thermal/water state ---
+    call diag_snapshot_1d('lakeflux_in:t_grnd', &
+         col_es%t_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_2d('lakeflux_in:t_lake', &
+         col_es%t_lake(bounds%begc:bounds%endc, :), nc, nlevlak)
+    nlay = size(col_es%t_soisno, 2)
+    call diag_snapshot_2d('lakeflux_in:t_soisno', &
+         col_es%t_soisno(bounds%begc:bounds%endc, :), nc, nlay)
+    nlay = size(col_ws%h2osoi_liq, 2)
+    call diag_snapshot_2d('lakeflux_in:h2osoi_liq', &
+         col_ws%h2osoi_liq(bounds%begc:bounds%endc, :), nc, nlay)
+    call diag_snapshot_2d('lakeflux_in:h2osoi_ice', &
+         col_ws%h2osoi_ice(bounds%begc:bounds%endc, :), nc, nlay)
+
+    ! --- Lake state ---
+    call diag_snapshot_1d('lakeflux_in:savedtke1', &
+         lakestate_vars%savedtke1_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_in:lakefetch', &
+         lakestate_vars%lakefetch_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_in:ust_lake', &
+         lakestate_vars%ust_lake_col(bounds%begc:bounds%endc), nc)
+
+    ! --- Roughness (column) ---
+    call diag_snapshot_1d('lakeflux_in:z0mg_col', &
+         frictionvel_vars%z0mg_col(bounds%begc:bounds%endc), nc)
+
+    ! --- Gridcell latitude ---
+    call diag_snapshot_1d('lakeflux_in:lat', &
+         grc_pp%lat(bounds%begg:bounds%endg), ng)
+
+  end subroutine LakeFluxes_diag_inputs
+
+
+  !-----------------------------------------------------------------------
+  subroutine LakeFluxes_diag_outputs(bounds, &
+       solarabs_vars, frictionvel_vars, lakestate_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of LakeFluxes output variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_enabled
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),       intent(in) :: bounds
+    type(solarabs_type),     intent(in) :: solarabs_vars
+    type(frictionvel_type),  intent(in) :: frictionvel_vars
+    type(lakestate_type),    intent(in) :: lakestate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc = bounds%endc - bounds%begc + 1
+    np = bounds%endp - bounds%begp + 1
+
+    ! --- Column-level outputs ---
+    call diag_snapshot_1d('lakeflux_out:t_grnd', &
+         col_es%t_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:ks', &
+         lakestate_vars%ks_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:ws', &
+         lakestate_vars%ws_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:betaprime', &
+         lakestate_vars%betaprime_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:ust_lake', &
+         lakestate_vars%ust_lake_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:lake_raw', &
+         lakestate_vars%lake_raw_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:z0mg_col', &
+         frictionvel_vars%z0mg_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:z0hg_col', &
+         frictionvel_vars%z0hg_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('lakeflux_out:z0qg_col', &
+         frictionvel_vars%z0qg_col(bounds%begc:bounds%endc), nc)
+
+    ! --- Patch-level outputs ---
+    call diag_snapshot_1d('lakeflux_out:eflx_sh_grnd', &
+         veg_ef%eflx_sh_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_sh_tot', &
+         veg_ef%eflx_sh_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_lh_tot', &
+         veg_ef%eflx_lh_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_lh_grnd', &
+         veg_ef%eflx_lh_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_lwrad_out', &
+         veg_ef%eflx_lwrad_out(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_lwrad_net', &
+         veg_ef%eflx_lwrad_net(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_soil_grnd', &
+         veg_ef%eflx_soil_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:eflx_gnet', &
+         veg_ef%eflx_gnet(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:taux', &
+         veg_ef%taux(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:tauy', &
+         veg_ef%tauy(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:qflx_evap_soi', &
+         veg_wf%qflx_evap_soi(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:qflx_evap_tot', &
+         veg_wf%qflx_evap_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:t_ref2m', &
+         veg_es%t_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:q_ref2m', &
+         veg_ws%q_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:rh_ref2m', &
+         veg_ws%rh_ref2m(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:t_veg', &
+         veg_es%t_veg(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:qflx_prec_grnd', &
+         veg_wf%qflx_prec_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:sabg_chk', &
+         solarabs_vars%sabg_chk_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:ram1_lake', &
+         lakestate_vars%ram1_lake_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('lakeflux_out:ram1', &
+         frictionvel_vars%ram1_patch(bounds%begp:bounds%endp), np)
+
+  end subroutine LakeFluxes_diag_outputs
 
 end module LakeFluxesMod
