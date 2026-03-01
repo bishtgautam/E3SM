@@ -36,7 +36,7 @@ module elm_driver
   !
   use CanopyTemperatureMod   , only : CanopyTemperature ! (formerly Biogeophysics1Mod)
   use SoilTemperatureMod     , only : SoilTemperature
-  use LakeTemperatureMod     , only : LakeTemperature
+  use LakeTemperatureMod     , only : LakeTemperature, LakeTemperature_diag_inputs, LakeTemperature_diag_outputs
   !
   use BareGroundFluxesMod    , only : BareGroundFluxes
   use CanopyFluxesMod        , only : CanopyFluxes
@@ -941,11 +941,21 @@ contains
        endif
        ! Set lake temperature
 
+       call LakeTemperature_diag_inputs(bounds_clump, &
+            filter(nc)%num_lakec, filter(nc)%lakec,   &
+            filter(nc)%num_lakep, filter(nc)%lakep,   &
+            solarabs_vars, soilstate_vars, lakestate_vars)
+
        call LakeTemperature(bounds_clump,             &
             filter(nc)%num_lakec, filter(nc)%lakec,   &
             filter(nc)%num_lakep, filter(nc)%lakep,   &
             solarabs_vars, soilstate_vars,  ch4_vars, &
             energyflux_vars, lakestate_vars)
+
+       call LakeTemperature_diag_outputs(bounds_clump, &
+            filter(nc)%num_lakec, filter(nc)%lakec,    &
+            filter(nc)%num_lakep, filter(nc)%lakep,    &
+            lakestate_vars)
        call t_stopf('bgplake')
 
        ! Set soil/snow temperatures including ground temperature
