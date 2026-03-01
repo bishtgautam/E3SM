@@ -30,6 +30,8 @@ module LakeTemperatureMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: LakeTemperature              ! Calculates Lake related temperature
+  public :: LakeTemperature_diag_inputs  ! Diagnostic snapshot of inputs
+  public :: LakeTemperature_diag_outputs ! Diagnostic snapshot of outputs
   !
   ! !PRIVATE MEMBER FUNCTIONS:
   private :: SoilThermProp_Lake   ! Set therm conductivities and heat cap of snow/soil layers
@@ -1452,5 +1454,224 @@ contains
      end associate
 
    end subroutine PhaseChange_Lake
+
+  !-----------------------------------------------------------------------
+  subroutine LakeTemperature_diag_inputs(bounds, &
+       num_lakec, filter_lakec, num_lakep, filter_lakep, &
+       solarabs_vars, soilstate_vars, lakestate_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of LakeTemperature input variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                diag_snapshot_int_1d, diag_enabled
+    use elm_varpar, only : nlevlak, nlevgrnd, nlevsno
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),       intent(in) :: bounds
+    integer,                 intent(in) :: num_lakec
+    integer,                 intent(in) :: filter_lakec(:)
+    integer,                 intent(in) :: num_lakep
+    integer,                 intent(in) :: filter_lakep(:)
+    type(solarabs_type),     intent(in) :: solarabs_vars
+    type(soilstate_type),    intent(in) :: soilstate_vars
+    type(lakestate_type),    intent(in) :: lakestate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np, nlay
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc   = bounds%endc - bounds%begc + 1
+    np   = bounds%endp - bounds%begp + 1
+    nlay = nlevsno + nlevgrnd
+
+    ! --- Filters ---
+    call diag_snapshot_int_1d('laketemp_in:filter_lakec', &
+         filter_lakec(1:num_lakec), num_lakec)
+    call diag_snapshot_int_1d('laketemp_in:filter_lakep', &
+         filter_lakep(1:num_lakep), num_lakep)
+
+    ! --- Subgrid mapping ---
+    call diag_snapshot_int_1d('laketemp_in:patch_column', &
+         veg_pp%column(bounds%begp:bounds%endp), np)
+
+    ! --- Column geometry ---
+    call diag_snapshot_2d('laketemp_in:dz_lake', &
+         col_pp%dz_lake(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+    call diag_snapshot_2d('laketemp_in:z_lake', &
+         col_pp%z_lake(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+    call diag_snapshot_2d('laketemp_in:dz', &
+         col_pp%dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_2d('laketemp_in:z', &
+         col_pp%z(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_2d('laketemp_in:zi', &
+         col_pp%zi(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_int_1d('laketemp_in:snl', &
+         col_pp%snl(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_in:lakedepth', &
+         col_pp%lakedepth(bounds%begc:bounds%endc), nc)
+
+    ! --- Solar absorption (patch-level) ---
+    call diag_snapshot_1d('laketemp_in:sabg', &
+         solarabs_vars%sabg_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_2d('laketemp_in:sabg_lyr', &
+         solarabs_vars%sabg_lyr_patch(bounds%begp:bounds%endp, -nlevsno+1:1), np, nlevsno+1)
+    call diag_snapshot_1d('laketemp_in:fsds_nir_d', &
+         solarabs_vars%fsds_nir_d_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:fsds_nir_i', &
+         solarabs_vars%fsds_nir_i_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:fsr_nir_d', &
+         solarabs_vars%fsr_nir_d_patch(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:fsr_nir_i', &
+         solarabs_vars%fsr_nir_i_patch(bounds%begp:bounds%endp), np)
+
+    ! --- Lake state ---
+    call diag_snapshot_1d('laketemp_in:etal', &
+         lakestate_vars%etal_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_in:ks', &
+         lakestate_vars%ks_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_in:ws', &
+         lakestate_vars%ws_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_in:lake_raw', &
+         lakestate_vars%lake_raw_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_2d('laketemp_in:lake_icefrac', &
+         lakestate_vars%lake_icefrac_col(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+
+    ! --- Water state ---
+    call diag_snapshot_1d('laketemp_in:h2osno', &
+         col_ws%h2osno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_2d('laketemp_in:h2osoi_liq', &
+         col_ws%h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_2d('laketemp_in:h2osoi_ice', &
+         col_ws%h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_1d('laketemp_in:snow_depth', &
+         col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+
+    ! --- Thermal state ---
+    call diag_snapshot_1d('laketemp_in:t_grnd', &
+         col_es%t_grnd(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_2d('laketemp_in:t_soisno', &
+         col_es%t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_2d('laketemp_in:t_lake', &
+         col_es%t_lake(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+
+    ! --- Energy fluxes (patch-level) ---
+    call diag_snapshot_1d('laketemp_in:eflx_gnet', &
+         veg_ef%eflx_gnet(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:eflx_sh_tot', &
+         veg_ef%eflx_sh_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:eflx_sh_grnd', &
+         veg_ef%eflx_sh_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_in:eflx_soil_grnd', &
+         veg_ef%eflx_soil_grnd(bounds%begp:bounds%endp), np)
+
+    ! --- Soil properties ---
+    call diag_snapshot_2d('laketemp_in:watsat', &
+         soilstate_vars%watsat_col(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+    call diag_snapshot_2d('laketemp_in:tksatu', &
+         soilstate_vars%tksatu_col(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+    call diag_snapshot_2d('laketemp_in:tkmg', &
+         soilstate_vars%tkmg_col(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+    call diag_snapshot_2d('laketemp_in:tkdry', &
+         soilstate_vars%tkdry_col(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+    call diag_snapshot_2d('laketemp_in:csol', &
+         soilstate_vars%csol_col(bounds%begc:bounds%endc, 1:nlevgrnd), nc, nlevgrnd)
+
+  end subroutine LakeTemperature_diag_inputs
+
+
+  !-----------------------------------------------------------------------
+  subroutine LakeTemperature_diag_outputs(bounds, &
+       num_lakec, filter_lakec, num_lakep, filter_lakep, &
+       lakestate_vars)
+    !
+    ! !DESCRIPTION:
+    ! Write ELMPy diagnostic snapshots of LakeTemperature output variables.
+    !
+    ! !USES:
+    use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                diag_snapshot_int_1d, diag_enabled
+    use elm_varpar, only : nlevlak, nlevgrnd, nlevsno
+    !
+    ! !ARGUMENTS:
+    type(bounds_type),       intent(in) :: bounds
+    integer,                 intent(in) :: num_lakec
+    integer,                 intent(in) :: filter_lakec(:)
+    integer,                 intent(in) :: num_lakep
+    integer,                 intent(in) :: filter_lakep(:)
+    type(lakestate_type),    intent(in) :: lakestate_vars
+    !
+    ! !LOCAL VARIABLES:
+    integer :: nc, np, nlay
+    !-----------------------------------------------------------------------
+
+    if (.not. diag_enabled) return
+
+    nc   = bounds%endc - bounds%begc + 1
+    np   = bounds%endp - bounds%begp + 1
+    nlay = nlevsno + nlevgrnd
+
+    ! --- Temperatures ---
+    call diag_snapshot_2d('laketemp_out:t_lake', &
+         col_es%t_lake(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+    call diag_snapshot_2d('laketemp_out:t_soisno', &
+         col_es%t_soisno(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+
+    ! --- Lake state ---
+    call diag_snapshot_2d('laketemp_out:lake_icefrac', &
+         lakestate_vars%lake_icefrac_col(bounds%begc:bounds%endc, 1:nlevlak), nc, nlevlak)
+    call diag_snapshot_1d('laketemp_out:lake_icethick', &
+         lakestate_vars%lake_icethick_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:savedtke1', &
+         lakestate_vars%savedtke1_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:betaprime', &
+         lakestate_vars%betaprime_col(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:lakeresist', &
+         lakestate_vars%lakeresist_col(bounds%begc:bounds%endc), nc)
+
+    ! --- Energy diagnostics ---
+    call diag_snapshot_1d('laketemp_out:hc_soi', &
+         col_es%hc_soi(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:hc_soisno', &
+         col_es%hc_soisno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:errsoi', &
+         col_ef%errsoi(bounds%begc:bounds%endc), nc)
+
+    ! --- Patch fluxes (energy-corrected) ---
+    call diag_snapshot_1d('laketemp_out:eflx_sh_tot', &
+         veg_ef%eflx_sh_tot(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_out:eflx_sh_grnd', &
+         veg_ef%eflx_sh_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_out:eflx_soil_grnd', &
+         veg_ef%eflx_soil_grnd(bounds%begp:bounds%endp), np)
+    call diag_snapshot_1d('laketemp_out:eflx_gnet', &
+         veg_ef%eflx_gnet(bounds%begp:bounds%endp), np)
+
+    ! --- Water state (post phase change) ---
+    call diag_snapshot_2d('laketemp_out:h2osoi_liq', &
+         col_ws%h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_2d('laketemp_out:h2osoi_ice', &
+         col_ws%h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+    call diag_snapshot_1d('laketemp_out:h2osno', &
+         col_ws%h2osno(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:snow_depth', &
+         col_ws%snow_depth(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_2d('laketemp_out:frac_iceold', &
+         col_ws%frac_iceold(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), nc, nlay)
+
+    ! --- Water fluxes ---
+    call diag_snapshot_1d('laketemp_out:qflx_snofrz_col', &
+         col_wf%qflx_snofrz(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:qflx_snomelt', &
+         col_wf%qflx_snomelt(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:qflx_snow_melt', &
+         col_wf%qflx_snow_melt(bounds%begc:bounds%endc), nc)
+    call diag_snapshot_1d('laketemp_out:eflx_snomelt', &
+         col_ef%eflx_snomelt(bounds%begc:bounds%endc), nc)
+
+  end subroutine LakeTemperature_diag_outputs
 
  end module LakeTemperatureMod
