@@ -53,7 +53,9 @@ module elm_driver
   use HydrologyDrainageMod   , only : HydrologyDrainage   ! (formerly Hydrology2Mod)
   use CanopyHydrologyMod     , only : CanopyHydrology, &     ! (formerly Hydrology1Mod)
                                        CanopyHydrology_diag_inputs, CanopyHydrology_diag_outputs
-  use LakeHydrologyMod       , only : LakeHydrology
+  use LakeHydrologyMod       , only : LakeHydrology, &
+                                      LakeHydrology_diag_inputs, &
+                                      LakeHydrology_diag_outputs
   !
   use AerosolMod             , only : AerosolMasses
   use SnowSnicarMod          , only : SnowAge_grain
@@ -1034,6 +1036,12 @@ contains
        ! LakeHydrology after the new snow filter is built
 
        call t_startf('hylake')
+
+       call LakeHydrology_diag_inputs(bounds_clump, &
+            filter(nc)%num_lakec, filter(nc)%lakec, &
+            filter(nc)%num_lakep, filter(nc)%lakep, &
+            atm2lnd_vars, soilstate_vars, lakestate_vars)
+
        call LakeHydrology(bounds_clump,                                                      &
             filter(nc)%num_lakec, filter(nc)%lakec,                                          &
             filter(nc)%num_lakep, filter(nc)%lakep,                                          &
@@ -1041,6 +1049,13 @@ contains
             filter(nc)%num_lakenosnowc, filter(nc)%lakenosnowc,                              &
             atm2lnd_vars, soilstate_vars,  &
             energyflux_vars, aerosol_vars, lakestate_vars)
+
+       call LakeHydrology_diag_outputs(bounds_clump, &
+            filter(nc)%num_lakec, filter(nc)%lakec, &
+            filter(nc)%num_lakep, filter(nc)%lakep, &
+            filter(nc)%num_lakesnowc, filter(nc)%lakesnowc, &
+            filter(nc)%num_lakenosnowc, filter(nc)%lakenosnowc, &
+            lakestate_vars)
 
        !  Calculate column-integrated aerosol masses, and
        !  mass concentrations for radiative calculations and output
