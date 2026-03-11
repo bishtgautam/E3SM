@@ -913,7 +913,7 @@ contains
 
     ! --- Phase change flag ---
     call diag_snapshot_2d('lakehydro_in:imelt', &
-         real(col_ws%imelt(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), kind=8), nc, nlay)
+         real(col_ef%imelt(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), kind=8), nc, nlay)
 
   end subroutine LakeHydrology_diag_inputs
 
