@@ -306,6 +306,7 @@ contains
      use column_varcon    , only : icol_roof, icol_road_imperv, icol_sunwall, icol_shadewall, icol_road_perv
      use landunit_varcon  , only : istsoil, istcrop, ilowcenpoly, iflatcenpoly, ihighcenpoly
      use elm_time_manager , only : get_step_size, get_nstep
+     use ElmDiagnostics   , only : diag_snapshot_1d, diag_enabled
      use atm2lndType      , only : atm2lnd_type ! land river two way coupling
      use ocn2lndType      , only : ocn2lnd_type
      use lnd2atmType      , only : lnd2atm_type
@@ -363,6 +364,8 @@ contains
      real(r8) :: top_icefrac                                ! temporary, ice fraction in top VIC layers
      real(r8) :: h2osoi_left_vol1                           ! temporary, available volume in the first soil layer
      real(r8) :: pc                                         ! temporary, threhold for surface water storage to outflow
+     real(r8) :: qinmax_diag(bounds%begc:bounds%endc)        ! diagnostic: qinmax per column
+     real(r8) :: qflx_top_soil_infil(bounds%begc:bounds%endc)! diagnostic: qflx_top_soil seen by Infiltration
      !-----------------------------------------------------------------------
 
      associate(                                                    &
@@ -479,6 +482,10 @@ contains
                 endif
              endif
 
+             ! Diagnostic: capture qflx_top_soil as seen by Infiltration
+             qflx_top_soil_infil(c) = qflx_top_soil(c)
+             qinmax_diag(c) = 0._r8
+
              !1. partition surface inputs between soil and h2osfc
              qflx_in_soil(c) = (1._r8 - frac_h2osfc(c)) * (qflx_top_soil(c)  - qflx_surf(c))
              qflx_in_h2osfc(c) = frac_h2osfc(c) * (qflx_top_soil(c)  - qflx_surf(c))
@@ -526,6 +533,7 @@ contains
                   qinmax=(1._r8 - fsat(c)) * minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
                 end if
              end if
+             qinmax_diag(c) = qinmax
              
              if ( use_modified_infil ) then
                 ! Assume frac_h2osfc occurs on fsat
@@ -722,6 +730,24 @@ contains
           endif
 
        enddo
+
+       ! Diagnostic snapshot of Infiltration intermediates
+       if (diag_enabled) then
+          call diag_snapshot_1d('infil_mid:qflx_top_soil', qflx_top_soil_infil(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:qflx_in_soil', qflx_in_soil(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:qinmax', qinmax_diag(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:qflx_infl_excess', qflx_infl_excess(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:qflx_infl', qflx_infl(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:fsat', fsat(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('infil_mid:h2osfc', h2osfc(bounds%begc:bounds%endc), &
+               bounds%endc-bounds%begc+1)
+       end if
 
        ! No infiltration for impervious urban surfaces
 

@@ -23,7 +23,8 @@ Module HydrologyNoDrainageMod
   use VegetationType    , only : veg_pp
   use TopounitDataType  , only : top_as, top_af ! Atmospheric state and flux variables
   use elm_instMod       , only : alm_fates , ep_betr
-  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_snapshot_int_1d, diag_enabled
+  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_snapshot_int_1d, diag_snapshot_scalar, diag_enabled
+  use VegetationDataType, only : veg_wf
 
 
   use timeinfoMod
@@ -220,6 +221,74 @@ contains
       call SnowWater(bounds, num_snowc, filter_snowc, num_nosnowc, filter_nosnowc, &
            atm2lnd_vars, aerosol_vars)
 
+      ! Diagnostic snapshot after SnowWater
+      if (diag_enabled) then
+         call diag_snapshot_1d('hydro_after_snow:qflx_top_soil', &
+              col_wf%qflx_top_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_after_snow:qflx_rain_grnd', &
+              col_wf%qflx_rain_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('hydro_after_snow:qflx_snow_melt', &
+              col_wf%qflx_snomelt(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+      end if
+
+      ! ========== DIAGNOSTICS: SurfaceRunoff + Infiltration INPUTS ==========
+      if (diag_enabled) then
+         ! Soil hydraulic properties (not in hydro_in)
+         call diag_snapshot_2d('surfrun_in:hksat', &
+              soilstate_vars%hksat_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_1d('surfrun_in:wtfact', &
+              soilstate_vars%wtfact_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Soilhydrology state
+         call diag_snapshot_1d('surfrun_in:zwt', &
+              soilhydrology_vars%zwt_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:zwt_perched', &
+              soilhydrology_vars%zwt_perched_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:frost_table', &
+              soilhydrology_vars%frost_table_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:h2osfc_thresh', &
+              soilhydrology_vars%h2osfc_thresh_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Column properties
+         call diag_snapshot_int_1d('surfrun_in:nlevbed', &
+              col_pp%nlevbed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:topo_slope', &
+              col_pp%topo_slope(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Gridcell-level fover (decay factor for fsat)
+         ! fover is dimensioned by gridcell: fover(bounds%begg:bounds%endg)
+         ! Snapshot gridcell-level array
+         call diag_snapshot_1d('surfrun_in:fover', &
+              soilhydrology_vars%fover(col_pp%gridcell(bounds%begc):col_pp%gridcell(bounds%endc)), &
+              col_pp%gridcell(bounds%endc)-col_pp%gridcell(bounds%begc)+1)
+         ! Fluxes not in hydro_in
+         call diag_snapshot_1d('surfrun_in:qflx_floodc', &
+              col_wf%qflx_floodc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:qflx_snow_h2osfc', &
+              col_wf%qflx_snow_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:qflx_ev_soil', &
+              col_wf%qflx_ev_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:qflx_ev_h2osfc', &
+              col_wf%qflx_ev_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Water state
+         call diag_snapshot_1d('surfrun_in:h2osfc', &
+              col_ws%h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:frac_h2osfc_act', &
+              col_ws%frac_h2osfc_act(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Filters
+         call diag_snapshot_int_1d('surfrun_in:filter_hydrologyc', &
+              filter_hydrologyc(1:num_hydrologyc), num_hydrologyc)
+         call diag_snapshot_int_1d('surfrun_in:filter_urbanc', &
+              filter_urbanc(1:num_urbanc), num_urbanc)
+         ! Scalar config
+         if (soilhydrology_vars%origflag == 1) then
+            call diag_snapshot_scalar('surfrun_in:origflag', 1.0_r8)
+         else
+            call diag_snapshot_scalar('surfrun_in:origflag', 0.0_r8)
+         end if
+         call diag_snapshot_scalar('surfrun_in:e_ice', e_ice)
+         call diag_snapshot_scalar('surfrun_in:dtime', dtime)
+      end if
+      ! ====================================================================
+
       ! mapping soilmoist from CLM to VIC layers for runoff calculations
       if (use_vichydro) then
          call ELMVICMap(bounds, num_hydrologyc, filter_hydrologyc, &
@@ -247,6 +316,40 @@ contains
       end if
       !------------------------------------------------------------------------------------
 
+      ! ========== DIAGNOSTICS: SurfaceRunoff + Infiltration OUTPUTS ==========
+      if (diag_enabled) then
+         ! SurfaceRunoff outputs
+         call diag_snapshot_1d('surfrun_out:qflx_surf', &
+              col_wf%qflx_surf(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:fsat', &
+              soilhydrology_vars%fsat_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:fcov', &
+              soilhydrology_vars%fcov_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('surfrun_out:fracice', &
+              soilhydrology_vars%fracice_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('surfrun_out:icefrac', &
+              soilhydrology_vars%icefrac_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_1d('surfrun_out:qflx_top_soil', &
+              col_wf%qflx_top_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Infiltration outputs
+         call diag_snapshot_1d('surfrun_out:qflx_infl', &
+              col_wf%qflx_infl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:qflx_h2osfc_surf', &
+              col_wf%qflx_h2osfc_surf(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:qflx_gross_infl_soil', &
+              col_wf%qflx_gross_infl_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:qflx_gross_evap_soil', &
+              col_wf%qflx_gross_evap_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_out:h2osfc', &
+              col_ws%h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('surfrun_out:eff_porosity', &
+              eff_porosity(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+      end if
+      ! ====================================================================
+
       !!TODO:  need to fix the waterstate_vars dependence here.
 #ifndef _OPENACC
       if (use_betr) then
@@ -263,6 +366,35 @@ contains
 
       call Compute_EffecRootFrac_And_VertTranSink(bounds, num_hydrologyc, &
            filter_hydrologyc, soilstate_vars, canopystate_vars, energyflux_vars)
+
+      ! ========== DIAGNOSTICS: RootWaterUpdate INPUTS/OUTPUTS ==========
+      if (diag_enabled) then
+         ! Patch-level inputs
+         call diag_snapshot_2d('rootwu_in:rootr_patch', &
+              soilstate_vars%rootr_patch(bounds%begp:bounds%endp, 1:nlevgrnd), &
+              bounds%endp-bounds%begp+1, nlevgrnd)
+         call diag_snapshot_1d('rootwu_in:qflx_tran_veg_patch', &
+              veg_wf%qflx_tran_veg(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         call diag_snapshot_1d('rootwu_in:qflx_tran_veg_col', &
+              col_wf%qflx_tran_veg(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! Patch-column mapping
+         call diag_snapshot_int_1d('rootwu_in:npfts', &
+              col_pp%npfts(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_int_1d('rootwu_in:pfti', &
+              col_pp%pfti(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_int_1d('rootwu_in:patch_column', &
+              veg_pp%column(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         call diag_snapshot_1d('rootwu_in:patch_wtcol', &
+              veg_pp%wtcol(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         ! Column-level outputs
+         call diag_snapshot_2d('rootwu_out:rootr_col', &
+              soilstate_vars%rootr_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootwu_out:qflx_rootsoi', &
+              col_wf%qflx_rootsoi(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+      end if
+      ! ====================================================================
 
       if ( use_fan ) then 
          ! save the h2osoi_liq in top layer before evaluating the soilwater movement
