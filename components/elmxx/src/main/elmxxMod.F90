@@ -25,6 +25,10 @@ module elmxxMod
                                surfdata_read, numurbl, natpft, nlevsoi, &
                                pct_natveg, pct_crop, pct_lake, pct_wetland, &
                                pct_glacier, pct_urban
+  use elmxxSubgridMod , only : elmxx_build_subgrid, elmxx_subgrid_clean, &
+                               subgrid_built, num_landunits, num_columns, &
+                               num_patches, lun_itype, col_landunit, &
+                               istsoil, isturb_tbd, isturb_hd, isturb_md
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
   use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
@@ -173,6 +177,7 @@ contains
     integer :: i, n, k
     integer :: num_cells_grid                  ! ni*nj, including non-land cells
     integer :: ierr_elmxx                      ! ELMxx C API status
+    integer :: n_nat_col, n_nat_patch, n_urb_lun
     integer, allocatable :: land_ids(:)        ! global grid IDs of the active land cells
     character(len=*), parameter :: subname = '(elmxx_init) '
 
@@ -258,7 +263,8 @@ contains
     if (len_trim(fsurdat) > 0) then
        call elmxx_read_surfdata(logunit, fsurdat, num_cells_grid, &
                                 natural_id_cells_owned)
-       call elmxx_report_subgrid(logunit)
+       call elmxx_report_composition(logunit)
+       call elmxx_build_subgrid(logunit, num_cells_owned)
     else
        if (masterproc) then
           write(logunit,*) subname,'no fsurdat in lnd_in; no surface dataset read'
@@ -278,19 +284,27 @@ contains
        call shr_sys_flush(logunit)
     end if
 
-    ! Placeholder counts -- see the elmxx_state declaration above. ELMxxCreate
-    ! rejects a zero natural-column or natural-patch count, so a rank that owns
-    ! no land cells would abort; elmxx_init already aborts earlier when
-    ! npes > numg, which is the only way that arises today.
-    call ELMxxCreate(num_cells_owned, num_cells_owned, 0, elmxx_state, ierr_elmxx)
+    ! Counts come from the subgrid once there is one. Without a surface dataset
+    ! there is no subgrid, so fall back to the Stage 1 placeholder rather than
+    ! failing -- a domain-only case stays runnable.
+    if (subgrid_built) then
+       call elmxx_count_for_create(n_nat_col, n_nat_patch, n_urb_lun)
+    else
+       n_nat_col   = num_cells_owned
+       n_nat_patch = num_cells_owned
+       n_urb_lun   = 0
+    end if
+
+    call ELMxxCreate(n_nat_col, n_nat_patch, n_urb_lun, elmxx_state, ierr_elmxx)
     if (ierr_elmxx /= ELMXX_SUCCESS) then
        write(logunit,*) subname,'ELMxxCreate failed with status ',ierr_elmxx
        call shr_sys_abort(subname//' ERROR: ELMxxCreate failed')
     end if
     elmxx_state_created = .true.
 
-    write(logunit,*) subname,'rank ',iam,' created ELMxx object for ', &
-                     num_cells_owned,' cells'
+    write(logunit,*) subname,'rank ',iam,' created ELMxx object: natural ', &
+                     n_nat_col,' columns ',n_nat_patch,' patches, urban ', &
+                     n_urb_lun,' landunits'
     call shr_sys_flush(logunit)
 
     if (masterproc) then
@@ -301,7 +315,68 @@ contains
   end subroutine elmxx_init
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_report_subgrid(logunit)
+  subroutine elmxx_count_for_create(n_nat_col, n_nat_patch, n_urb_lun)
+    !
+    ! !DESCRIPTION:
+    ! Translate the subgrid into the three counts ELMxxCreate wants.
+    !
+    ! ELMxx's C++ side is organised per surface type, not as one flat begc:endc
+    ! span, so it needs the natural-vegetation columns and patches and the urban
+    ! landunit count -- not the totals. Lake and glacier are carried by the
+    ! subgrid but are not part of this call: lake state is allocated separately
+    ! (ELMxxAllocateLakeState) and glacier has no kernels at all.
+    !
+    implicit none
+    !
+    integer, intent(out) :: n_nat_col, n_nat_patch, n_urb_lun
+    !
+    integer :: l, c
+
+    n_nat_col = 0; n_nat_patch = 0; n_urb_lun = 0
+
+    do l = 1, num_landunits
+       select case (lun_itype(l))
+       case (istsoil)
+          n_nat_col = n_nat_col + 1
+       case (isturb_tbd, isturb_hd, isturb_md)
+          n_urb_lun = n_urb_lun + 1
+       end select
+    end do
+
+    ! Patches on natural-vegetation columns. Counted from the column side so it
+    ! stays correct if a landunit ever gets more than one column.
+    do c = 1, num_columns
+       if (lun_itype(col_landunit(c)) == istsoil) then
+          n_nat_patch = n_nat_patch + count_patches_on(c)
+       end if
+    end do
+
+    ! ELMxxCreate rejects zero natural columns or patches. Every gridcell gets a
+    ! natural-vegetation landunit, so this can only happen with no cells at all,
+    ! which elmxx_init already rules out.
+    if (n_nat_col <= 0 .or. n_nat_patch <= 0) then
+       call shr_sys_abort('(elmxx_count_for_create) ERROR: no natural columns or patches')
+    end if
+
+  end subroutine elmxx_count_for_create
+
+  !-----------------------------------------------------------------------
+  integer function count_patches_on(c)
+    !
+    use elmxxSubgridMod, only : num_patches, patch_column
+    implicit none
+    integer, intent(in) :: c
+    integer :: p
+
+    count_patches_on = 0
+    do p = 1, num_patches
+       if (patch_column(p) == c) count_patches_on = count_patches_on + 1
+    end do
+
+  end function count_patches_on
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_report_composition(logunit)
     !
     ! !DESCRIPTION:
     ! Summarize the subgrid composition just read, and check it is self
@@ -319,7 +394,7 @@ contains
     integer  :: i, n_nat, n_urb, n_lake, n_gla, n_wet, n_crop
     real(r8) :: total, worst
     real(r8), parameter :: pct_tol = 1.0e-6_r8   ! percentage points
-    character(len=*), parameter :: subname = '(elmxx_report_subgrid) '
+    character(len=*), parameter :: subname = '(elmxx_report_composition) '
 
     n_nat = 0; n_urb = 0; n_lake = 0; n_gla = 0; n_wet = 0; n_crop = 0
     worst = 0.0_r8
@@ -361,7 +436,7 @@ contains
        call shr_sys_flush(logunit)
     end if
 
-  end subroutine elmxx_report_subgrid
+  end subroutine elmxx_report_composition
 
   !-----------------------------------------------------------------------
   subroutine elmxx_run(logunit, coupling_dt_in_sec)
@@ -410,6 +485,7 @@ contains
        call ELMxxKokkosFinalize()
     end if
 
+    call elmxx_subgrid_clean()
     call elmxx_surfdata_clean()
 
     if (associated(natural_id_cells_owned)) deallocate(natural_id_cells_owned)
