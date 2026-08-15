@@ -163,6 +163,22 @@ contains
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
+       ! ORDERING FINDING (2026-08-15): these cannot usefully precede
+       ! SurfaceAlbedo, whatever the driver order suggests.
+       !
+       ! SoilTemperature is driven by hs_soil / hs_top_snow / hs_h2osfc, the
+       ! ground surface energy balance, which ELM builds in SoilTemperatureMod
+       ! as
+       !     eflx_gnet_soil = sabg_soil + dlrad
+       !                    + (1-frac_veg_nosno)*emg*forc_lwrad
+       !                    - lwrad_emit_soil
+       !                    - (eflx_sh_soil + qflx_ev_soil*htvp)
+       ! sabg_soil is absorbed shortwave, a SurfaceRadiation output, and
+       ! SurfaceRadiation needs SurfaceAlbedo. It also reads sabg_lyr
+       ! directly. Wiring these five with sabg zero would drive the soil
+       ! column with its dominant daytime term missing -- a run that completes
+       ! and means nothing, which is the failure this switch exists to stop.
+       !
        ! A different integration surface entirely. These are SHARED kernels:
        ! they do not read naturalCol, they read their own per-kernel state
        ! seeded through ST_/SF_/SRI_/RWU_/HD_ setters -- 163 of them -- on top
@@ -170,9 +186,10 @@ contains
        ! nolakep, hydrologyc and urbanc filters and an urbpoi flag.
        ! elmxxFilterMod already builds all four filters, so the Fortran side
        ! fits; the seeding does not exist yet.
-       why = 'needs ELMxxInitSharedMetadata plus the shared filters, and ' // &
-             'per-kernel ST_/SF_/SRI_/RWU_/HD_ seeding (163 setters); ' // &
-             'these do not read naturalCol'
+       why = 'needs SurfaceAlbedo first -- their surface energy balance ' // &
+             'is driven by sabg from SurfaceRadiation -- then ' // &
+             'ELMxxInitSharedMetadata, the shared filters, and per-kernel ' // &
+             'ST_/SF_/SRI_/RWU_/HD_ seeding'
 
     case (K_URBANRAD, K_URBANFLUX)
        why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &

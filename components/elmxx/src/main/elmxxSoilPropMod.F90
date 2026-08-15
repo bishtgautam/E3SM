@@ -70,6 +70,16 @@ module elmxxSoilPropMod
   real(r8), public, pointer :: watfc (:,:) => null()  ! (nc, nlevgrnd) field capacity, v/v
 
   !--------------------------------------------------------------------------
+  ! Thermal properties, from the same ELM SoilStateType block. Split out here
+  ! rather than folded above because only SoilTemperature reads them, and
+  ! keeping them separate makes it obvious which kernel required them.
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: tkmg  (:,:) => null()  ! (nc, nlevgrnd) dry-solid conductivity, W/m/K
+  real(r8), public, pointer :: tkdry (:,:) => null()  ! (nc, nlevgrnd) dry-soil conductivity, W/m/K
+  real(r8), public, pointer :: tksatu(:,:) => null()  ! (nc, nlevgrnd) saturated conductivity, W/m/K
+  real(r8), public, pointer :: csol  (:,:) => null()  ! (nc, nlevgrnd) heat capacity, J/m3/K
+
+  !--------------------------------------------------------------------------
   ! Cold-start column state, on the snow+ground index space the kernels use.
   ! Slot m = 1..nlevtot maps to ELM layer j = m - nlevsno, so m = 6 is ELM's
   ! first soil layer and m = 1..5 are the snow slots.
@@ -144,17 +154,25 @@ contains
     real(r8) :: wsat_min, b_min, suc_min, xksat
     real(r8) :: om_watsat, om_b, om_sucsat, om_hksat
     real(r8) :: perc_norm, perc_frac, uncon_frac, uncon_hksat
+    real(r8) :: bd, tkm
     ! ELM SoilStateType
     real(r8), parameter :: organic_max = 130.0_r8   ! clm_params, kg/m3
     real(r8), parameter :: zsapric     = 0.5_r8     ! m
     real(r8), parameter :: pcalpha     = 0.5_r8     ! percolation threshold
     real(r8), parameter :: pcbeta      = 0.139_r8   ! percolation exponent
     real(r8), parameter :: secspday    = 86400.0_r8
+    ! Thermal, ELM SoilStateType
+    real(r8), parameter :: om_tkm       = 0.25_r8    ! organic conductivity, W/m/K
+    real(r8), parameter :: om_tkd       = 0.05_r8    ! dry organic conductivity
+    real(r8), parameter :: om_csol      = 2.5_r8     ! peat heat capacity, *1e6 J/K/m3
+    real(r8), parameter :: csol_bedrock = 2.0e6_r8   ! granite/sandstone, J/m3/K
     character(len=*), parameter :: subname = '(elmxx_soil_prop_init) '
 
     allocate(watsat(num_columns, nlevgrnd), bsw(num_columns, nlevgrnd), &
              sucsat(num_columns, nlevgrnd), hksat(num_columns, nlevgrnd), &
-             watfc(num_columns, nlevgrnd))
+             watfc(num_columns, nlevgrnd), tkmg(num_columns, nlevgrnd), &
+             tkdry(num_columns, nlevgrnd), tksatu(num_columns, nlevgrnd), &
+             csol(num_columns, nlevgrnd))
 
     do c = 1, num_columns
        do j = 1, nlevgrnd
@@ -204,6 +222,24 @@ contains
           ! --- field capacity: the water content at which hk = 0.1 mm/day ---
           watfc(c,j) = watsat(c,j) * &
                (0.1_r8 / (hksat(c,j)*secspday))**(1.0_r8/(2.0_r8*bsw(c,j) + 3.0_r8))
+
+          ! --- thermal properties (ELM SoilStateType) ---
+          ! bd is bulk density, and the (sand+clay) denominator is why a
+          ! column with neither would divide by zero -- surfdata always has
+          ! one or the other, but guard rather than assume.
+          bd  = (1.0_r8 - watsat(c,j)) * 2.7e3_r8
+          if (sand + clay <= 0.0_r8) then
+             call shr_sys_abort(subname//'ERROR: column has neither sand nor clay')
+          end if
+          tkm = (1.0_r8 - om_frac)*(8.80_r8*sand + 2.92_r8*clay)/(sand + clay) &
+              + om_tkm*om_frac
+          tkmg  (c,j) = tkm ** (1.0_r8 - watsat(c,j))
+          tksatu(c,j) = tkmg(c,j) * 0.57_r8**watsat(c,j)
+          tkdry (c,j) = ((0.135_r8*bd + 64.7_r8) / (2.7e3_r8 - 0.947_r8*bd)) &
+                      * (1.0_r8 - om_frac) + om_tkd*om_frac
+          csol  (c,j) = ((1.0_r8 - om_frac)*(2.128_r8*sand + 2.385_r8*clay)/(sand + clay) &
+                      + om_csol*om_frac) * 1.0e6_r8
+          if (j > nlevbed) csol(c,j) = csol_bedrock
 
        end do
     end do
@@ -326,6 +362,10 @@ contains
     write(logunit,*) '    sucsat [mm]   ',minval(sucsat),' .. ',maxval(sucsat)
     write(logunit,*) '    hksat  [mm/s] ',minval(hksat) ,' .. ',maxval(hksat)
     write(logunit,*) '    watfc  [v/v]  ',minval(watfc) ,' .. ',maxval(watfc)
+    write(logunit,*) '    tkmg   [W/m/K]',minval(tkmg)  ,' .. ',maxval(tkmg)
+    write(logunit,*) '    tkdry  [W/m/K]',minval(tkdry) ,' .. ',maxval(tkdry)
+    write(logunit,*) '    tksatu [W/m/K]',minval(tksatu),' .. ',maxval(tksatu)
+    write(logunit,*) '    csol   [J/m3/K]',minval(csol) ,' .. ',maxval(csol)
     call shr_sys_flush(logunit)
 
     if (minval(watsat) <= 0.0_r8 .or. maxval(watsat) >= 1.0_r8) then
@@ -340,6 +380,14 @@ contains
     if (any(watfc > watsat)) then
        call shr_sys_abort(subname//'ERROR: field capacity exceeds saturation')
     end if
+    ! Saturated soil conducts heat better than dry soil, always. If this
+    ! inverts, tkmg's exponent or watsat is wrong.
+    if (any(tksatu < tkdry)) then
+       call shr_sys_abort(subname//'ERROR: saturated conductivity below dry conductivity')
+    end if
+    if (minval(csol) <= 0.0_r8) then
+       call shr_sys_abort(subname//'ERROR: non-positive volumetric heat capacity')
+    end if
 
   end subroutine report
 
@@ -351,6 +399,10 @@ contains
     if (associated(sucsat)) deallocate(sucsat)
     if (associated(hksat))  deallocate(hksat)
     if (associated(watfc))  deallocate(watfc)
+    if (associated(tkmg))   deallocate(tkmg)
+    if (associated(tkdry))  deallocate(tkdry)
+    if (associated(tksatu)) deallocate(tksatu)
+    if (associated(csol))   deallocate(csol)
     if (associated(col_dz))         deallocate(col_dz)
     if (associated(col_t_soisno))   deallocate(col_t_soisno)
     if (associated(col_h2osoi_liq)) deallocate(col_h2osoi_liq)
@@ -358,6 +410,7 @@ contains
     if (associated(col_h2osoi_vol)) deallocate(col_h2osoi_vol)
     watsat => null(); bsw => null(); sucsat => null()
     hksat  => null(); watfc => null()
+    tkmg => null(); tkdry => null(); tksatu => null(); csol => null()
     col_dz => null(); col_t_soisno => null()
     col_h2osoi_liq => null(); col_h2osoi_ice => null(); col_h2osoi_vol => null()
     soil_prop_built = .false.
