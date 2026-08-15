@@ -39,6 +39,8 @@ module elmxxMod
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
                                       elmxx_kokkos_seed_topology, &
+                                      elmxx_kokkos_seed_state, &
+                                      elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -356,6 +358,7 @@ contains
        end if
 
        call elmxx_kokkos_seed_topology(elmxx_state, logunit)
+       call elmxx_kokkos_seed_state(elmxx_state, logunit)
     end if
 
     if (masterproc) then
@@ -521,6 +524,16 @@ contains
     ! every kernel still off, so nothing between the set and the get could
     ! legitimately have changed a value.
     !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    ! Crossing one of two: atmospheric forcing in. The forcing arrays were
+    ! filled from x2l_l before this call, so this is where they reach the
+    ! device. Nothing else crosses per step -- the seeded state does not
+    ! change while the kernels are off.
+    !-----------------------------------------------------------------------
+    if (kokkos_state_built) then
+       call elmxx_kokkos_push_forcing(elmxx_state, logunit)
+    end if
+
     if (kokkos_state_built .and. nstep == 1) then
        call elmxx_verify_kokkos_boundary(logunit)
     end if
@@ -552,6 +565,14 @@ contains
     if (nfail /= 0) then
        call shr_sys_abort(subname//' ERROR: packed Fortran<->Kokkos maps do not round-trip')
     end if
+
+    ! The probe writes fingerprints into real state fields -- t_grnd, t_veg,
+    ! h2osno and friends -- so the seeded values have to be put back. Harmless
+    ! today, since no kernel reads them yet, but leaving garbage in persistent
+    ! state to be discovered at Stage 4 is exactly the kind of thing that gets
+    ! blamed on the kernel. Re-seeding is exact here because the state is
+    ! static while the kernels are off.
+    call elmxx_kokkos_seed_state(elmxx_state, logunit)
 
   end subroutine elmxx_verify_kokkos_boundary
 
