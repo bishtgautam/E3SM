@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet type="text/xsl" href="namelist_definition.xsl"?>
+
+<namelist_definition>
+
+<!-- ========================================================================================  -->
+<!-- ELMXX Namelist -->
+<!-- ========================================================================================  -->
+
+<entry id="do_elmxx"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: .true.
+If .true., elmxx will run
+</entry>
+
+<entry id="fatmlndfrc"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: ' '
+Full pathname of the land domain (fraction) file. Set from the xml variables
+LND_DOMAIN_PATH and LND_DOMAIN_FILE. ELMXX reads the grid dimensions, cell
+center coordinates, cell areas, mask and land fraction from this file, and
+hands them to the coupler as the land domain.
+</entry>
+
+</namelist_definition>

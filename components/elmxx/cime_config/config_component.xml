@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet type="text/xsl" href="definitions_variables.xsl" ?>
+
+<definitions_variables>
+
+  <entry id="COMP_LND">
+    <type>char</type>
+    <valid_values>elmxx</valid_values>
+    <default_value>elmxx</default_value>
+    <group>case_comp</group>
+    <file>env_case.xml</file>
+    <desc>Name of land component</desc>
+  </entry>
+
+  <entry id="ELMXX_NAMELIST_OPTS">
+    <type>char</type>
+    <valid_values></valid_values>
+    <default_value></default_value>
+    <group>run_component_elmxx</group>
+    <file>env_run.xml</file>
+    <desc>ELMXX-specific namelist settings for the ELMXX build-namelist.
+      ELMXX_NAMELIST_OPTS is normally set as a compset variable and in general
+      should not be modified for supported compsets. It is recommended that if
+      you want to modify this value for your experiment, you should use your own
+      user-defined component sets via using create_newcase with a compset_file
+      argument.</desc>
+  </entry>
+
+  <description>
+    <desc compset="_ELMXX">ELMXX:</desc>
+  </description>
+
+  <help>
+    =========================================
+    ELMXX naming conventions
+    =========================================
+    ELMXX is the Kokkos port of the E3SM Land Model (ELM). It is selected with
+    the LND compset token ELMXX, e.g.
+
+      2000_DATM%QIA_ELMXX_SICE_SOCN_SROF_SGLC_SWAV
+
+    Note that ELMXX writes its namelist to lnd_in, the same file name used by
+    ELM, since namelist files are named after the component class.
+  </help>
+
+</definitions_variables>

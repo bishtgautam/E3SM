@@ -1,0 +1,12 @@
+!----------------------------------------------------------------------------------
+! Users should add all user specific namelist changes below in the form of
+! namelist_var = new_namelist_value
+!
+! The resulting namelist is written to lnd_in (namelist files are named after the
+! component class, not the component, so ELMXX uses the same file name as ELM).
+!
+! NOTE: fatmlndfrc is set from the xml variables LND_DOMAIN_PATH and
+!       LND_DOMAIN_FILE. Change those with ./xmlchange rather than overriding
+!       fatmlndfrc here, otherwise the land domain will no longer match the
+!       domain the coupler checks it against.
+!----------------------------------------------------------------------------------

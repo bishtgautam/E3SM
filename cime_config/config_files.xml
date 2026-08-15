@@ -144,6 +144,7 @@
     <default_value>unset</default_value>
     <values>
       <value component="elm"                         >$SRCROOT/components/elm</value>
+      <value component="elmxx"                       >$SRCROOT/components/elmxx</value>
       <value component="dlnd"                        >$SRCROOT/components/data_comps/dlnd</value>
       <value component="slnd"                        >$SRCROOT/components/stub_comps/slnd</value>
       <value component="xlnd"                        >$SRCROOT/components/xcpl_comps/xlnd</value>
@@ -268,6 +269,7 @@
       <value component="eam"      >$COMP_ROOT_DIR_ATM/cime_config/config_compsets.xml</value>
       <value component="scream"   >$COMP_ROOT_DIR_ATM/cime_config/config_compsets.xml</value>
       <value component="elm"      >$COMP_ROOT_DIR_LND/cime_config/config_compsets.xml</value>
+      <value component="elmxx"    >$COMP_ROOT_DIR_LND/cime_config/config_compsets.xml</value>
       <value component="cice"     >$COMP_ROOT_DIR_ICE/cime_config/config_compsets.xml</value>
       <value component="mpaso"    >$COMP_ROOT_DIR_OCN/cime_config/config_compsets.xml</value>
       <value component="mali"     >$COMP_ROOT_DIR_GLC/cime_config/config_compsets.xml</value>
@@ -291,6 +293,7 @@
       <value component="eam"      >$SRCROOT/components/eam/cime_config/config_pes.xml</value>
       <value component="scream"   >$SRCROOT/components/eamxx/cime_config/config_pes.xml</value>
       <value component="elm"      >$SRCROOT/components/elm/cime_config/config_pes.xml</value>
+      <value component="elmxx"    >$SRCROOT/components/elmxx/cime_config/config_pes.xml</value>
       <value component="cice"     >$SRCROOT/components/cice/cime_config/config_pes.xml</value>
       <value component="mpaso"    >$SRCROOT/components/mpas-ocean/cime_config/config_pes.xml</value>
       <value component="mali"     >$SRCROOT/components/mpas-albany-landice/cime_config/config_pes.xml</value>
