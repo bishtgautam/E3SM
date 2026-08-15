@@ -251,6 +251,11 @@ contains
          ! Column properties
          call diag_snapshot_int_1d('surfrun_in:nlevbed', &
               col_pp%nlevbed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         ! snl is needed to locate the top soil layer in the combined
+         ! snow+soil arrays; it is captured in hydro_in too, but SurfRunInfil
+         ! consumers read the surfrun_in group on its own.
+         call diag_snapshot_int_1d('surfrun_in:snl', &
+              snl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
          call diag_snapshot_1d('surfrun_in:topo_slope', &
               col_pp%topo_slope(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
          ! Gridcell-level fover (decay factor for fsat)
@@ -286,6 +291,27 @@ contains
          end if
          call diag_snapshot_scalar('surfrun_in:e_ice', e_ice)
          call diag_snapshot_scalar('surfrun_in:dtime', dtime)
+         ! State consumed by SurfaceRunoff/Infiltration. These also exist in the
+         ! hydro_in group, but are snapshotted again here on purpose: hydro_in is
+         ! taken at the top of HydrologyNoDrainage, while these are the values as
+         ! they stand immediately before SurfaceRunoff runs, after SnowWater and
+         ! the preceding updates have already modified them.
+         call diag_snapshot_2d('surfrun_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('surfrun_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('surfrun_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         call diag_snapshot_2d('surfrun_in:watsat', watsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_1d('surfrun_in:frac_sno_eff', &
+              frac_sno_eff(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:frac_h2osfc', &
+              frac_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:qflx_top_soil', &
+              col_wf%qflx_top_soil(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('surfrun_in:qflx_evap_grnd', &
+              col_wf%qflx_evap_grnd(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
       end if
       ! ====================================================================
 
