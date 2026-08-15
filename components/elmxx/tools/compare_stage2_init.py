@@ -60,9 +60,12 @@ def records(paths: Iterable[str]):
     patch: Dict[Tuple[int, int, int, int], Tuple[float, ...]] = {}
     dates = set()
     for pattern in paths:
-        matched = glob.glob(pattern)
+        matched = sorted(glob.glob(pattern))
         if not matched:
             raise SystemExit(f"no ELMxx snapshot matches {pattern}")
+        # Sorted, so rank000000 precedes rank000001: concatenating the
+        # rank-local snapshots in rank order is what reproduces ELMxx's global
+        # ordering, which the order report below compares against ELM's.
         for filename in matched:
             for line in Path(filename).read_text().splitlines():
                 fields = line.split()
@@ -107,6 +110,41 @@ def assert_values(label: str, actual: Dict, expected: Dict, atol: float) -> int:
                 )
             checked += 1
     return checked
+
+
+def order_report(label: str, actual: Dict, expected: Dict) -> Tuple[bool, str]:
+    """Compare the sequence of keys, which the value checks above discard.
+
+    assert_same_keys compares key *sets* and assert_values iterates in sorted
+    order, so neither can see position. Both artifacts do carry it --
+    elmxxInitCheckMod writes its records in index order, and the restart
+    arrays are in ELM's global I/O order -- so the sequences can be compared.
+
+    ELM HAS TWO ORDERINGS, AND THIS COMPARES AGAINST THE SECOND:
+
+      in-memory (begl:endl, begc:endc, begp:endp)
+          clump, then landunit TYPE, then gridcell -- initGridCellsMod.F90's
+          header comment, and how its per-type topounit loops actually fill.
+
+      global / on-disk (restart, history)
+          gridcell-major in natural grid order. decompInit_glcp builds the
+          per-gridcell subgrid counts, gathers them in glo order and takes a
+          running sum, so each gridcell's whole subgrid is contiguous. That is
+          what makes a restart readable on a different PE count.
+
+    The two coincide only at one gridcell per clump. ELMxx's Fortran subgrid
+    is type-major, so it already follows the in-memory convention; a PERMUTED
+    verdict here is the memory-order-vs-file-order difference ELM itself has,
+    not a disagreement with begc:endc.
+    """
+    aseq, eseq = list(actual.keys()), list(expected.keys())
+    if aseq == eseq:
+        return True, f"{label}: identical ({len(aseq)})"
+    for position, (a, e) in enumerate(zip(aseq, eseq), start=1):
+        if a != e:
+            return False, (f"{label}: diverges at position {position} of "
+                           f"{len(eseq)} -- ELMxx={a}, ELM={e}")
+    return False, f"{label}: ELMxx has {len(aseq)} entries, ELM has {len(eseq)}"
 
 
 def surfdata_dimensions(surfdata: Path) -> Tuple[int, int]:
@@ -170,6 +208,11 @@ def main() -> int:
                         help="snapshot path or glob; repeatable")
     parser.add_argument("--atol", type=float, default=1.0e-10,
                         help="absolute tolerance for ELM floating values")
+    parser.add_argument("--require-order", action="store_true",
+                        help="fail if ELMxx's subgrid order differs from ELM's "
+                             "global on-disk order; off by default, because "
+                             "the two legitimately differ whenever a clump "
+                             "holds more than one gridcell (see order_report)")
     args = parser.parse_args()
 
     elmxx_land, elmxx_col, elmxx_patch, date = records(args.elmxx_snapshot)
@@ -215,11 +258,31 @@ def main() -> int:
         print(f"Stage 2 initialization comparison FAILED: {exc}", file=sys.stderr)
         return 1
 
+    order = [
+        order_report("landunit", elmxx_land, elm_land),
+        order_report("column", elmxx_col, elm_col),
+        order_report("patch", elmxx_patch, elm_patch),
+    ]
+    aligned = all(ok for ok, _ in order)
+
     print(
         "Stage 2 initialization comparison PASSED: "
         f"{len(elm_land)} landunits, {len(elm_col)} columns, {len(elm_patch)} patches; "
         f"{checked} exact-to-tolerance values; ELMxx month/day={date[0]}/{date[1]}."
     )
+    print("  ELMxx subgrid order vs ELM's global (on-disk) order "
+          f"-- {'IDENTITY' if aligned else 'PERMUTED'}")
+    for _, message in order:
+        print(f"    {message}")
+    if not aligned:
+        print("    (expected off single-gridcell cases: ELM's on-disk order is"
+              " gridcell-major,\n     its begc:endc is type-major, and ELMxx"
+              " follows begc:endc. The I/O\n     wrappers must permute, not"
+              " alias -- see STATUS.md)")
+        if args.require_order:
+            print("Stage 2 initialization comparison FAILED: ordering differs "
+                  "and --require-order was given", file=sys.stderr)
+            return 1
     return 0
 
 
