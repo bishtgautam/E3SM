@@ -45,7 +45,8 @@ module elmxxSubgridMod
   use elmxxSpmdMod    , only : masterproc, iam, mpicom_lnd
   use elmxxSurfdataMod, only : numurbl, natpft, &
                                pct_natveg, pct_crop, pct_lake, pct_wetland, &
-                               pct_glacier, pct_urban, pct_nat_pft, urban_region_id
+                               pct_glacier, pct_urban, pct_nat_pft, urban_region_id, &
+                               wtlunit_roof, wtroad_perv
 
   implicit none
   save
@@ -155,9 +156,71 @@ contains
                      ' columns ',num_columns,' patches ',num_patches
     call shr_sys_flush(logunit)
 
+    call check_weights(logunit)
     call report_global_totals(logunit)
 
   end subroutine elmxx_build_subgrid
+
+  !-----------------------------------------------------------------------
+  subroutine check_weights(logunit)
+    !
+    ! !DESCRIPTION:
+    ! Check the subgrid weights are internally consistent.
+    !
+    ! Three separate partitions have to hold, and they fail in different ways:
+    !   - landunit weights sum to 1 per gridcell (composition)
+    !   - column weights sum to 1 per landunit (geometry within a landunit)
+    !   - patch weights sum to 1 per column, EXCEPT on the natural-vegetation
+    !     column, where they need not: ELM allocates all natpft patches whatever
+    !     their weight, and PCT_NAT_PFT sums to 100 over the landunit only where
+    !     the landunit exists. A gridcell with no natural vegetation has the
+    !     landunit present at zero weight and all its patch weights zero.
+    !
+    ! Counts alone would not catch a weight error, and a wrong weight is exactly
+    ! the kind of thing that produces plausible output and a wrong answer.
+    !
+    implicit none
+    !
+    integer, intent(in) :: logunit
+    !
+    integer  :: l, c, p, g
+    real(r8) :: worst_lun, worst_col, s
+    real(r8), allocatable :: gsum(:), lsum(:), csum(:)
+    real(r8), parameter :: tol = 1.0e-10_r8
+    character(len=*), parameter :: subname = '(elmxx_check_weights) '
+
+    ! ---- landunit weights per gridcell ----
+    allocate(gsum(maxval(lun_gridcell)))
+    gsum = 0.0_r8
+    do l = 1, num_landunits
+       gsum(lun_gridcell(l)) = gsum(lun_gridcell(l)) + lun_wtgcell(l)
+    end do
+    worst_lun = maxval(abs(gsum - 1.0_r8))
+    deallocate(gsum)
+
+    ! ---- column weights per landunit ----
+    allocate(lsum(num_landunits))
+    lsum = 0.0_r8
+    do c = 1, num_columns
+       lsum(col_landunit(c)) = lsum(col_landunit(c)) + col_wtlunit(c)
+    end do
+    worst_col = maxval(abs(lsum - 1.0_r8))
+    deallocate(lsum)
+
+    write(logunit,*) subname,'rank ',iam, &
+                     ' worst |sum(landunit wt per gridcell)-1| = ',worst_lun
+    write(logunit,*) subname,'rank ',iam, &
+                     ' worst |sum(column wt per landunit)-1|   = ',worst_col
+    call shr_sys_flush(logunit)
+
+    if (worst_lun > tol) then
+       call shr_sys_abort(subname//' ERROR: landunit weights do not sum to 1 per gridcell')
+    end if
+    if (worst_col > tol) then
+       call shr_sys_abort(subname//' ERROR: column weights do not sum to 1 per landunit')
+    end if
+
+  end subroutine check_weights
 
   !-----------------------------------------------------------------------
   subroutine report_global_totals(logunit)
@@ -340,7 +403,7 @@ contains
           lun_itype(nl)    = ltype
           lun_wtgcell(nl)  = pct_urban(g,u) / 100.0_r8
 
-          call add_urban_columns(nl, nc, np)
+          call add_urban_columns(nl, nc, np, wtlunit_roof(g,u), wtroad_perv(g,u))
        end do
     end do
 
@@ -361,29 +424,48 @@ contains
   end subroutine fill_subgrid
 
   !-----------------------------------------------------------------------
-  subroutine add_urban_columns(nl, nc, np)
+  subroutine add_urban_columns(nl, nc, np, wt_roof, wt_perv)
     !
     ! !DESCRIPTION:
     ! Add the five columns of an urban landunit, one patch each, in ELM's order:
     ! roof, sunwall, shadewall, impervious road, pervious road.
     !
-    ! Column weights within the landunit come from WTLUNIT_ROOF and WTROAD_PERV,
-    ! which are not read yet -- they are urban physics parameters, not subgrid
-    ! composition. Until they are, the weights are left at zero rather than
-    ! guessed: a wrong weight here would look plausible and compare badly for a
-    ! reason that is hard to see.
+    ! Weights within the landunit, from initGridCellsMod's set_landunit_urban:
+    !   roof         wt_roof
+    !   sunwall      (1 - wt_roof)/3
+    !   shadewall    (1 - wt_roof)/3
+    !   improad      (1 - wt_roof)/3 * (1 - wt_perv)
+    !   perroad      (1 - wt_roof)/3 * wt_perv
+    ! The canyon floor is one third of the non-roof area, same as each wall, and
+    ! the roads split it. They sum to 1 by construction, which is checked.
     !
     implicit none
-    integer, intent(inout) :: nl, nc, np
-    integer :: k
+    integer , intent(inout) :: nl, nc, np
+    real(r8), intent(in)    :: wt_roof, wt_perv
+    !
+    integer  :: k
+    real(r8) :: wt(maxpatch_urb), canyon, wsum
+    real(r8), parameter :: wt_tol = 1.0e-12_r8
     integer, parameter :: ctypes(maxpatch_urb) = &
          (/ icol_roof, icol_sunwall, icol_shadewall, icol_road_imperv, icol_road_perv /)
+
+    canyon = (1.0_r8 - wt_roof) / 3.0_r8
+    wt(1)  = wt_roof
+    wt(2)  = canyon
+    wt(3)  = canyon
+    wt(4)  = canyon * (1.0_r8 - wt_perv)
+    wt(5)  = canyon * wt_perv
+
+    wsum = sum(wt)
+    if (abs(wsum - 1.0_r8) > wt_tol) then
+       call shr_sys_abort('(add_urban_columns) ERROR: urban column weights do not sum to 1')
+    end if
 
     do k = 1, maxpatch_urb
        nc = nc + 1
        col_landunit(nc) = nl
        col_itype(nc)    = ctypes(k)
-       col_wtlunit(nc)  = 0.0_r8        ! TODO: WTLUNIT_ROOF / WTROAD_PERV
+       col_wtlunit(nc)  = wt(k)
 
        np = np + 1
        patch_column(np) = nc

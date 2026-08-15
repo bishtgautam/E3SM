@@ -91,6 +91,13 @@ module elmxxSurfdataMod
   integer , public, pointer :: urban_region_id(:) => null()  ! (ncells)
 
   !--------------------------------------------------------------------------
+  ! Urban column geometry, per density type. These set the column weights
+  ! within an urban landunit, so they are subgrid structure rather than physics.
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: wtlunit_roof(:,:) => null()  ! (ncells, numurbl)
+  real(r8), public, pointer :: wtroad_perv(:,:)  => null()  ! (ncells, numurbl)
+
+  !--------------------------------------------------------------------------
   ! Satellite-phenology streams, per owned cell: (ncells, lsmpft, nmonths)
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: monthly_lai(:,:,:)        => null()
@@ -176,6 +183,7 @@ contains
     allocate(pct_sand(ncells, nlevsoi), pct_clay(ncells, nlevsoi), &
              organic(ncells, nlevsoi))
     allocate(urban_region_id(ncells))
+    allocate(wtlunit_roof(ncells, numurbl), wtroad_perv(ncells, numurbl))
     allocate(monthly_lai(ncells, lsmpft, nmonths), &
              monthly_sai(ncells, lsmpft, nmonths), &
              monthly_height_top(ncells, lsmpft, nmonths), &
@@ -199,6 +207,8 @@ contains
 
     ! ---- urban validity ----
     call read_gc_int1d(ncid, fname, 'URBAN_REGION_ID', ngrid, cell_ids, urban_region_id)
+    call read_gc_real2d(ncid, fname, 'WTLUNIT_ROOF', ngrid, numurbl, cell_ids, wtlunit_roof)
+    call read_gc_real2d(ncid, fname, 'WTROAD_PERV' , ngrid, numurbl, cell_ids, wtroad_perv)
 
     ! ---- satellite phenology ----
     call read_gc_real3d(ncid, fname, 'MONTHLY_LAI', ngrid, lsmpft, nmonths, &
@@ -458,6 +468,8 @@ contains
     if (associated(fmax))        deallocate(fmax)
     if (associated(soil_color))  deallocate(soil_color)
     if (associated(urban_region_id))    deallocate(urban_region_id)
+    if (associated(wtlunit_roof))       deallocate(wtlunit_roof)
+    if (associated(wtroad_perv))        deallocate(wtroad_perv)
     if (associated(monthly_lai))        deallocate(monthly_lai)
     if (associated(monthly_sai))        deallocate(monthly_sai)
     if (associated(monthly_height_top)) deallocate(monthly_height_top)
