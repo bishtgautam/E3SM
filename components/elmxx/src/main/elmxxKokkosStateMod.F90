@@ -48,8 +48,19 @@ module elmxxKokkosStateMod
                                lun_gridcell, lun_itype, col_landunit, &
                                col_itype, patch_column, patch_itype, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
+  use elmxxSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
+                                    patch_height_top
+  use elmxxForcingMod , only : forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
+                               forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
+                               forc_snowc, forc_snowl
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxSetPatchColumn, &
+                               ELMxxSetElai, ELMxxSetEsai, ELMxxSetHtop, &
+                               ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
+                               ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
+                               ELMxxSetForcUCol, ELMxxSetForcVCol, &
+                               ELMxxSetForcThCol, ELMxxSetForcT, &
+                               ELMxxSetForcRain, ELMxxSetForcSnow, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -86,6 +97,8 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_state_init
   public :: elmxx_kokkos_check_map_invariants
   public :: elmxx_kokkos_seed_topology
+  public :: elmxx_kokkos_seed_state
+  public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -340,6 +353,200 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_topology
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_state(elm, logunit)
+    !
+    ! Seed once. The plan's "at init and at restart only" crossing: everything
+    ! here is state that does not change per timestep while the kernels are
+    ! off, so it is pushed once rather than every step.
+    !
+    ! WHAT IS SEEDED, AND FROM WHERE:
+    !   Elai, Esai, Htop  Stage 2's interpolated satellite phenology. Real
+    !                     data, exact against ELM's restart already.
+    !   Snl, H2osno,      ELM's cold start (ColumnDataType InitCold):
+    !   SnowDepth,        no snow, t_soisno = 274 K for non-lake columns and
+    !   FracSno, TGrnd    t_grnd = t_soisno(snl+1), so 274 K here. Lake's
+    !                     277 K does not arise: the packed natural-column view
+    !                     carries no lake.
+    !   TVeg              283 K (VegetationDataType InitCold). The 297.56 /
+    !                     289.46 branches are use_vancouver / use_mexicocity,
+    !                     both off.
+    !
+    ! DELIBERATELY NOT SEEDED: the soil hydraulic properties (Watsat, Watfc,
+    ! Sucsat, Bsw). ELMxx has setters for them, but they are not surfdata
+    ! fields -- ELM derives them from sand, clay and organic matter through the
+    ! pedotransfer functions in iniTimeConst. Porting that is real physics
+    ! work, it belongs with the kernels that read those arrays, and guessing it
+    ! here would put plausible-looking wrong numbers underneath Stage 4. Stage
+    ! 2 already stores the raw sand/clay/organic per column, so the inputs are
+    ! ready when that port happens.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kc, kp, p, ierr
+    real(r8), allocatable :: rcol(:), rpatch(:)
+    integer , allocatable :: icol(:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_state) '
+    real(r8), parameter :: t_grnd_cold = 274.0_r8   ! ELM ColumnDataType InitCold
+    real(r8), parameter :: t_veg_cold  = 283.0_r8   ! ELM VegetationDataType InitCold
+
+    call require_built(subname)
+    if (.not. surface_state_built) then
+       call shr_sys_abort(subname//'ERROR: surface state is not ready')
+    end if
+
+    allocate(rcol(n_kokkos_col), icol(n_kokkos_col), rpatch(n_kokkos_patch))
+
+    ! ---- natural columns: cold start, no snow ----
+    icol = 0
+    call ELMxxSetSnl(elm, icol, n_kokkos_col, ierr);       call check(ierr, subname, 'Snl')
+    rcol = 0.0_r8
+    call ELMxxSetH2osno(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'H2osno')
+    call ELMxxSetSnowDepth(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'SnowDepth')
+    call ELMxxSetFracSno(elm, rcol, n_kokkos_col, ierr);   call check(ierr, subname, 'FracSno')
+    rcol = t_grnd_cold
+    call ELMxxSetTGrnd(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'TGrnd')
+
+    ! ---- natural patches: cold-start canopy plus real phenology ----
+    rpatch = t_veg_cold
+    call ELMxxSetTVeg(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'TVeg')
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = patch_lai(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetElai(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Elai')
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = patch_sai(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetEsai(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Esai')
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = patch_height_top(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetHtop(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Htop')
+
+    deallocate(rcol, icol, rpatch)
+
+    write(logunit,*) subname,'rank ',iam,' seeded cold-start state and ', &
+                     'phenology for ',n_kokkos_col,' columns ',n_kokkos_patch, &
+                     ' patches'
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_state
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_forcing(elm, logunit)
+    !
+    ! The per-timestep "atmospheric forcing in" crossing -- one of the two the
+    ! plan allows. Everything here genuinely changes every coupling interval;
+    ! anything that does not belongs in elmxx_kokkos_seed_state.
+    !
+    ! Forcing arrives per gridcell, so it is broadcast down to the columns and
+    ! patches through the packed maps rather than by loop position. Column c
+    ! belongs to gridcell lun_gridcell(col_landunit(c)); that is the only
+    ! defensible route from one level to the other.
+    !
+    ! NOT YET CROSSED: ForcSolad / ForcSolai are 2-D over the radiation bands
+    ! and need the LayoutRight/LayoutLeft question settled first
+    ! (ELMxxKokkosIsLayoutRight exists for exactly this), and ForcRhoCol needs
+    ! air density, which ELM derives from vapor pressure in its import rather
+    ! than receiving it. Both are named in STATUS as the remaining crossing
+    ! work; neither is guessed at here.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kc, kp, g, ierr
+    real(r8), allocatable :: rcol(:), rpatch(:)
+    logical, save :: reported = .false.
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
+
+    call require_built(subname)
+    allocate(rcol(n_kokkos_col), rpatch(n_kokkos_patch))
+
+    ! ---- column-level ----
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_tbot(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcTCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcTCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_pbot(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcPbotCol(elm, rcol, n_kokkos_col, ierr);  call check(ierr, subname, 'ForcPbotCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_shum(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcQCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcQCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_lwrad(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcLwradCol(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ForcLwradCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_u(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcUCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcUCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_v(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcVCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcVCol')
+
+    do kc = 1, n_kokkos_col
+       rcol(kc) = forc_ptem(cell_of_kcol(kc))
+    end do
+    call ELMxxSetForcThCol(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'ForcThCol')
+
+    ! ---- patch-level ----
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = forc_tbot(cell_of_kpatch(kp))
+    end do
+    call ELMxxSetForcT(elm, rpatch, n_kokkos_patch, ierr);    call check(ierr, subname, 'ForcT')
+
+    ! Convective and large-scale are separate on the coupler side and summed
+    ! here, which is what ELM's import does.
+    do kp = 1, n_kokkos_patch
+       g = cell_of_kpatch(kp)
+       rpatch(kp) = forc_rainc(g) + forc_rainl(g)
+    end do
+    call ELMxxSetForcRain(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'ForcRain')
+
+    do kp = 1, n_kokkos_patch
+       g = cell_of_kpatch(kp)
+       rpatch(kp) = forc_snowc(g) + forc_snowl(g)
+    end do
+    call ELMxxSetForcSnow(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'ForcSnow')
+
+    deallocate(rcol, rpatch)
+
+    if (.not. reported) then
+       write(logunit,*) subname,'rank ',iam,' pushing forcing each step to ', &
+                        n_kokkos_col,' columns ',n_kokkos_patch,' patches'
+       call shr_sys_flush(logunit)
+       reported = .true.
+    end if
+
+  end subroutine elmxx_kokkos_push_forcing
+
+  !-----------------------------------------------------------------------
+  integer function cell_of_kcol(kc)
+    implicit none
+    integer, intent(in) :: kc
+    cell_of_kcol = lun_gridcell(col_landunit(col_of_kcol(kc)))
+  end function cell_of_kcol
+
+  !-----------------------------------------------------------------------
+  integer function cell_of_kpatch(kp)
+    implicit none
+    integer, intent(in) :: kp
+    cell_of_kpatch = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(kp))))
+  end function cell_of_kpatch
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_verify_maps(elm, logunit, nfail)
