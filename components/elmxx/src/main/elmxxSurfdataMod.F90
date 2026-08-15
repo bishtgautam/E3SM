@@ -4,11 +4,9 @@ module elmxxSurfdataMod
   ! !DESCRIPTION:
   ! Reads the ELM surface dataset for the cells this rank owns.
   !
-  ! Scope is SP mode: the subgrid composition and the soil properties. The
-  ! satellite-phenology streams (MONTHLY_LAI/SAI/HEIGHT_TOP/HEIGHT_BOT) are not
-  ! read yet -- they are needed by the phenology update, not by subgrid
-  ! construction, and land in a later increment. CN/BGC, crop and transient
-  ! land-use fields are out of scope entirely.
+  ! Scope is SP mode: the subgrid composition, soil properties, and the
+  ! satellite-phenology streams used by elmxxSurfaceStateMod. CN/BGC, crop and
+  ! transient land-use fields are out of scope entirely.
   !
   ! Reading strategy: like elmxx_read_domain, the whole global field is read on
   ! every rank and the owned cells are then picked out of it. That is simple and

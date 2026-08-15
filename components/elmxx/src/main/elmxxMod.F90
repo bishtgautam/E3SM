@@ -29,6 +29,8 @@ module elmxxMod
                                subgrid_built, num_landunits, num_columns, &
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
+  use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
+                                   elmxx_update_phenology, elmxx_surface_state_clean
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
@@ -80,14 +82,11 @@ module elmxxMod
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
   !
-  ! Stage 1 scope: the handle is created at init and destroyed at finalize so
-  ! that the Kokkos runtime, the C API, and the E3SM link line are all
-  ! exercised in a real coupled run. No state is set and no kernel is called
-  ! yet -- Stage 2 (surfdata + subgrid) supplies the counts that make the
-  ! per-surface-type views meaningful. Until then the natural-column and
-  ! natural-patch counts are the rank's land-cell count, a placeholder that is
-  ! dimensionally valid (ELMxxCreate requires > 0) and deliberately not
-  ! physically meaningful.
+  ! Stage 2 materializes the host-side subgrid and surface state before this
+  ! handle is created. No state crosses the C API and no kernel is called yet;
+  ! that one-time persistent-state transfer belongs to Stage 3. Without a
+  ! surface dataset the component still retains the Stage 1 fallback counts so
+  ! a domain-only coupling smoke test remains possible.
   !--------------------------------------------------------------------------
   type(ELMxxType), public :: elmxx_state
   logical, private        :: elmxx_state_created = .false.
@@ -165,7 +164,7 @@ contains
   end subroutine elmxx_read_namelist
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_init(logunit)
+  subroutine elmxx_init(logunit, month, day)
     !
     ! !DESCRIPTION:
     ! Initialize ELMxx: read the land domain and build the round-robin
@@ -173,7 +172,7 @@ contains
     !
     implicit none
     !
-    integer, intent(in) :: logunit
+    integer, intent(in) :: logunit, month, day
     !
     integer :: i, n, k
     integer :: num_cells_grid                  ! ni*nj, including non-land cells
@@ -270,6 +269,7 @@ contains
                                 natural_id_cells_owned)
        call elmxx_report_composition(logunit)
        call elmxx_build_subgrid(logunit, num_cells_owned)
+       call elmxx_surface_state_init(logunit, month, day)
     else
        if (masterproc) then
           write(logunit,*) subname,'no fsurdat in lnd_in; no surface dataset read'
@@ -444,7 +444,7 @@ contains
   end subroutine elmxx_report_composition
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_run(logunit, coupling_dt_in_sec)
+  subroutine elmxx_run(logunit, coupling_dt_in_sec, month, day)
     !
     ! !DESCRIPTION:
     ! Advance ELMxx one coupling interval.
@@ -456,8 +456,11 @@ contains
     !
     integer, intent(in) :: logunit
     integer, intent(in) :: coupling_dt_in_sec
+    integer, intent(in) :: month, day
 
     nstep = nstep + 1
+
+    if (subgrid_built) call elmxx_update_phenology(logunit, month, day)
 
     if (masterproc) then
        write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
@@ -491,6 +494,7 @@ contains
     end if
 
     call elmxx_forcing_clean()
+    call elmxx_surface_state_clean()
     call elmxx_subgrid_clean()
     call elmxx_surfdata_clean()
 
