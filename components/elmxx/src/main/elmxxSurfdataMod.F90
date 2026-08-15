@@ -18,9 +18,22 @@ module elmxxSurfdataMod
   ! natural_id_cells_owned) before this reaches production resolutions.
   !
   ! Indexing: natural_id_cells_owned holds 1-based *global grid* IDs, i.e.
-  ! indices into the ni*nj arrays, which is exactly how the surface dataset is
-  ! laid out (its `gridcell` dimension spans the full grid, ocean included).
-  ! So a cell's surfdata is a direct lookup, no land-only compaction involved.
+  ! indices into the ni*nj arrays. The surface dataset spans the same full grid,
+  ! ocean included, so a cell's surfdata is a direct lookup with no land-only
+  ! compaction involved.
+  !
+  ! TWO GRID CONVENTIONS. Surface datasets come either way and both are in use
+  ! here, so the reader detects which:
+  !   unstructured  a single `gridcell` dimension; e.g. PCT_NATVEG(gridcell).
+  !                 Used by 2x1_brazil and ne30.
+  !   structured    `lsmlon` x `lsmlat`; e.g. PCT_NATVEG(lsmlat, lsmlon).
+  !                 Used by f19.
+  ! Both flatten to the same cell ordering as the domain file's ni x nj arrays
+  ! -- longitude fastest -- so once flattened, cell_ids addresses either.
+  !
+  ! Note the domain file always uses ni/nj even for an unstructured grid (where
+  ! nj == 1); it is only the *surface dataset* that switches convention. Do not
+  ! infer one from the other.
   !-----------------------------------------------------------------------
 
   use shr_kind_mod  , only : r8 => shr_kind_r8
@@ -41,6 +54,10 @@ module elmxxSurfdataMod
   integer, public :: nlevsoi = 0   ! hydrologically active soil layers (10)
   integer, public :: lsmpft  = 0   ! PFTs on the monthly phenology streams (17)
   integer, public :: nmonths = 0   ! months on the phenology streams (12)
+
+  ! Grid convention of the surface dataset currently being read
+  logical :: structured = .false.
+  integer :: nlon_s = 0, nlat_s = 0
 
   !--------------------------------------------------------------------------
   ! Subgrid composition, per owned cell. Percentages as stored on the file.
@@ -119,8 +136,23 @@ contains
        call shr_sys_abort(subname//' ERROR: cannot open surface dataset '//trim(fname))
     end if
 
-    ! ---- dimensions ----
-    ngrid   = get_dimlen(ncid, fname, 'gridcell')
+    ! ---- grid convention and size ----
+    if (has_dim(ncid, 'gridcell')) then
+       structured = .false.
+       ngrid      = get_dimlen(ncid, fname, 'gridcell')
+       nlon_s     = 0
+       nlat_s     = 0
+    else if (has_dim(ncid, 'lsmlon') .and. has_dim(ncid, 'lsmlat')) then
+       structured = .true.
+       nlon_s     = get_dimlen(ncid, fname, 'lsmlon')
+       nlat_s     = get_dimlen(ncid, fname, 'lsmlat')
+       ngrid      = nlon_s * nlat_s
+    else
+       call shr_sys_abort(subname//' ERROR: '//trim(fname)// &
+            ' has neither a gridcell dimension nor lsmlon/lsmlat')
+    end if
+
+    ! ---- remaining dimensions ----
     numurbl = get_dimlen(ncid, fname, 'numurbl')
     natpft  = get_dimlen(ncid, fname, 'natpft')
     nlevsoi = get_dimlen(ncid, fname, 'nlevsoi')
@@ -192,6 +224,19 @@ contains
   end subroutine elmxx_read_surfdata
 
   !-----------------------------------------------------------------------
+  logical function has_dim(ncid, dimname)
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: dimname
+    integer :: dimid, status
+
+    status  = pio_inq_dimid(ncid, trim(dimname), dimid)
+    has_dim = (status == PIO_NOERR)
+
+  end function has_dim
+
+  !-----------------------------------------------------------------------
   integer function get_dimlen(ncid, fname, dimname)
     !
     implicit none
@@ -224,7 +269,7 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     real(r8)         , intent(inout) :: out(:)
     !
-    real(r8), allocatable :: glob(:)
+    real(r8), allocatable :: glob(:), buf2d(:,:)
     integer :: varid, status, i
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real1d'
 
@@ -233,7 +278,14 @@ contains
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
     end if
-    status = pio_get_var(ncid, varid, glob)
+    if (structured) then
+       allocate(buf2d(nlon_s, nlat_s))
+       status = pio_get_var(ncid, varid, buf2d)
+       glob = reshape(buf2d, (/ngrid/))
+       deallocate(buf2d)
+    else
+       status = pio_get_var(ncid, varid, glob)
+    end if
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
     end if
@@ -256,7 +308,7 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     integer          , intent(inout) :: out(:)
     !
-    integer, allocatable :: glob(:)
+    integer, allocatable :: glob(:), ibuf2d(:,:)
     integer :: varid, status, i
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_int1d'
 
@@ -265,7 +317,14 @@ contains
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
     end if
-    status = pio_get_var(ncid, varid, glob)
+    if (structured) then
+       allocate(ibuf2d(nlon_s, nlat_s))
+       status = pio_get_var(ncid, varid, ibuf2d)
+       glob = reshape(ibuf2d, (/ngrid/))
+       deallocate(ibuf2d)
+    else
+       status = pio_get_var(ncid, varid, glob)
+    end if
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
     end if
@@ -299,7 +358,7 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     real(r8)         , intent(inout) :: out(:,:)
     !
-    real(r8), allocatable :: glob(:,:)
+    real(r8), allocatable :: glob(:,:), buf3d(:,:,:)
     integer :: varid, status, i, k
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real2d'
 
@@ -308,7 +367,14 @@ contains
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
     end if
-    status = pio_get_var(ncid, varid, glob)
+    if (structured) then
+       allocate(buf3d(nlon_s, nlat_s, nsecond))
+       status = pio_get_var(ncid, varid, buf3d)
+       glob = reshape(buf3d, (/ngrid, nsecond/))
+       deallocate(buf3d)
+    else
+       status = pio_get_var(ncid, varid, glob)
+    end if
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
     end if
@@ -341,7 +407,7 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     real(r8)         , intent(inout) :: out(:,:,:)
     !
-    real(r8), allocatable :: glob(:,:,:)
+    real(r8), allocatable :: glob(:,:,:), buf4d(:,:,:,:)
     integer :: varid, status, i, k, m
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real3d'
 
@@ -350,7 +416,14 @@ contains
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
     end if
-    status = pio_get_var(ncid, varid, glob)
+    if (structured) then
+       allocate(buf4d(nlon_s, nlat_s, nsecond, nthird))
+       status = pio_get_var(ncid, varid, buf4d)
+       glob = reshape(buf4d, (/ngrid, nsecond, nthird/))
+       deallocate(buf4d)
+    else
+       status = pio_get_var(ncid, varid, glob)
+    end if
     if (status /= PIO_NOERR) then
        call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
     end if
