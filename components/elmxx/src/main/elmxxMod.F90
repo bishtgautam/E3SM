@@ -37,11 +37,12 @@ module elmxxMod
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
-                                      any_kernel_active
+                                      elmxx_kernels_report, any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
                                       elmxx_kokkos_seed_topology, &
                                       elmxx_kokkos_seed_state, &
+                                      elmxx_kokkos_seed_canopy_hydrology, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
@@ -377,6 +378,7 @@ contains
 
        call elmxx_kokkos_seed_topology(elmxx_state, logunit)
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
+       call elmxx_kokkos_seed_canopy_hydrology(elmxx_state, logunit)
 
        ! Parse after seeding, so a blocked kernel's abort names a
        ! prerequisite that genuinely could not be met rather than one that
@@ -564,6 +566,11 @@ contains
     !-----------------------------------------------------------------------
     if (kokkos_state_built .and. any_kernel_active) then
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit)
+       ! Report on the first step and daily after, so a five-day run leaves a
+       ! readable trace without one block per half-hour timestep.
+       if (nstep == 1 .or. mod(nstep, 48) == 0) then
+          call elmxx_kernels_report(elmxx_state, n_kokkos_patch, logunit)
+       end if
     end if
 
     if (kokkos_state_built .and. nstep == 1 .and. elmxx_check_boundary) then

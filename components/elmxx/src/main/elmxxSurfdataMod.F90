@@ -74,6 +74,15 @@ module elmxxSurfdataMod
   real(r8), public, pointer :: pct_nat_pft(:,:) => null()  ! (ncells, natpft)
 
   !--------------------------------------------------------------------------
+  ! Topography. Not landunit weights -- these feed the microtopography
+  ! parameters ELM derives in initVerticalMod (n_melt from STD_ELEV,
+  ! micro_sigma from SLOPE), which CanopyHydrology and the snow-cover
+  ! fraction need.
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: topo_std(:)      => null()  ! (ncells) STD_ELEV, m
+  real(r8), public, pointer :: topo_slope(:)    => null()  ! (ncells) SLOPE, degrees
+
+  !--------------------------------------------------------------------------
   ! Soil properties, per owned cell
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: pct_sand(:,:)    => null()  ! (ncells, nlevsoi)
@@ -173,6 +182,7 @@ contains
        call shr_sys_abort(subname//' ERROR: surface dataset grid does not match the domain')
     end if
 
+    allocate(topo_std(ncells), topo_slope(ncells))
     allocate(pct_natveg(ncells), pct_crop(ncells), pct_lake(ncells), &
              pct_wetland(ncells), pct_glacier(ncells), fmax(ncells), &
              soil_color(ncells))
@@ -195,6 +205,10 @@ contains
     call read_gc_real1d(ncid, fname, 'PCT_GLACIER', ngrid, cell_ids, pct_glacier)
     call read_gc_real2d(ncid, fname, 'PCT_URBAN'  , ngrid, numurbl, cell_ids, pct_urban)
     call read_gc_real2d(ncid, fname, 'PCT_NAT_PFT', ngrid, natpft , cell_ids, pct_nat_pft)
+
+    ! ---- topography ----
+    call read_gc_real1d(ncid, fname, 'STD_ELEV'   , ngrid, cell_ids, topo_std)
+    call read_gc_real1d(ncid, fname, 'SLOPE'      , ngrid, cell_ids, topo_slope)
 
     ! ---- soil properties ----
     call read_gc_real2d(ncid, fname, 'PCT_SAND', ngrid, nlevsoi, cell_ids, pct_sand)
@@ -460,6 +474,8 @@ contains
     if (associated(pct_glacier)) deallocate(pct_glacier)
     if (associated(pct_urban))   deallocate(pct_urban)
     if (associated(pct_nat_pft)) deallocate(pct_nat_pft)
+    if (associated(topo_std))    deallocate(topo_std)
+    if (associated(topo_slope))  deallocate(topo_slope)
     if (associated(pct_sand))    deallocate(pct_sand)
     if (associated(pct_clay))    deallocate(pct_clay)
     if (associated(organic))     deallocate(organic)

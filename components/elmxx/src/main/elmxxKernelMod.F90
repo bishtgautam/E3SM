@@ -42,7 +42,9 @@ module elmxxKernelMod
                                ELMxxComputeSurfRunInfil, &
                                ELMxxComputeRootWaterUpdate, &
                                ELMxxComputeHydrologyDrainage, &
-                               ELMxxComputeLakeHydrology
+                               ELMxxComputeLakeHydrology, &
+                               ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
+                               ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry
 
   implicit none
   save
@@ -82,6 +84,7 @@ module elmxxKernelMod
 
   public :: elmxx_kernels_parse
   public :: elmxx_kernels_run
+  public :: elmxx_kernels_report
 
 contains
 
@@ -144,9 +147,7 @@ contains
        ! What is missing is small and specific: micro_sigma and n_melt, which
        ! ELM derives in initVerticalMod from SLOPE and STD_ELEV -- both present
        ! on surfdata, neither yet read by elmxxSurfdataMod.
-       why = 'needs SLOPE/STD_ELEV read from surfdata and its cold-start ' // &
-             'inputs seeded (micro_sigma, n_melt, frac_veg_nosno, dewmx, ' // &
-             'h2ocan, fwet, h2osfc, int_snow, frac_h2osfc, frac_sno_eff)'
+       why = ' '
 
     case default
        why = 'unknown kernel'
@@ -338,6 +339,62 @@ contains
     end if
 
   end subroutine elmxx_kernels_run
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kernels_report(elm, npatch, logunit)
+    !
+    ! Report the range of each active kernel's outputs.
+    !
+    ! A kernel that runs without aborting has proved almost nothing -- it
+    ! reads zeros happily and writes zeros back. What makes a range useful is
+    ! that it can be argued with: canopy interception must be positive when it
+    ! rains on a canopy and exactly zero when it does not, h2ocan must not
+    ! exceed dewmx*(elai+esai), and fwet+fdry must not leave [0,1]. That is
+    ! the same standard Stage 2 held the forcing import to -- the range is the
+    ! evidence, not the absence of a crash.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: npatch, logunit
+    integer :: ierr
+    real(r8), allocatable :: intr(:), grnd(:), can(:), fwet(:), fdry(:)
+    character(len=*), parameter :: subname = '(elmxx_kernels_report) '
+
+    if (.not. kernel_active(K_CANHYDRO)) return
+    if (npatch <= 0) return
+
+    allocate(intr(npatch), grnd(npatch), can(npatch), fwet(npatch), fdry(npatch))
+
+    call ELMxxGetQflxPrecIntr(elm, intr, npatch, ierr); call check(ierr, logunit, K_CANHYDRO)
+    call ELMxxGetQflxPrecGrnd(elm, grnd, npatch, ierr); call check(ierr, logunit, K_CANHYDRO)
+    call ELMxxGetH2ocan(elm, can, npatch, ierr);        call check(ierr, logunit, K_CANHYDRO)
+    call ELMxxGetFwet(elm, fwet, npatch, ierr);         call check(ierr, logunit, K_CANHYDRO)
+    call ELMxxGetFdry(elm, fdry, npatch, ierr);         call check(ierr, logunit, K_CANHYDRO)
+
+    write(logunit,*) subname,'rank ',iam,' canhydro over ',npatch,' patches:'
+    write(logunit,*) '    qflx_prec_intr [kg/m2/s] ',minval(intr),' .. ',maxval(intr)
+    write(logunit,*) '    qflx_prec_grnd [kg/m2/s] ',minval(grnd),' .. ',maxval(grnd)
+    write(logunit,*) '    h2ocan         [kg/m2]   ',minval(can) ,' .. ',maxval(can)
+    write(logunit,*) '    fwet           [-]       ',minval(fwet),' .. ',maxval(fwet)
+    write(logunit,*) '    fdry           [-]       ',minval(fdry),' .. ',maxval(fdry)
+
+    ! Bounds that must hold whatever the forcing is. Reported, not asserted:
+    ! this is a diagnostic stage and an abort here would stop a run that is
+    ! still useful to inspect. They become assertions when the kernel set is
+    ! complete enough for a run to be graded rather than watched.
+    if (minval(intr) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative canopy interception'
+    if (minval(can) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative canopy water'
+    if (minval(fwet) < 0.0_r8 .or. maxval(fwet) > 1.0_r8) &
+         write(logunit,*) subname,'SUSPECT: fwet outside [0,1]'
+    if (minval(fdry) < 0.0_r8 .or. maxval(fdry) > 1.0_r8) &
+         write(logunit,*) subname,'SUSPECT: fdry outside [0,1]'
+
+    call shr_sys_flush(logunit)
+    deallocate(intr, grnd, can, fwet, fdry)
+
+  end subroutine elmxx_kernels_report
 
   !-----------------------------------------------------------------------
   subroutine check(ierr, logunit, k)
