@@ -15,7 +15,7 @@
     Where for the EAM specific compsets below the following is supported
     TIME = Time period (e.g. 2000, HIST, RCP8...)
     ATM  = [EAM, EAMXX, SATM, SCREAM]
-    LND  = [ELM,  SLND]
+    LND  = [ELM,  ELMXX, SLND]
     ICE  = [MPASSI, CICE, DICE, SICE]
     OCN  = [MPASO, DOCN, SOCN]
     ROF  = [MOSART, SROF]

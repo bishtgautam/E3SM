@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+
+<compsets>
+
+  <help>
+  Compset format is explained in cime_config/allactive/config_compsets.xml
+  or in the CIME documentation
+  </help>
+
+  <!-- ELMxx I compsets -->
+
+  <compset>
+    <alias>IELMXX</alias>
+    <lname>2000_DATM%QIA_ELMXX_SICE_SOCN_SROF_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>I1850ELMXX</alias>
+    <lname>1850_DATM%QIA_ELMXX_SICE_SOCN_SROF_SGLC_SWAV</lname>
+  </compset>
+
+</compsets>

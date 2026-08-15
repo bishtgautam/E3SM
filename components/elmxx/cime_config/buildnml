@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+
+"""
+Namelist creator for E3SM's ELMXX component
+"""
+
+import os, sys
+
+_CIMEROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..","..","cime")
+sys.path.append(os.path.join(_CIMEROOT, "scripts", "Tools"))
+
+from standard_script_setup import *
+from CIME.case import Case
+from CIME.utils import expect, run_cmd_no_fail, safe_copy
+from CIME.buildnml import create_namelist_infile, parse_input
+
+logger = logging.getLogger(__name__)
+
+###############################################################################
+def buildnml(case, caseroot, compname):
+###############################################################################
+    expect(compname == "elmxx", compname)
+
+    os.chdir(caseroot)
+
+    casebuild           = case.get_value("CASEBUILD")
+    caseroot            = case.get_value("CASEROOT")
+    srcroot             = case.get_value("SRCROOT")
+    scriptsroot         = case.get_value("SCRIPTSROOT")
+    rundir              = case.get_value("RUNDIR")
+    ninst_lnd           = case.get_value("NINST_LND")
+    elmxx_namelist_opts = case.get_value("ELMXX_NAMELIST_OPTS")
+    comp_interface      = case.get_value("COMP_INTERFACE")
+
+    # elmxx only ships an MCT coupling layer (src/cpl/lnd_comp_mct.F90). Fail here
+    # with a clear message rather than at link time under the moab driver, which
+    # would also expect elmxx to register a MOAB app.
+    expect(comp_interface == "mct",
+           "COMP_INTERFACE = {} but elmxx currently provides only an MCT coupling "
+           "layer. Recreate the case with: create_newcase ... --driver mct"
+           .format(comp_interface))
+
+    # Multi-instance is not supported yet -- see plans/active for the roadmap.
+    expect(ninst_lnd == 1,
+           "NINST_LND = {} but elmxx only supports a single instance".format(ninst_lnd))
+
+    lndconf_dir = os.path.join(casebuild, "elmxxconf")
+
+    if not os.path.isdir(lndconf_dir): os.mkdir(lndconf_dir)
+
+    #--------------------------------------------------------------------
+    # Create elmxxconf/cesm_namelist from user_nl_elmxx
+    #--------------------------------------------------------------------
+
+    input_data_list = os.path.join(casebuild, "elmxx.input_data_list")
+    if os.path.exists(input_data_list):
+        os.remove(input_data_list)
+
+    create_namelist_infile(case,
+                           "{}/user_nl_elmxx".format(caseroot),
+                           "{}/cesm_namelist".format(lndconf_dir))
+
+    #--------------------------------------------------------------------
+    # Invoke elmxx build-namelist - output will go in $CASEBUILD/elmxxconf
+    #--------------------------------------------------------------------
+
+    sysmod  = os.path.join(srcroot, "components/elmxx/bld/build-namelist")
+    sysmod += " -infile {}/cesm_namelist".format(lndconf_dir)
+    sysmod += " -caseroot {}".format(caseroot)
+    sysmod += " -scriptsroot {}".format(scriptsroot)
+    sysmod += ' -namelist " &elmxx_inparm {} /" '.format(elmxx_namelist_opts)
+    run_cmd_no_fail(sysmod, from_dir=lndconf_dir)
+
+    #--------------------------------------------------------------------
+    # move lnd_in to $RUNDIR
+    #--------------------------------------------------------------------
+
+    if os.path.exists(rundir):
+        safe_copy(os.path.join(lndconf_dir, "lnd_in"), os.path.join(rundir, "lnd_in"))
+
+###############################################################################
+def _main_func():
+###############################################################################
+    caseroot = parse_input(sys.argv)
+    with Case(caseroot) as case:
+        buildnml(case, caseroot, "elmxx")
+
+if __name__ == "__main__":
+    _main_func()
