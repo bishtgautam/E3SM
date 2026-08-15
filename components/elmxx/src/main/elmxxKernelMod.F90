@@ -44,7 +44,9 @@ module elmxxKernelMod
                                ELMxxComputeHydrologyDrainage, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
-                               ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry
+                               ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
+                               ELMxxGetTGrnd, ELMxxGetQg, ELMxxGetThv, &
+                               ELMxxGetHtvp, ELMxxGetSoilbeta, ELMxxGetZ0mg
 
   implicit none
   save
@@ -85,6 +87,7 @@ module elmxxKernelMod
   public :: elmxx_kernels_parse
   public :: elmxx_kernels_run
   public :: elmxx_kernels_report
+  public :: elmxx_report_cantemp
 
 contains
 
@@ -115,7 +118,17 @@ contains
        why = 'needs SurfaceAlbedo (Stage 5) for albd/albi/fabd/fabi/ftdd/' // &
              'ftid/ftii and albgrd/albgri, plus 2-D forc_solad/forc_solai'
 
-    case (K_CANTEMP, K_BAREGRND, K_CANFLUX)
+    case (K_CANTEMP)
+       ! Runnable. Everything it reads is now seeded: the hydraulic properties
+       ! and cold-start column state from elmxxSoilPropMod, and the four
+       ! scalars it reads without writing -- smpmin, t_h2osfc, patch_itype and
+       ! forc_hgt_patch. What it appears to want beyond that -- zii, the three
+       ! forc_hgt_*_patch, t_ssbef, t_h2osfc_bef -- it computes itself, as ELM
+       ! does; checking that rather than assuming saved seeding four fields
+       ! the kernel would have overwritten.
+       why = ' '
+
+    case (K_BAREGRND, K_CANFLUX)
        ! These read naturalCol directly, and most of what they need is now
        ! there: watsat/watfc/sucsat/bsw from elmxxSoilPropMod, and dz,
        ! t_soisno, h2osoi_liq and h2osoi_ice from its cold start. What is left
@@ -125,8 +138,9 @@ contains
        ! receiving. Two more have no setter at all (t_ssbef, ugust) and need
        ! checking against what the kernels actually require.
        ! This is the nearest group to runnable.
-       why = 'needs the remaining naturalCol scalars (smpmin, zii, ' // &
-             't_h2osfc, patch_itype, forc_hgt_*_patch, forc_rho_col)'
+       why = 'needs CanopyTemperature to have run (qg, thv, htvp, z0*, ' // &
+             'soilbeta, displa, thm are its outputs) and forc_rho_col, ' // &
+             'which ELM derives from vapor pressure rather than receiving'
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
        ! A different integration surface entirely. These are SHARED kernels:
@@ -408,6 +422,55 @@ contains
     deallocate(intr, grnd, can, fwet, fdry)
 
   end subroutine elmxx_kernels_report
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_report_cantemp(elm, ncol, logunit)
+    !
+    ! CanopyTemperature's outputs, graded the same way: by whether the ranges
+    ! can be argued with. Ground temperature should sit near the 274 K it was
+    ! cold-started to, ground specific humidity must be positive and small,
+    ! the latent heat of vaporization is ~2.5e6 J/kg at these temperatures and
+    ! ~2.83e6 if it sublimates, and soilbeta is a fraction.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: ncol, logunit
+    integer :: ierr
+    real(r8), allocatable :: tg(:), qg(:), thv(:), htvp(:), sbeta(:), z0mg(:)
+    character(len=*), parameter :: subname = '(elmxx_kernels_report) '
+
+    if (.not. kernel_active(K_CANTEMP)) return
+    if (ncol <= 0) return
+
+    allocate(tg(ncol), qg(ncol), thv(ncol), htvp(ncol), sbeta(ncol), z0mg(ncol))
+    call ELMxxGetTGrnd(elm, tg, ncol, ierr);       call check(ierr, logunit, K_CANTEMP)
+    call ELMxxGetQg(elm, qg, ncol, ierr);          call check(ierr, logunit, K_CANTEMP)
+    call ELMxxGetThv(elm, thv, ncol, ierr);        call check(ierr, logunit, K_CANTEMP)
+    call ELMxxGetHtvp(elm, htvp, ncol, ierr);      call check(ierr, logunit, K_CANTEMP)
+    call ELMxxGetSoilbeta(elm, sbeta, ncol, ierr); call check(ierr, logunit, K_CANTEMP)
+    call ELMxxGetZ0mg(elm, z0mg, ncol, ierr);      call check(ierr, logunit, K_CANTEMP)
+
+    write(logunit,*) subname,'rank ',iam,' cantemp over ',ncol,' columns:'
+    write(logunit,*) '    t_grnd   [K]     ',minval(tg)   ,' .. ',maxval(tg)
+    write(logunit,*) '    qg       [kg/kg] ',minval(qg)   ,' .. ',maxval(qg)
+    write(logunit,*) '    thv      [K]     ',minval(thv)  ,' .. ',maxval(thv)
+    write(logunit,*) '    htvp     [J/kg]  ',minval(htvp) ,' .. ',maxval(htvp)
+    write(logunit,*) '    soilbeta [-]     ',minval(sbeta),' .. ',maxval(sbeta)
+    write(logunit,*) '    z0mg     [m]     ',minval(z0mg) ,' .. ',maxval(z0mg)
+
+    if (minval(tg) < 200.0_r8 .or. maxval(tg) > 350.0_r8) &
+         write(logunit,*) subname,'SUSPECT: ground temperature outside 200-350 K'
+    if (minval(qg) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative ground specific humidity'
+    if (minval(sbeta) < 0.0_r8 .or. maxval(sbeta) > 1.0_r8) &
+         write(logunit,*) subname,'SUSPECT: soilbeta outside [0,1]'
+    if (minval(htvp) <= 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: non-positive latent heat'
+
+    call shr_sys_flush(logunit)
+    deallocate(tg, qg, thv, htvp, sbeta, z0mg)
+
+  end subroutine elmxx_report_cantemp
 
   !-----------------------------------------------------------------------
   subroutine check(ierr, logunit, k)
