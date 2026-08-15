@@ -46,4 +46,34 @@ Unlike ELM, ELMXX has no -clm_usr_name machinery to derive this from a naming
 convention, so it must be set explicitly -- normally in user_nl_elmxx.
 </entry>
 
+<entry id="elmxx_check_boundary"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: .true.
+If .true., round-trip a per-entity fingerprint through the Kokkos views at the
+end of step 1 and check that every packed slot returns what was written to it.
+This validates the Fortran/Kokkos boundary plumbing: extents matching the views
+ELMxxCreate allocated, no setter silently rejected, both the int and double
+paths.
+
+The map SEMANTICS -- bijection, landunit types, patch-to-column agreement --
+are checked separately at init and are not controlled by this switch, because
+they need no Kokkos and cost nothing.
+</entry>
+
+<entry id="elmxx_check_soft_fail"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: .false.
+If .false., a boundary-check mismatch aborts the run. If .true., it is reported
+and the run continues.
+
+Abort is the right default while the boundary is being brought up: a wrong
+index map is silent corruption and every kernel added later builds on it. Set
+.true. only when a long run must survive a known mismatch during kernel
+bring-up.
+</entry>
+
 </namelist_definition>

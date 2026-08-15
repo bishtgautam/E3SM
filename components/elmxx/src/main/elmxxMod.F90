@@ -78,6 +78,9 @@ module elmxxMod
   logical           , public :: do_elmxx   = .true.
   character(len=256), public :: fatmlndfrc = ' '
   character(len=256), public :: fsurdat    = ' '
+  ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
+  logical           , public :: elmxx_check_boundary  = .true.
+  logical           , public :: elmxx_check_soft_fail = .false.
 
   !--------------------------------------------------------------------------
   ! Instance information
@@ -124,12 +127,15 @@ contains
     logical            :: lexist
     character(len=*), parameter :: subname = '(elmxx_read_namelist) '
 
-    namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat
+    namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
+                            elmxx_check_boundary, elmxx_check_soft_fail
 
     ! defaults
     do_elmxx   = .true.
     fatmlndfrc = ' '
     fsurdat    = ' '
+    elmxx_check_boundary  = .true.
+    elmxx_check_soft_fail = .false.
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -162,6 +168,8 @@ contains
     call mpi_bcast (do_elmxx  , 1                , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (fatmlndfrc, len(fatmlndfrc)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fsurdat   , len(fsurdat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -169,6 +177,8 @@ contains
        write(logunit,*) '   do_elmxx   = ', do_elmxx
        write(logunit,*) '   fatmlndfrc = ', trim(fatmlndfrc)
        write(logunit,*) '   fsurdat    = ', trim(fsurdat)
+       write(logunit,*) '   elmxx_check_boundary  = ', elmxx_check_boundary
+       write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
        call shr_sys_flush(logunit)
     end if
 
@@ -534,7 +544,7 @@ contains
        call elmxx_kokkos_push_forcing(elmxx_state, logunit)
     end if
 
-    if (kokkos_state_built .and. nstep == 1) then
+    if (kokkos_state_built .and. nstep == 1 .and. elmxx_check_boundary) then
        call elmxx_verify_kokkos_boundary(logunit)
     end if
 
@@ -563,7 +573,14 @@ contains
     call elmxx_kokkos_verify_maps(elmxx_state, logunit, nfail)
 
     if (nfail /= 0) then
-       call shr_sys_abort(subname//' ERROR: packed Fortran<->Kokkos maps do not round-trip')
+       if (elmxx_check_soft_fail) then
+          write(logunit,*) subname,'WARNING: ',nfail,' boundary mismatches; ', &
+               'continuing because elmxx_check_soft_fail is set. Every kernel ', &
+               'reading this state is now suspect.'
+          call shr_sys_flush(logunit)
+       else
+          call shr_sys_abort(subname//' ERROR: packed Fortran<->Kokkos maps do not round-trip')
+       end if
     end if
 
     ! The probe writes fingerprints into real state fields -- t_grnd, t_veg,

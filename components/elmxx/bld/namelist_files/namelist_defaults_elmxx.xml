@@ -20,4 +20,7 @@ attributes to express the dependency.
 <!-- fsurdat has no default: ELMXX has no -clm_usr_name equivalent to derive one
      from a naming convention, so it must be given explicitly in user_nl_elmxx -->
 
+<elmxx_check_boundary>.true.</elmxx_check_boundary>
+<elmxx_check_soft_fail>.false.</elmxx_check_soft_fail>
+
 </namelist_defaults>
