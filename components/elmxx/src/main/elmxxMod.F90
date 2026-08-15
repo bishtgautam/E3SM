@@ -22,6 +22,10 @@ module elmxxMod
   use elmxxSpmdMod , only : masterproc, iam, npes, mpicom_lnd
   use elmxxIO      , only : elmxx_pio_init, elmxx_read_domain
 
+  use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
+  use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
+                                      ELMxxKokkosPrintConfiguration
+
   implicit none
   save
   private
@@ -62,6 +66,21 @@ module elmxxMod
   integer, public :: iulog = 6
 
   integer, private :: nstep = 0
+
+  !--------------------------------------------------------------------------
+  ! ELMxx Kokkos/C++ model object
+  !
+  ! Stage 1 scope: the handle is created at init and destroyed at finalize so
+  ! that the Kokkos runtime, the C API, and the E3SM link line are all
+  ! exercised in a real coupled run. No state is set and no kernel is called
+  ! yet -- Stage 2 (surfdata + subgrid) supplies the counts that make the
+  ! per-surface-type views meaningful. Until then the natural-column and
+  ! natural-patch counts are the rank's land-cell count, a placeholder that is
+  ! dimensionally valid (ELMxxCreate requires > 0) and deliberately not
+  ! physically meaningful.
+  !--------------------------------------------------------------------------
+  type(ELMxxType), public :: elmxx_state
+  logical, private        :: elmxx_state_created = .false.
 
   public :: elmxx_read_namelist
   public :: elmxx_init
@@ -145,6 +164,7 @@ contains
     !
     integer :: i, n, k
     integer :: num_cells_grid                  ! ni*nj, including non-land cells
+    integer :: ierr_elmxx                      ! ELMxx C API status
     integer, allocatable :: land_ids(:)        ! global grid IDs of the active land cells
     character(len=*), parameter :: subname = '(elmxx_init) '
 
@@ -219,6 +239,33 @@ contains
 
     nstep = 0
 
+    !-----------------------------------------------------------------------
+    ! Bring up the Kokkos runtime and create the ELMxx model object.
+    !-----------------------------------------------------------------------
+    call ELMxxKokkosInitialize()
+
+    if (masterproc) then
+       write(logunit,*) subname,'Kokkos configuration:'
+       call shr_sys_flush(logunit)
+       call ELMxxKokkosPrintConfiguration()
+       call shr_sys_flush(logunit)
+    end if
+
+    ! Placeholder counts -- see the elmxx_state declaration above. ELMxxCreate
+    ! rejects a zero natural-column or natural-patch count, so a rank that owns
+    ! no land cells would abort; elmxx_init already aborts earlier when
+    ! npes > numg, which is the only way that arises today.
+    call ELMxxCreate(num_cells_owned, num_cells_owned, 0, elmxx_state, ierr_elmxx)
+    if (ierr_elmxx /= ELMXX_SUCCESS) then
+       write(logunit,*) subname,'ELMxxCreate failed with status ',ierr_elmxx
+       call shr_sys_abort(subname//' ERROR: ELMxxCreate failed')
+    end if
+    elmxx_state_created = .true.
+
+    write(logunit,*) subname,'rank ',iam,' created ELMxx object for ', &
+                     num_cells_owned,' cells'
+    call shr_sys_flush(logunit)
+
     if (masterproc) then
        write(logunit,*) 'ELMxx model initialization completed'
        call shr_sys_flush(logunit)
@@ -256,6 +303,22 @@ contains
     ! Finalize ELMxx.
     !
     implicit none
+
+    integer :: ierr_elmxx
+
+    !-----------------------------------------------------------------------
+    ! Tear down in reverse order of elmxx_init: object first, then Kokkos.
+    ! ELMxxKokkosFinalize must come after ELMxxDestroy -- the object owns
+    ! Kokkos views, and destroying them after the runtime is gone is undefined.
+    !-----------------------------------------------------------------------
+    if (elmxx_state_created) then
+       call ELMxxDestroy(elmxx_state, ierr_elmxx)
+       if (ierr_elmxx /= ELMXX_SUCCESS) then
+          write(iulog,*) 'elmxx_final: ELMxxDestroy failed with status ',ierr_elmxx
+       end if
+       elmxx_state_created = .false.
+       call ELMxxKokkosFinalize()
+    end if
 
     if (associated(natural_id_cells_owned)) deallocate(natural_id_cells_owned)
     if (associated(lonc_g))  deallocate(lonc_g)

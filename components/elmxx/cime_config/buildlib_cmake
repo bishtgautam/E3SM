@@ -31,6 +31,26 @@ def buildlib(bldroot, installpath, case):
     # elmxx makes its Filepath right here.
     #-------------------------------------------------------
 
+    #-------------------------------------------------------
+    # The ELMxx Kokkos/C++ library lives in a git submodule. Its Fortran
+    # bindings (elmxx_mod.F90, ELMxxKokkos.F90) are compiled as part of the
+    # library by components/cmake/build_model.cmake, not listed here -- adding
+    # them to Filepath as well would compile them twice and produce duplicate
+    # module files.
+    #
+    # Fail early and legibly if the submodule was never initialized, rather
+    # than letting CMake fail later with a confusing missing-directory error.
+    #-------------------------------------------------------
+    elmxx_lib_dir = os.path.join(srcroot, "components", "elmxx",
+                                 "external_models", "elmxx")
+    expect(
+        os.path.isfile(os.path.join(elmxx_lib_dir, "CMakeLists.txt")),
+        "ELMxx C++ library not found at {}.\n"
+        "Initialize the submodule:\n"
+        "    cd {} && git submodule update --init --recursive "
+        "components/elmxx/external_models/elmxx".format(elmxx_lib_dir, srcroot),
+    )
+
     filepaths = \
  """{caseroot}/SourceMods/src.elmxx
 {srcroot}/components/elmxx/src/main

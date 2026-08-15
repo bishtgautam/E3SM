@@ -27,6 +27,26 @@
       argument.</desc>
   </entry>
 
+  <entry id="ELM_USRDAT_NAME">
+    <type>char</type>
+    <default_value>UNSET</default_value>
+    <group>run_component_elmxx</group>
+    <file>env_run.xml</file>
+    <desc>Dataset name for user-created datasets, used with the ELM_USRDAT grid.
+
+      The entry id deliberately keeps ELM's name rather than an ELMXX-specific
+      one: cime_config/config_grids.xml resolves the ELM_USRDAT domain file as
+      domain.lnd.${ELM_USRDAT_NAME}_navy.nc, and that file is shared across
+      components. Renaming the variable here would mean forking the grid
+      definition. The ELM_USRDAT grid alias itself already matches ELMXX
+      compsets, since its regex is compset="(DATM|SATM).+ELM" and _ELMXX_
+      contains ELM.
+
+      Unlike ELM, ELMXX does not feed this to a -clm_usr_name option -- it has
+      its own build-namelist and resolves fsurdat itself. The only consumer is
+      the domain path above. The default is UNSET, matching ELM.</desc>
+  </entry>
+
   <description>
     <desc compset="_ELMXX">ELMXX:</desc>
   </description>
