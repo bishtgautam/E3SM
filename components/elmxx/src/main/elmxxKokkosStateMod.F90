@@ -57,7 +57,7 @@ module elmxxKokkosStateMod
                                sp_sucsat => sucsat, sp_watfc => watfc, &
                                sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
-  use elmxxForcingMod , only : forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
+  use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
@@ -76,6 +76,8 @@ module elmxxKokkosStateMod
                                ELMxxSetWatsat, ELMxxSetBsw, ELMxxSetSucsat, &
                                ELMxxSetWatfc, ELMxxSetDz, ELMxxSetTSoisno, &
                                ELMxxSetH2osoiLiq, ELMxxSetH2osoiIce, &
+                               ELMxxSetSmpmin, ELMxxSetTH2osfc, &
+                               ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -477,8 +479,11 @@ contains
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
-    integer :: kc, c, j, ierr, sz(2)
-    real(r8), allocatable :: buf(:,:)
+    integer :: kc, c, j, kp, ierr, sz(2)
+    real(r8), allocatable :: buf(:,:), rcol1(:), rpatch1(:)
+    integer , allocatable :: ipatch1(:)
+    real(r8), parameter :: smpmin_const  = -1.0e8_r8   ! ELM SoilStateType
+    real(r8), parameter :: t_h2osfc_cold = 274.0_r8    ! ELM ColumnDataType InitCold
     character(len=*), parameter :: subname = '(elmxx_kokkos_seed_soil_properties) '
 
     call require_built(subname)
@@ -562,6 +567,35 @@ contains
     call ELMxxSetH2osoiIce(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiIce')
 
     deallocate(buf)
+
+    ! ---- the scalars CanopyTemperature reads but does not write ----
+    ! Only four: everything else it appears to want -- zii, the three
+    ! forc_hgt_*_patch, t_ssbef, t_h2osfc_bef -- it COMPUTES, exactly as ELM
+    ! does. Seeding those would have been wasted work at best and a
+    ! disagreement with the kernel at worst.
+    allocate(rcol1(n_kokkos_col))
+    rcol1 = smpmin_const
+    call ELMxxSetSmpmin(elm, rcol1, n_kokkos_col, ierr);  call check(ierr, subname, 'Smpmin')
+    rcol1 = t_h2osfc_cold
+    call ELMxxSetTH2osfc(elm, rcol1, n_kokkos_col, ierr); call check(ierr, subname, 'TH2osfc')
+    deallocate(rcol1)
+
+    allocate(ipatch1(n_kokkos_patch), rpatch1(n_kokkos_patch))
+    do kp = 1, n_kokkos_patch
+       ipatch1(kp) = patch_itype(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetPatchItype(elm, ipatch1, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'PatchItype')
+
+    ! The atmospheric reference height. CanopyTemperature adds roughness and
+    ! displacement to it to get the per-patch heights, so this is the raw
+    ! forcing value, not a derived one.
+    do kp = 1, n_kokkos_patch
+       rpatch1(kp) = forc_z(cell_of_kpatch(kp))
+    end do
+    call ELMxxSetForcHgtPatch(elm, rpatch1, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'ForcHgtPatch')
+    deallocate(ipatch1, rpatch1)
 
     write(logunit,*) subname,'rank ',iam,' seeded watsat/bsw/sucsat/watfc (', &
                      nlevgrnd,' layers) and dz/t_soisno/h2osoi_liq/h2osoi_ice (', &
