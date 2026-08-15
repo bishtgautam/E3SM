@@ -301,6 +301,10 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'elmxx_check_boundary');
     add_default($nl, 'elmxx_check_soft_fail');
 
+    # Stage 4 kernel activation. Empty by default -- the timestep stays a
+    # no-op until kernels are named explicitly.
+    add_default($nl, 'elmxx_kernels', 'nofail'=>1);
+
     # fsurdat has no default and no naming convention to fall back on (ELMXX
     # has no -clm_usr_name equivalent), so it comes from user_nl_elmxx if it
     # comes at all. Absent, ELMXX still builds the decomposition and the domain
