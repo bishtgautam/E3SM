@@ -81,3 +81,7 @@
 [submodule "externals/mam4xx"]
 	path = externals/mam4xx
 	url = git@github.com:eagles-project/mam4xx.git
+[submodule "components/elmxx/external_models/elmxx"]
+	path = components/elmxx/external_models/elmxx
+	url = git@github.com:bishtgautam/elmxx.git
+	branch = bishtgautam/e3sm-integration
