@@ -340,6 +340,46 @@ macro(build_model COMP_CLASS COMP_NAME)
           target_include_directories(${TARGET_NAME} PRIVATE ${MOAB_INCLUDE_DIRS})
         endif()
       endif()
+      if (COMP_NAME STREQUAL "elmxx")
+        # ELMxx's Kokkos/C++ library, built from its submodule as part of this
+        # build. Kokkos itself comes from EKAT: uses_kokkos() in
+        # cime/CIME/build.py returns true for COMP_LND=elmxx, so USE_KOKKOS is
+        # set, EKAT is built in the sharedlibs, and Kokkos::kokkos exists by the
+        # time we get here. ELMxx's own CMakeLists detects that target and skips
+        # its bundled copy (see the ELMXX_STANDALONE guard there); both are the
+        # same E3SM-Project/kokkos fork at 4.5.1.
+        if (NOT TARGET Kokkos::kokkos)
+          message(FATAL_ERROR
+            "elmxx requires Kokkos, but target Kokkos::kokkos does not exist. "
+            "USE_KOKKOS should have been set for this case by uses_kokkos() in "
+            "cime/CIME/build.py.")
+        endif()
+        set(ELMXX_LIB_DIR "${PROJECT_SOURCE_DIR}/elmxx/external_models/elmxx")
+        if (NOT EXISTS "${ELMXX_LIB_DIR}/CMakeLists.txt")
+          message(FATAL_ERROR
+            "ELMxx C++ library not found at ${ELMXX_LIB_DIR}. Initialize the "
+            "submodule with: git submodule update --init --recursive "
+            "components/elmxx/external_models/elmxx")
+        endif()
+        add_subdirectory(${ELMXX_LIB_DIR} elmxx-lib)
+        # elmxx         -> libelmxx.a         (C++ kernels + C API)
+        # elmxx_fortran -> libelmxx_fortran.a (iso_c_binding wrappers; supplies
+        #                  the elmxx_mod and elmxx_kokkos_interface .mod files
+        #                  that components/elmxx/src/main/elmxxMod.F90 uses)
+        target_link_libraries(${TARGET_NAME} PRIVATE elmxx_fortran elmxx)
+        # elmxxMod.F90 does `use elmxx_mod` / `use elmxx_kokkos_interface`, so
+        # this target needs ELMxx's Fortran module directory on its include
+        # path. Read it off the target rather than reconstructing the path, so
+        # it stays correct if ELMxx changes where it writes .mod files.
+        get_target_property(ELMXX_MOD_DIR elmxx_fortran Fortran_MODULE_DIRECTORY)
+        if (NOT ELMXX_MOD_DIR)
+          message(FATAL_ERROR
+            "elmxx_fortran has no Fortran_MODULE_DIRECTORY property; cannot "
+            "locate ELMxx .mod files.")
+        endif()
+        target_include_directories(${TARGET_NAME} PRIVATE "${ELMXX_MOD_DIR}")
+        add_dependencies(${TARGET_NAME} elmxx_fortran)
+      endif()
       if (COMP_NAME STREQUAL "ww3")
 
         set(WW3_SRC_DIR "${PROJECT_SOURCE_DIR}/ww3/src/WW3/model/src")
