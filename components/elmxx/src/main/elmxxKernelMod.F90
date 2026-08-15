@@ -117,15 +117,20 @@ contains
 
     case (K_CANTEMP, K_BAREGRND, K_CANFLUX, K_SOILTEMP, K_SOILFLUX, &
           K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
-       ! All read the soil hydraulic properties (watsat, watfc, sucsat, bsw,
-       ! smpmin) and the soil column state (h2osoi_liq, h2osoi_ice, dz,
-       ! t_soisno). The hydraulic properties are NOT surfdata fields: ELM
-       ! derives them from sand, clay and organic matter through
-       ! iniTimeConst's pedotransfer functions, which has not been ported.
-       ! Stage 2 stores the raw inputs per column, so the port has what it
-       ! needs -- it just has not happened.
-       why = 'needs the iniTimeConst pedotransfer port for watsat/watfc/' // &
-             'sucsat/bsw and an initialized soil column (h2osoi_*, dz, t_soisno)'
+       ! The hydraulic properties (watsat, watfc, sucsat, bsw) are DONE --
+       ! elmxxSoilPropMod derives them from surfdata texture and seeds them,
+       ! and its vertical grid is bit-identical to ELM's. What is still
+       ! missing is the soil COLUMN STATE those kernels read alongside:
+       ! h2osoi_liq, h2osoi_ice, dz and t_soisno.
+       !
+       ! That is ELM's ColumnDataType InitCold, and it is not a one-liner:
+       ! h2osoi_vol branches on bedrock depth, urban road type, lake, and
+       ! whether FATES is on (0.70*watsat there, 0.15 otherwise). Each branch
+       ! has to be read rather than guessed -- a plausible-looking wrong soil
+       ! moisture is exactly the failure this switch exists to prevent.
+       why = 'needs the ColumnDataType InitCold port for the soil column ' // &
+             'state (h2osoi_liq, h2osoi_ice, dz, t_soisno); the hydraulic ' // &
+             'properties themselves are done'
 
     case (K_URBANRAD, K_URBANFLUX)
        why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &
