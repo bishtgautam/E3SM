@@ -46,6 +46,16 @@ module elmxxSoilPropMod
 
   integer, parameter, public :: nlevsoi  = 10   ! layers surfdata supplies texture for
   integer, parameter, public :: nlevgrnd = 15   ! ground layers the kernels index
+  integer, parameter, public :: nlevsno  =  5   ! maximum snow layers
+  integer, parameter, public :: nlevtot  = nlevsno + nlevgrnd   ! 20, snow + ground
+
+  ! Depth to bedrock. ELM reads it from surfdata's aveDTB when present and
+  ! otherwise falls back to nlevsoi for every column; aveDTB is absent from the
+  ! surfdata in use, so the ELM twins are already running that fallback.
+  ! Varying depth to bedrock is out of scope (decision, 2026-08-15), so this is
+  ! a parameter rather than a per-column array. Layers below it are bedrock and
+  ! hold no water.
+  integer, parameter, public :: nlevbed  = nlevsoi
 
   ! Vertical grid, shared by every column (ELM's is global too).
   real(r8), public :: zsoi (nlevgrnd)      ! node depth, m
@@ -58,6 +68,17 @@ module elmxxSoilPropMod
   real(r8), public, pointer :: sucsat(:,:) => null()  ! (nc, nlevgrnd) sat. matric potential, mm
   real(r8), public, pointer :: hksat (:,:) => null()  ! (nc, nlevgrnd) sat. conductivity, mm/s
   real(r8), public, pointer :: watfc (:,:) => null()  ! (nc, nlevgrnd) field capacity, v/v
+
+  !--------------------------------------------------------------------------
+  ! Cold-start column state, on the snow+ground index space the kernels use.
+  ! Slot m = 1..nlevtot maps to ELM layer j = m - nlevsno, so m = 6 is ELM's
+  ! first soil layer and m = 1..5 are the snow slots.
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: col_dz        (:,:) => null()  ! (nc, nlevtot) m
+  real(r8), public, pointer :: col_t_soisno  (:,:) => null()  ! (nc, nlevtot) K
+  real(r8), public, pointer :: col_h2osoi_liq(:,:) => null()  ! (nc, nlevtot) kg/m2
+  real(r8), public, pointer :: col_h2osoi_ice(:,:) => null()  ! (nc, nlevtot) kg/m2
+  real(r8), public, pointer :: col_h2osoi_vol(:,:) => null()  ! (nc, nlevgrnd) v/v
 
   logical, public :: soil_prop_built = .false.
 
@@ -79,6 +100,7 @@ contains
     call elmxx_soil_prop_clean()
     call build_vertical_grid()
     call build_hydraulic_properties(logunit)
+    call build_cold_start_state(logunit)
 
     soil_prop_built = .true.
 
@@ -191,6 +213,94 @@ contains
   end subroutine build_hydraulic_properties
 
   !-----------------------------------------------------------------------
+  subroutine build_cold_start_state(logunit)
+    !
+    ! ELM's ColumnDataType InitCold, for natural soil columns.
+    !
+    ! WHICH BRANCH, AND WHY IT IS THIS ONE. ELM's h2osoi_vol cold start forks
+    ! on FATES/hydrstress, arctic init, landunit type and bedrock depth. In
+    ! this configuration:
+    !   use_fates, use_hydrstress, use_arctic_init   all .false. (checked in
+    !                                                the ELM twin's lnd_in)
+    !   varying depth to bedrock                     out of scope; nlevbed is
+    !                                                nlevsoi, which is also
+    !                                                ELM's own fallback when
+    !                                                aveDTB is absent -- and it
+    !                                                is absent from the
+    !                                                surfdata in use
+    !   wetland, glacier, lake                       out of scope or unpacked
+    ! What is left is the plain branch: 0.15 by volume above bedrock, zero
+    ! below, capped at porosity.
+    !
+    ! Urban columns are NOT handled here (decision, 2026-08-15: natural first).
+    ! Their cold start differs per column type -- pervious road 0.3, impervious
+    ! road 0, roof and walls zero over nlevurb -- and belongs with the urban
+    ! increment.
+    !
+    ! Liquid versus ice is decided by temperature, and at 274 K every layer is
+    ! liquid. The branch is kept anyway: it costs nothing and the alternative
+    ! is code that silently assumes a warm start.
+    !
+    implicit none
+    integer, intent(in) :: logunit
+    integer  :: c, m, j
+    real(r8) :: vol
+    real(r8), parameter :: t_soil_cold = 274.0_r8      ! ELM InitCold, non-lake
+    real(r8), parameter :: h2osoi_vol_cold = 0.15_r8   ! ELM InitCold, plain branch
+    real(r8), parameter :: tkfrz  = 273.15_r8          ! SHR_CONST_TKFRZ
+    real(r8), parameter :: denh2o = 1000.0_r8          ! kg/m3
+    real(r8), parameter :: denice =  917.0_r8          ! kg/m3
+
+    allocate(col_dz        (num_columns, nlevtot), &
+             col_t_soisno  (num_columns, nlevtot), &
+             col_h2osoi_liq(num_columns, nlevtot), &
+             col_h2osoi_ice(num_columns, nlevtot), &
+             col_h2osoi_vol(num_columns, nlevgrnd))
+
+    ! Snow slots stay zero: snl = 0 at a cold start, so no snow layer exists
+    ! and every kernel gates on snl before reading them.
+    col_dz = 0.0_r8; col_t_soisno = 0.0_r8
+    col_h2osoi_liq = 0.0_r8; col_h2osoi_ice = 0.0_r8; col_h2osoi_vol = 0.0_r8
+
+    do c = 1, num_columns
+       do j = 1, nlevgrnd
+          m = j + nlevsno                       ! ELM layer j -> packed slot m
+
+          col_dz(c,m)       = dzsoi(j)
+          col_t_soisno(c,m) = t_soil_cold
+
+          if (j > nlevbed) then
+             vol = 0.0_r8                       ! bedrock holds no water
+          else
+             vol = min(h2osoi_vol_cold, watsat(c,j))
+          end if
+          col_h2osoi_vol(c,j) = vol
+
+          if (col_t_soisno(c,m) <= tkfrz) then
+             col_h2osoi_ice(c,m) = col_dz(c,m) * denice * vol
+             col_h2osoi_liq(c,m) = 0.0_r8
+          else
+             col_h2osoi_ice(c,m) = 0.0_r8
+             col_h2osoi_liq(c,m) = col_dz(c,m) * denh2o * vol
+          end if
+       end do
+    end do
+
+    write(logunit,*) '(elmxx_soil_prop_init) rank ',iam,' cold-start column state:'
+    write(logunit,*) '    h2osoi_vol [v/v]   ',minval(col_h2osoi_vol),' .. ',maxval(col_h2osoi_vol)
+    write(logunit,*) '    h2osoi_liq [kg/m2] ',minval(col_h2osoi_liq),' .. ',maxval(col_h2osoi_liq)
+    write(logunit,*) '    h2osoi_ice [kg/m2] ',minval(col_h2osoi_ice),' .. ',maxval(col_h2osoi_ice)
+    write(logunit,*) '    t_soisno   [K]     ',t_soil_cold,' over ',nlevgrnd,' ground layers'
+    write(logunit,*) '    nlevbed            ',nlevbed,' (layers below hold no water)'
+    call shr_sys_flush(logunit)
+
+    if (any(col_h2osoi_vol > watsat)) then
+       call shr_sys_abort('(elmxx_soil_prop_init) ERROR: soil water exceeds porosity')
+    end if
+
+  end subroutine build_cold_start_state
+
+  !-----------------------------------------------------------------------
   subroutine report(logunit)
     !
     ! Ranges, plus the bounds that must hold whatever the texture is. A
@@ -241,8 +351,15 @@ contains
     if (associated(sucsat)) deallocate(sucsat)
     if (associated(hksat))  deallocate(hksat)
     if (associated(watfc))  deallocate(watfc)
+    if (associated(col_dz))         deallocate(col_dz)
+    if (associated(col_t_soisno))   deallocate(col_t_soisno)
+    if (associated(col_h2osoi_liq)) deallocate(col_h2osoi_liq)
+    if (associated(col_h2osoi_ice)) deallocate(col_h2osoi_ice)
+    if (associated(col_h2osoi_vol)) deallocate(col_h2osoi_vol)
     watsat => null(); bsw => null(); sucsat => null()
     hksat  => null(); watfc => null()
+    col_dz => null(); col_t_soisno => null()
+    col_h2osoi_liq => null(); col_h2osoi_ice => null(); col_h2osoi_vol => null()
     soil_prop_built = .false.
   end subroutine elmxx_soil_prop_clean
 
