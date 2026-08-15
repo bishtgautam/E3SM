@@ -133,15 +133,22 @@ contains
        why = ' '
 
     case (K_CANFLUX)
-       ! CanopyFluxes reads btran and does not compute it -- the impl says so
-       ! outright ("btran is not modified -- leave as-is (already set via
-       ! input)"). With btran zero it produces exactly zero transpiration and
-       ! zero canopy sensible heat, which looks like a working kernel and is
-       ! not. ELM computes btran from root fraction and soil matric potential
-       ! in CanopyFluxes itself; here it needs a source before the kernel
-       ! means anything.
-       why = 'needs btran, which this kernel reads but does not compute; ' // &
-             'ELM derives it from rootfr and soil matric potential'
+       ! btran now has a source: elmxxRootMod computes it from rootfr and soil
+       ! matric potential, and it crosses each step.
+       !
+       ! IT WILL BE ZERO, AND THAT IS CORRECT. The cold-start soil is 0.15 by
+       ! volume, about 28% of saturation, which at bsw ~ 8 gives a matric
+       ! potential near -4.7e6 mm -- roughly eighteen times drier than these
+       ! PFTs' closure threshold of -2.55e5. The smp_node clamp pins it to
+       ! smpsc, rresis goes to zero, and the plant transpires nothing. ELM
+       ! would do the same from the same cold start.
+       !
+       ! So this kernel runs but cannot be meaningfully GRADED yet: nothing
+       ! wets the soil until the hydrology kernels are active, so btran stays
+       ! zero and every canopy flux with it. Structurally exercised,
+       ! numerically trivial -- worth knowing before reading its output as
+       ! evidence of anything.
+       why = ' '
 
     case (K_BAREGRND)
        ! Their inputs are CanopyTemperature's outputs -- qg, thv, htvp, the

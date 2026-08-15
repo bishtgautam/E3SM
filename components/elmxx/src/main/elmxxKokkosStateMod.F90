@@ -53,6 +53,7 @@ module elmxxKokkosStateMod
                                     patch_height_top
   use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
+  use elmxxRootMod    , only : rt_btran => btran
   use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, nlevtot, &
                                sp_watsat => watsat, sp_bsw => bsw, &
                                sp_sucsat => sucsat, sp_watfc => watfc, &
@@ -79,7 +80,7 @@ module elmxxKokkosStateMod
                                ELMxxSetH2osoiLiq, ELMxxSetH2osoiIce, &
                                ELMxxSetSmpmin, ELMxxSetTH2osfc, &
                                ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
-                               ELMxxSetForcRhoCol, &
+                               ELMxxSetForcRhoCol, ELMxxSetBtran, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -120,6 +121,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_canopy_hydrology
   public :: elmxx_kokkos_seed_soil_properties
   public :: elmxx_kokkos_push_forcing
+  public :: elmxx_kokkos_push_btran
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -685,6 +687,8 @@ contains
     end do
     call ELMxxSetFracVegNosno(elm, ipatch, n_kokkos_patch, ierr)
     call check(ierr, subname, 'FracVegNosno')
+    write(logunit,*) subname,'rank ',iam,' frac_veg_nosno = 1 on ', &
+         count(ipatch == 1),' of ',n_kokkos_patch,' packed patches'
 
     deallocate(rcol, icol, rpatch, ipatch)
 
@@ -843,6 +847,33 @@ contains
     end if
 
   end subroutine elmxx_kokkos_push_forcing
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_btran(elm, logunit)
+    !
+    ! Cross btran, which CanopyFluxes reads and does not compute.
+    !
+    ! Per-step rather than seeded: it is a function of soil moisture and
+    ! temperature, so it goes stale as soon as hydrology runs. Cheap enough
+    ! that recomputing beats reasoning about when it last changed.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kp, ierr
+    real(r8), allocatable :: buf(:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_btran) '
+
+    call require_built(subname)
+    allocate(buf(n_kokkos_patch))
+    do kp = 1, n_kokkos_patch
+       buf(kp) = rt_btran(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetBtran(elm, buf, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'Btran')
+    deallocate(buf)
+
+  end subroutine elmxx_kokkos_push_btran
 
   !-----------------------------------------------------------------------
   integer function cell_of_kcol(kc)

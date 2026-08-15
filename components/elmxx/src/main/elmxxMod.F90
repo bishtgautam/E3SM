@@ -37,6 +37,9 @@ module elmxxMod
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean
+  use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
+  use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
+                                      elmxx_root_clean, root_built
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, &
@@ -48,6 +51,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_canopy_hydrology, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
+                                      elmxx_kokkos_push_btran, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -90,6 +94,8 @@ module elmxxMod
   logical           , public :: elmxx_check_soft_fail = .false.
   ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
   character(len=256), public :: elmxx_kernels = ' '
+  ! PFT parameter file (ELM's clm_params). Needed once root water stress runs.
+  character(len=256), public :: fparamfile = ' '
 
   !--------------------------------------------------------------------------
   ! Instance information
@@ -138,7 +144,7 @@ contains
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
-                            elmxx_kernels
+                            elmxx_kernels, fparamfile
 
     ! defaults
     do_elmxx   = .true.
@@ -147,6 +153,7 @@ contains
     elmxx_check_boundary  = .true.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
+    fparamfile            = ' '
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -182,6 +189,7 @@ contains
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (fparamfile   , len(fparamfile)   , MPI_CHARACTER, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -192,6 +200,7 @@ contains
        write(logunit,*) '   elmxx_check_boundary  = ', elmxx_check_boundary
        write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
        write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
+       write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        call shr_sys_flush(logunit)
     end if
 
@@ -390,6 +399,13 @@ contains
        call elmxx_soil_prop_init(logunit)
        call elmxx_kokkos_seed_soil_properties(elmxx_state, logunit)
 
+       ! Root profile. Needs the PFT parameters and the soil grid, so it comes
+       ! after both. btran itself is per-step and is computed in elmxx_run.
+       if (len_trim(fparamfile) > 0) then
+          call elmxx_read_pftcon(logunit, fparamfile)
+          call elmxx_root_init(logunit)
+       end if
+
        ! Parse after seeding, so a blocked kernel's abort names a
        ! prerequisite that genuinely could not be met rather than one that
        ! merely had not been met yet at this point in init.
@@ -570,6 +586,16 @@ contains
     end if
 
     !-----------------------------------------------------------------------
+    ! Root water stress. btran depends on soil moisture and temperature, so it
+    ! is recomputed here rather than seeded once -- it would go stale the
+    ! moment hydrology starts evolving the soil column.
+    !-----------------------------------------------------------------------
+    if (root_built) then
+       call elmxx_compute_btran(logunit, nstep == 1 .or. mod(nstep, 48) == 0)
+       call elmxx_kokkos_push_btran(elmxx_state, logunit)
+    end if
+
+    !-----------------------------------------------------------------------
     ! Stage 4: run the active kernels, in driver order. After forcing has
     ! crossed, before the boundary probe -- the probe overwrites state fields
     ! with fingerprints, so it has to come last in the step.
@@ -657,6 +683,8 @@ contains
        elmxx_state_created = .false.
        call elmxx_kokkos_state_clean()
        call elmxx_soil_prop_clean()
+       call elmxx_root_clean()
+       call elmxx_pftcon_clean()
        call ELMxxKokkosFinalize()
     end if
 

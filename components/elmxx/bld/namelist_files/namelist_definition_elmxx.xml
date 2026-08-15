@@ -100,4 +100,21 @@ plausible-looking garbage rather than failing, which is why this is enforced
 at init instead of being left to inspection.
 </entry>
 
+<entry id="fparamfile"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: ''
+Full pathname of the PFT parameter file (ELM's clm_params). ELMXX reads only
+the fields a ported kernel needs -- roota_par and rootb_par for the root
+profile, smpso and smpsc for stomatal response, tc_stress for the cold cutoff
+on root water uptake -- rather than the whole file, so that every field read
+has a consumer.
+
+Required once any kernel needing root water stress is active. Use the same
+file as the ELM twin, or the two models are not comparable.
+</entry>
+
 </namelist_definition>
