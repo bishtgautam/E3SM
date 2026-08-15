@@ -46,7 +46,10 @@ module elmxxKernelMod
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
                                ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
                                ELMxxGetTGrnd, ELMxxGetQg, ELMxxGetThv, &
-                               ELMxxGetHtvp, ELMxxGetSoilbeta, ELMxxGetZ0mg
+                               ELMxxGetHtvp, ELMxxGetSoilbeta, ELMxxGetZ0mg, &
+                               ELMxxGetEflxShGrnd, ELMxxGetEflxShVeg, &
+                               ELMxxGetQflxEvapSoi, ELMxxGetQflxTranVeg, &
+                               ELMxxGetTVeg, ELMxxGetBtran
 
   implicit none
   save
@@ -88,6 +91,7 @@ module elmxxKernelMod
   public :: elmxx_kernels_run
   public :: elmxx_kernels_report
   public :: elmxx_report_cantemp
+  public :: elmxx_report_fluxes
 
 contains
 
@@ -128,19 +132,28 @@ contains
        ! the kernel would have overwritten.
        why = ' '
 
-    case (K_BAREGRND, K_CANFLUX)
-       ! These read naturalCol directly, and most of what they need is now
-       ! there: watsat/watfc/sucsat/bsw from elmxxSoilPropMod, and dz,
-       ! t_soisno, h2osoi_liq and h2osoi_ice from its cold start. What is left
-       ! is a short list of scalars and per-patch constants -- smpmin, zii,
-       ! t_h2osfc, patch_itype, the four forc_hgt_*_patch reference heights,
-       ! and forc_rho_col, which ELM derives from vapor pressure rather than
-       ! receiving. Two more have no setter at all (t_ssbef, ugust) and need
-       ! checking against what the kernels actually require.
-       ! This is the nearest group to runnable.
-       why = 'needs CanopyTemperature to have run (qg, thv, htvp, z0*, ' // &
-             'soilbeta, displa, thm are its outputs) and forc_rho_col, ' // &
-             'which ELM derives from vapor pressure rather than receiving'
+    case (K_CANFLUX)
+       ! CanopyFluxes reads btran and does not compute it -- the impl says so
+       ! outright ("btran is not modified -- leave as-is (already set via
+       ! input)"). With btran zero it produces exactly zero transpiration and
+       ! zero canopy sensible heat, which looks like a working kernel and is
+       ! not. ELM computes btran from root fraction and soil matric potential
+       ! in CanopyFluxes itself; here it needs a source before the kernel
+       ! means anything.
+       why = 'needs btran, which this kernel reads but does not compute; ' // &
+             'ELM derives it from rootfr and soil matric potential'
+
+    case (K_BAREGRND)
+       ! Their inputs are CanopyTemperature's outputs -- qg, thv, htvp, the
+       ! roughness lengths, soilbeta, displa, thm -- plus forc_rho_col, which
+       ! is now derived from vapor pressure and crossed each step. Runnable
+       ! provided cantemp runs first, which driver order guarantees.
+       !
+       ! ugust is NOT provided: gustiness is out of scope for now (decision,
+       ! 2026-08-15). BareGroundFluxes reads it, so it will see zero, which is
+       ! ELM's no-gustiness case rather than an unset value -- but it is worth
+       ! confirming against the kernel before trusting its fluxes.
+       why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
        ! A different integration surface entirely. These are SHARED kernels:
@@ -471,6 +484,57 @@ contains
     deallocate(tg, qg, thv, htvp, sbeta, z0mg)
 
   end subroutine elmxx_report_cantemp
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_report_fluxes(elm, npatch, logunit)
+    !
+    ! BareGroundFluxes and CanopyFluxes outputs.
+    !
+    ! These two partition the patches between them -- BareGroundFluxes takes
+    ! frac_veg_nosno == 0, CanopyFluxes takes == 1 -- so a patch appears in
+    ! exactly one. That is why they are reported together: the union is the
+    ! surface energy balance, and a gap or an overlap shows up here as a
+    ! patch with no flux or two.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: npatch, logunit
+    integer :: ierr
+    real(r8), allocatable :: shg(:), shv(:), evs(:), trv(:), tv(:), btr(:)
+    character(len=*), parameter :: subname = '(elmxx_kernels_report) '
+
+    if (.not. (kernel_active(K_BAREGRND) .or. kernel_active(K_CANFLUX))) return
+    if (npatch <= 0) return
+
+    allocate(shg(npatch), shv(npatch), evs(npatch), trv(npatch), &
+             tv(npatch), btr(npatch))
+    call ELMxxGetEflxShGrnd(elm, shg, npatch, ierr);  call check(ierr, logunit, K_BAREGRND)
+    call ELMxxGetEflxShVeg(elm, shv, npatch, ierr);   call check(ierr, logunit, K_CANFLUX)
+    call ELMxxGetQflxEvapSoi(elm, evs, npatch, ierr); call check(ierr, logunit, K_BAREGRND)
+    call ELMxxGetQflxTranVeg(elm, trv, npatch, ierr); call check(ierr, logunit, K_CANFLUX)
+    call ELMxxGetTVeg(elm, tv, npatch, ierr);         call check(ierr, logunit, K_CANFLUX)
+    call ELMxxGetBtran(elm, btr, npatch, ierr);       call check(ierr, logunit, K_CANFLUX)
+
+    write(logunit,*) subname,'rank ',iam,' surface fluxes over ',npatch,' patches:'
+    write(logunit,*) '    eflx_sh_grnd  [W/m2]   ',minval(shg),' .. ',maxval(shg)
+    write(logunit,*) '    eflx_sh_veg   [W/m2]   ',minval(shv),' .. ',maxval(shv)
+    write(logunit,*) '    qflx_evap_soi [kg/m2/s]',minval(evs),' .. ',maxval(evs)
+    write(logunit,*) '    qflx_tran_veg [kg/m2/s]',minval(trv),' .. ',maxval(trv)
+    write(logunit,*) '    t_veg         [K]      ',minval(tv) ,' .. ',maxval(tv)
+    write(logunit,*) '    btran         [-]      ',minval(btr),' .. ',maxval(btr)
+
+    ! Bounds that hold whatever the forcing is.
+    if (minval(tv) < 200.0_r8 .or. maxval(tv) > 350.0_r8) &
+         write(logunit,*) subname,'SUSPECT: vegetation temperature outside 200-350 K'
+    if (minval(btr) < 0.0_r8 .or. maxval(btr) > 1.0_r8) &
+         write(logunit,*) subname,'SUSPECT: btran outside [0,1]'
+    if (minval(trv) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative transpiration'
+
+    call shr_sys_flush(logunit)
+    deallocate(shg, shv, evs, trv, tv, btr)
+
+  end subroutine elmxx_report_fluxes
 
   !-----------------------------------------------------------------------
   subroutine check(ierr, logunit, k)
