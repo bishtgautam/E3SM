@@ -305,6 +305,14 @@ if ($LND_GRID eq "null") {
     # no-op until kernels are named explicitly.
     add_default($nl, 'elmxx_kernels', 'nofail'=>1);
 
+    # PFT parameter file. No default and no naming convention to derive one,
+    # same as fsurdat; needed once root water stress is in play.
+    if (defined $nl->get_value('fparamfile')) {
+        print "ELMXX parameter file is " . $nl->get_value('fparamfile') . " \n";
+    } else {
+        print "ELMXX: no fparamfile set; kernels needing PFT parameters cannot run \n";
+    }
+
     # fsurdat has no default and no naming convention to fall back on (ELMXX
     # has no -clm_usr_name equivalent), so it comes from user_nl_elmxx if it
     # comes at all. Absent, ELMXX still builds the decomposition and the domain
