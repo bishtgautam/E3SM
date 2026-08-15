@@ -296,6 +296,21 @@ if ($LND_GRID eq "null") {
     }
     add_default($nl, 'fatmlndfrc', 'val'=>"$LND_DOMAIN_PATH/$LND_DOMAIN_FILE");
 
+    # fsurdat has no default and no naming convention to fall back on (ELMXX
+    # has no -clm_usr_name equivalent), so it comes from user_nl_elmxx if it
+    # comes at all. Absent, ELMXX still builds the decomposition and the domain
+    # but has no subgrid; elmxx_init reports that rather than failing, so a
+    # domain-only case stays runnable.
+    if (defined $nl->get_value('fsurdat')) {
+        if ($print>=2) {
+            print "ELMXX surface dataset is " . $nl->get_value('fsurdat') . " \n";
+        }
+    } else {
+        if ($print>=1) {
+            print "ELMXX: no fsurdat set; running without a surface dataset \n";
+        }
+    }
+
     if ($print>=2) {
         print "ELMXX lnd grid is $LND_GRID \n";
         print "ELMXX lnd domain file is $LND_DOMAIN_PATH/$LND_DOMAIN_FILE \n";

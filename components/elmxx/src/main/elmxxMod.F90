@@ -21,6 +21,10 @@ module elmxxMod
   use shr_nl_mod   , only : shr_nl_find_group_name
   use elmxxSpmdMod , only : masterproc, iam, npes, mpicom_lnd
   use elmxxIO      , only : elmxx_pio_init, elmxx_read_domain
+  use elmxxSurfdataMod, only : elmxx_read_surfdata, elmxx_surfdata_clean, &
+                               surfdata_read, numurbl, natpft, nlevsoi, &
+                               pct_natveg, pct_crop, pct_lake, pct_wetland, &
+                               pct_glacier, pct_urban
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
   use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
@@ -55,6 +59,7 @@ module elmxxMod
   !--------------------------------------------------------------------------
   logical           , public :: do_elmxx   = .true.
   character(len=256), public :: fatmlndfrc = ' '
+  character(len=256), public :: fsurdat    = ' '
 
   !--------------------------------------------------------------------------
   ! Instance information
@@ -104,11 +109,12 @@ contains
     logical            :: lexist
     character(len=*), parameter :: subname = '(elmxx_read_namelist) '
 
-    namelist /elmxx_inparm/ do_elmxx, fatmlndfrc
+    namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat
 
     ! defaults
     do_elmxx   = .true.
     fatmlndfrc = ' '
+    fsurdat    = ' '
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -140,12 +146,14 @@ contains
 
     call mpi_bcast (do_elmxx  , 1                , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (fatmlndfrc, len(fatmlndfrc)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (fsurdat   , len(fsurdat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
        write(logunit,*) 'read from namelist:'
        write(logunit,*) '   do_elmxx   = ', do_elmxx
        write(logunit,*) '   fatmlndfrc = ', trim(fatmlndfrc)
+       write(logunit,*) '   fsurdat    = ', trim(fsurdat)
        call shr_sys_flush(logunit)
     end if
 
@@ -240,6 +248,25 @@ contains
     nstep = 0
 
     !-----------------------------------------------------------------------
+    ! Surface dataset.
+    !
+    ! Optional for now: without it ELMxx still has a decomposition and a domain,
+    ! which is all Stage 1 needed, so a case with no fsurdat stays runnable
+    ! rather than aborting. It becomes mandatory once subgrid construction
+    ! depends on it.
+    !-----------------------------------------------------------------------
+    if (len_trim(fsurdat) > 0) then
+       call elmxx_read_surfdata(logunit, fsurdat, num_cells_grid, &
+                                natural_id_cells_owned)
+       call elmxx_report_subgrid(logunit)
+    else
+       if (masterproc) then
+          write(logunit,*) subname,'no fsurdat in lnd_in; no surface dataset read'
+          call shr_sys_flush(logunit)
+       end if
+    end if
+
+    !-----------------------------------------------------------------------
     ! Bring up the Kokkos runtime and create the ELMxx model object.
     !-----------------------------------------------------------------------
     call ELMxxKokkosInitialize()
@@ -272,6 +299,69 @@ contains
     end if
 
   end subroutine elmxx_init
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_report_subgrid(logunit)
+    !
+    ! !DESCRIPTION:
+    ! Summarize the subgrid composition just read, and check it is self
+    ! consistent.
+    !
+    ! This is the first piece of the Stage 2 initialization comparison: what a
+    ! cell is made of has to be right before anything is built on top of it. It
+    ! is a summary only -- the per-cell dump that gets compared against ELM
+    ! lands with subgrid construction itself.
+    !
+    implicit none
+    !
+    integer, intent(in) :: logunit
+    !
+    integer  :: i, n_nat, n_urb, n_lake, n_gla, n_wet, n_crop
+    real(r8) :: total, worst
+    real(r8), parameter :: pct_tol = 1.0e-6_r8   ! percentage points
+    character(len=*), parameter :: subname = '(elmxx_report_subgrid) '
+
+    n_nat = 0; n_urb = 0; n_lake = 0; n_gla = 0; n_wet = 0; n_crop = 0
+    worst = 0.0_r8
+
+    do i = 1, num_cells_owned
+       if (pct_natveg(i)  > 0.0_r8) n_nat  = n_nat  + 1
+       if (pct_lake(i)    > 0.0_r8) n_lake = n_lake + 1
+       if (pct_glacier(i) > 0.0_r8) n_gla  = n_gla  + 1
+       if (pct_wetland(i) > 0.0_r8) n_wet  = n_wet  + 1
+       if (pct_crop(i)    > 0.0_r8) n_crop = n_crop + 1
+       if (sum(pct_urban(i,:)) > 0.0_r8) n_urb = n_urb + 1
+
+       ! The landunit percentages partition the gridcell, so they must sum to
+       ! 100. A cell that does not is a reading or indexing error -- most likely
+       ! the wrong gridcell row -- and would otherwise surface much later as
+       ! nonsensical subgrid weights.
+       total = pct_natveg(i) + pct_crop(i) + pct_lake(i) + pct_wetland(i) &
+             + pct_glacier(i) + sum(pct_urban(i,:))
+       worst = max(worst, abs(total - 100.0_r8))
+    end do
+
+    write(logunit,*) subname,'rank ',iam,' cells with: natveg ',n_nat, &
+                     ' urban ',n_urb,' lake ',n_lake,' glacier ',n_gla, &
+                     ' wetland ',n_wet,' crop ',n_crop
+    write(logunit,*) subname,'rank ',iam,' worst |sum(pct)-100| = ',worst
+    call shr_sys_flush(logunit)
+
+    if (worst > pct_tol) then
+       write(logunit,*) subname,'ERROR: landunit percentages do not sum to 100'
+       call shr_sys_abort(subname//' ERROR: inconsistent subgrid composition')
+    end if
+
+    ! Glacier is out of scope (no kernels and no Fortran fallback), so say so
+    ! loudly where it appears rather than silently ignoring the area.
+    if (n_gla > 0 .and. masterproc) then
+       write(logunit,*) subname,'WARNING: ',n_gla,' cells have glacier area, ', &
+                        'which ELMxx does not model; it is not yet excluded ', &
+                        'from the subgrid'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_report_subgrid
 
   !-----------------------------------------------------------------------
   subroutine elmxx_run(logunit, coupling_dt_in_sec)
@@ -319,6 +409,8 @@ contains
        elmxx_state_created = .false.
        call ELMxxKokkosFinalize()
     end if
+
+    call elmxx_surfdata_clean()
 
     if (associated(natural_id_cells_owned)) deallocate(natural_id_cells_owned)
     if (associated(lonc_g))  deallocate(lonc_g)

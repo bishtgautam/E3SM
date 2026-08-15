@@ -17,4 +17,7 @@ attributes to express the dependency.
 
 <!-- fatmlndfrc has no default: it is always set from LND_DOMAIN_PATH/LND_DOMAIN_FILE -->
 
+<!-- fsurdat has no default: ELMXX has no -clm_usr_name equivalent to derive one
+     from a naming convention, so it must be given explicitly in user_nl_elmxx -->
+
 </namelist_defaults>

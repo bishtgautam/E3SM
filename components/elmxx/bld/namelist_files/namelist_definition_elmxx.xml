@@ -29,4 +29,21 @@ center coordinates, cell areas, mask and land fraction from this file, and
 hands them to the coupler as the land domain.
 </entry>
 
+<entry id="fsurdat"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: ' '
+Full pathname of the surface dataset. ELMXX reads the subgrid composition
+(PCT_NATVEG, PCT_NAT_PFT, PCT_URBAN, PCT_LAKE, PCT_GLACIER, PCT_WETLAND,
+PCT_CROP), the soil properties (PCT_SAND, PCT_CLAY, ORGANIC, SOIL_COLOR,
+FMAX) and the satellite-phenology streams (MONTHLY_LAI, MONTHLY_SAI,
+MONTHLY_HEIGHT_TOP, MONTHLY_HEIGHT_BOT) from this file.
+
+Unlike ELM, ELMXX has no -clm_usr_name machinery to derive this from a naming
+convention, so it must be set explicitly -- normally in user_nl_elmxx.
+</entry>
+
 </namelist_definition>
