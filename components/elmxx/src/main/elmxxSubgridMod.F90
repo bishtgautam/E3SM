@@ -42,7 +42,7 @@ module elmxxSubgridMod
 
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
-  use elmxxSpmdMod    , only : masterproc, iam
+  use elmxxSpmdMod    , only : masterproc, iam, mpicom_lnd
   use elmxxSurfdataMod, only : numurbl, natpft, &
                                pct_natveg, pct_crop, pct_lake, pct_wetland, &
                                pct_glacier, pct_urban, pct_nat_pft, urban_region_id
@@ -50,6 +50,8 @@ module elmxxSubgridMod
   implicit none
   save
   private
+
+#include <mpif.h>
 
   !--------------------------------------------------------------------------
   ! Landunit type codes -- ELM's values (landunit_varcon.F90), so that dumps can
@@ -153,7 +155,39 @@ contains
                      ' columns ',num_columns,' patches ',num_patches
     call shr_sys_flush(logunit)
 
+    call report_global_totals(logunit)
+
   end subroutine elmxx_build_subgrid
+
+  !-----------------------------------------------------------------------
+  subroutine report_global_totals(logunit)
+    !
+    ! !DESCRIPTION:
+    ! Sum the subgrid across ranks and report the totals on the master.
+    !
+    ! This is the number that gets compared against ELM, which reports its
+    ! subgrid globally ("total number of landunits = ..."). Per-rank counts
+    ! cannot be compared directly: the decomposition differs, and only the
+    ! master's line reaches lnd.log anyway.
+    !
+    implicit none
+    !
+    integer, intent(in) :: logunit
+    !
+    integer :: mine(3), total(3), ier
+    character(len=*), parameter :: subname = '(elmxx_subgrid_global) '
+
+    mine = (/ num_landunits, num_columns, num_patches /)
+    call mpi_reduce(mine, total, 3, MPI_INTEGER, MPI_SUM, 0, mpicom_lnd, ier)
+
+    if (masterproc) then
+       write(logunit,*) subname,'GLOBAL total landunits = ',total(1)
+       write(logunit,*) subname,'GLOBAL total columns   = ',total(2)
+       write(logunit,*) subname,'GLOBAL total patches   = ',total(3)
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine report_global_totals
 
   !-----------------------------------------------------------------------
   subroutine report_by_type(logunit)
