@@ -296,12 +296,17 @@ contains
          ! taken at the top of HydrologyNoDrainage, while these are the values as
          ! they stand immediately before SurfaceRunoff runs, after SnowWater and
          ! the preceding updates have already modified them.
-         call diag_snapshot_2d('surfrun_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
-              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
-         call diag_snapshot_2d('surfrun_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
-              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
-         call diag_snapshot_2d('surfrun_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:nlevgrnd), &
-              bounds%endc-bounds%begc+1, nlevsno+nlevgrnd)
+         ! Soil layers only (1:nlevgrnd), unlike the hydro_in snapshots of the
+         ! same arrays which span -nlevsno+1:nlevgrnd. SurfaceRunoff and
+         ! Infiltration work purely in soil-layer index space -- snow is already
+         ! accounted for upstream in qflx_top_soil -- so including the snow
+         ! layers here would offset every soil layer by nlevsno.
+         call diag_snapshot_2d('surfrun_in:dz', dz(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('surfrun_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('surfrun_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
          call diag_snapshot_2d('surfrun_in:watsat', watsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
               bounds%endc-bounds%begc+1, nlevgrnd)
          call diag_snapshot_1d('surfrun_in:frac_sno_eff', &
