@@ -50,6 +50,7 @@ module elmxxKokkosStateMod
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
                                     patch_height_top
+  use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxxForcingMod , only : forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl
@@ -61,6 +62,11 @@ module elmxxKokkosStateMod
                                ELMxxSetForcUCol, ELMxxSetForcVCol, &
                                ELMxxSetForcThCol, ELMxxSetForcT, &
                                ELMxxSetForcRain, ELMxxSetForcSnow, &
+                               ELMxxSetDewmx, ELMxxSetMicroSigma, ELMxxSetNMelt, &
+                               ELMxxSetFracVegNosno, ELMxxSetFwet, ELMxxSetH2ocan, &
+                               ELMxxSetH2osfc, ELMxxSetIntSnow, &
+                               ELMxxSetFracH2osfc, ELMxxSetFracSnoEff, &
+                               ELMxxSetDoCapsnow, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -98,6 +104,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_check_map_invariants
   public :: elmxx_kokkos_seed_topology
   public :: elmxx_kokkos_seed_state
+  public :: elmxx_kokkos_seed_canopy_hydrology
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
@@ -413,13 +420,17 @@ contains
     rpatch = t_veg_cold
     call ELMxxSetTVeg(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'TVeg')
 
+    ! Exposed LAI/SAI, not raw TLAI/TSAI. With no snow the burial term is the
+    ! identity, but ELM's SatellitePhenologyMod also zeroes anything below
+    ! 0.05 rather than carrying a sliver of canopy, and downstream kernels
+    ! branch on exactly that threshold.
     do kp = 1, n_kokkos_patch
-       rpatch(kp) = patch_lai(patch_of_kpatch(kp))
+       rpatch(kp) = elai_seeded(kp)
     end do
     call ELMxxSetElai(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Elai')
 
     do kp = 1, n_kokkos_patch
-       rpatch(kp) = patch_sai(patch_of_kpatch(kp))
+       rpatch(kp) = esai_seeded(kp)
     end do
     call ELMxxSetEsai(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Esai')
 
@@ -436,6 +447,114 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_state
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_canopy_hydrology(elm, logunit)
+    !
+    ! The extra inputs CanopyHydrology needs beyond elmxx_kokkos_seed_state.
+    ! Split out because they belong to one kernel: keeping them here makes it
+    ! obvious what activating that kernel required, and what the next kernel
+    ! will have to add.
+    !
+    ! TWO DERIVED PARAMETERS, from ELM's initVerticalMod:
+    !   n_melt      = 200 / max(10, STD_ELEV)   -- snow-cover shape function.
+    !                 ELM's istice_mec branch (a flat 10) cannot arise: the
+    !                 packed natural-column view carries no glacier.
+    !   micro_sigma = (SLOPE + slope0)**(-slopebeta), slopebeta = 3,
+    !                 slopemax = 0.4, slope0 = slopemax**(-1/slopebeta).
+    !                 Microtopography, in meters.
+    ! Both come from surfdata fields ELMxx did not read until now.
+    !
+    ! THE REST ARE COLD-START ZEROS: no canopy water, no surface water, no
+    ! snow. dewmx is ELM's constant 0.1.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kc, kp, g, ierr
+    real(r8), allocatable :: rcol(:), rpatch(:)
+    integer , allocatable :: icol(:), ipatch(:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_canopy_hydrology) '
+    real(r8), parameter :: dewmx_const = 0.1_r8    ! ELM CanopyHydrologyMod
+    real(r8), parameter :: slopebeta   = 3.0_r8    ! ELM initVerticalMod
+    real(r8), parameter :: slopemax    = 0.4_r8
+    real(r8) :: slope0
+
+    call require_built(subname)
+    slope0 = slopemax**(-1.0_r8/slopebeta)
+
+    allocate(rcol(n_kokkos_col), icol(n_kokkos_col), &
+             rpatch(n_kokkos_patch), ipatch(n_kokkos_patch))
+
+    ! ---- derived microtopography, per natural column ----
+    do kc = 1, n_kokkos_col
+       g = cell_of_kcol(kc)
+       rcol(kc) = 200.0_r8 / max(10.0_r8, topo_std(g))
+    end do
+    call ELMxxSetNMelt(elm, rcol, n_kokkos_col, ierr);      call check(ierr, subname, 'NMelt')
+
+    do kc = 1, n_kokkos_col
+       g = cell_of_kcol(kc)
+       rcol(kc) = (topo_slope(g) + slope0)**(-slopebeta)
+    end do
+    call ELMxxSetMicroSigma(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'MicroSigma')
+
+    ! ---- cold start: no surface water, no snow beyond what seed_state set ----
+    rcol = 0.0_r8
+    call ELMxxSetH2osfc(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'H2osfc')
+    call ELMxxSetIntSnow(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'IntSnow')
+    call ELMxxSetFracH2osfc(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FracH2osfc')
+    call ELMxxSetFracSnoEff(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FracSnoEff')
+    icol = 0
+    call ELMxxSetDoCapsnow(elm, icol, n_kokkos_col, ierr);  call check(ierr, subname, 'DoCapsnow')
+
+    ! ---- per patch ----
+    rpatch = dewmx_const
+    call ELMxxSetDewmx(elm, rpatch, n_kokkos_patch, ierr);  call check(ierr, subname, 'Dewmx')
+    rpatch = 0.0_r8
+    call ELMxxSetH2ocan(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'H2ocan')
+    call ELMxxSetFwet(elm, rpatch, n_kokkos_patch, ierr);   call check(ierr, subname, 'Fwet')
+
+    ! frac_veg_nosno follows ELM's SatellitePhenologyMod rule: vegetated for
+    ! radiation purposes iff exposed LAI + SAI reaches 0.05. elm_driver copies
+    ! frac_veg_nosno_alb into frac_veg_nosno when dynamic vegetation is off,
+    ! which is the SP-mode case here.
+    do kp = 1, n_kokkos_patch
+       if (elai_seeded(kp) + esai_seeded(kp) >= 0.05_r8) then
+          ipatch(kp) = 1
+       else
+          ipatch(kp) = 0
+       end if
+    end do
+    call ELMxxSetFracVegNosno(elm, ipatch, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'FracVegNosno')
+
+    deallocate(rcol, icol, rpatch, ipatch)
+
+    write(logunit,*) subname,'rank ',iam,' seeded CanopyHydrology inputs for ', &
+                     n_kokkos_col,' columns ',n_kokkos_patch,' patches'
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_canopy_hydrology
+
+  !-----------------------------------------------------------------------
+  ! Exposed LAI/SAI as seeded, matching what elmxx_kokkos_seed_state pushed.
+  ! ELM's SatellitePhenology zeroes anything below 0.05 rather than carrying a
+  ! sliver of canopy, and frac_veg_nosno is decided on the zeroed values.
+  !-----------------------------------------------------------------------
+  real(r8) function elai_seeded(kp)
+    implicit none
+    integer, intent(in) :: kp
+    elai_seeded = patch_lai(patch_of_kpatch(kp))
+    if (elai_seeded < 0.05_r8) elai_seeded = 0.0_r8
+  end function elai_seeded
+
+  real(r8) function esai_seeded(kp)
+    implicit none
+    integer, intent(in) :: kp
+    esai_seeded = patch_sai(patch_of_kpatch(kp))
+    if (esai_seeded < 0.05_r8) esai_seeded = 0.0_r8
+  end function esai_seeded
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_push_forcing(elm, logunit)
