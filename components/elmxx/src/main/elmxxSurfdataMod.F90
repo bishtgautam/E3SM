@@ -39,6 +39,8 @@ module elmxxSurfdataMod
   integer, public :: numurbl = 0   ! urban density types (3)
   integer, public :: natpft  = 0   ! natural PFTs (17)
   integer, public :: nlevsoi = 0   ! hydrologically active soil layers (10)
+  integer, public :: lsmpft  = 0   ! PFTs on the monthly phenology streams (17)
+  integer, public :: nmonths = 0   ! months on the phenology streams (12)
 
   !--------------------------------------------------------------------------
   ! Subgrid composition, per owned cell. Percentages as stored on the file.
@@ -64,6 +66,20 @@ module elmxxSurfdataMod
   real(r8), public, pointer :: organic(:,:)     => null()  ! (ncells, nlevsoi)
   real(r8), public, pointer :: fmax(:)          => null()  ! (ncells)
   integer , public, pointer :: soil_color(:)    => null()  ! (ncells)
+
+  !--------------------------------------------------------------------------
+  ! Urban region ID. Not a physics parameter: it decides whether a gridcell gets
+  ! urban landunits at all, independently of PCT_URBAN. Zero means invalid.
+  !--------------------------------------------------------------------------
+  integer , public, pointer :: urban_region_id(:) => null()  ! (ncells)
+
+  !--------------------------------------------------------------------------
+  ! Satellite-phenology streams, per owned cell: (ncells, lsmpft, nmonths)
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: monthly_lai(:,:,:)        => null()
+  real(r8), public, pointer :: monthly_sai(:,:,:)        => null()
+  real(r8), public, pointer :: monthly_height_top(:,:,:) => null()
+  real(r8), public, pointer :: monthly_height_bot(:,:,:) => null()
 
   logical, public :: surfdata_read = .false.
 
@@ -108,6 +124,8 @@ contains
     numurbl = get_dimlen(ncid, fname, 'numurbl')
     natpft  = get_dimlen(ncid, fname, 'natpft')
     nlevsoi = get_dimlen(ncid, fname, 'nlevsoi')
+    lsmpft  = get_dimlen(ncid, fname, 'lsmpft')
+    nmonths = get_dimlen(ncid, fname, 'time')
 
     ! The surface dataset spans the whole grid, ocean cells included, so its
     ! gridcell dimension must equal ni*nj from the domain file. If it does not,
@@ -125,6 +143,11 @@ contains
     allocate(pct_nat_pft(ncells, natpft))
     allocate(pct_sand(ncells, nlevsoi), pct_clay(ncells, nlevsoi), &
              organic(ncells, nlevsoi))
+    allocate(urban_region_id(ncells))
+    allocate(monthly_lai(ncells, lsmpft, nmonths), &
+             monthly_sai(ncells, lsmpft, nmonths), &
+             monthly_height_top(ncells, lsmpft, nmonths), &
+             monthly_height_bot(ncells, lsmpft, nmonths))
 
     ! ---- subgrid composition ----
     call read_gc_real1d(ncid, fname, 'PCT_NATVEG' , ngrid, cell_ids, pct_natveg)
@@ -142,13 +165,27 @@ contains
     call read_gc_real1d(ncid, fname, 'FMAX'    , ngrid, cell_ids, fmax)
     call read_gc_int1d (ncid, fname, 'SOIL_COLOR', ngrid, cell_ids, soil_color)
 
+    ! ---- urban validity ----
+    call read_gc_int1d(ncid, fname, 'URBAN_REGION_ID', ngrid, cell_ids, urban_region_id)
+
+    ! ---- satellite phenology ----
+    call read_gc_real3d(ncid, fname, 'MONTHLY_LAI', ngrid, lsmpft, nmonths, &
+                        cell_ids, monthly_lai)
+    call read_gc_real3d(ncid, fname, 'MONTHLY_SAI', ngrid, lsmpft, nmonths, &
+                        cell_ids, monthly_sai)
+    call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_TOP', ngrid, lsmpft, nmonths, &
+                        cell_ids, monthly_height_top)
+    call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_BOT', ngrid, lsmpft, nmonths, &
+                        cell_ids, monthly_height_bot)
+
     call pio_closefile(ncid)
 
     surfdata_read = .true.
 
     if (masterproc) then
        write(iulog,*) trim(subname),': gridcell = ',ngrid,' numurbl = ',numurbl, &
-                      ' natpft = ',natpft,' nlevsoi = ',nlevsoi
+                      ' natpft = ',natpft,' nlevsoi = ',nlevsoi, &
+                      ' lsmpft = ',lsmpft,' months = ',nmonths
        call shr_sys_flush(iulog)
     end if
 
@@ -287,6 +324,50 @@ contains
   end subroutine read_gc_real2d
 
   !-----------------------------------------------------------------------
+  subroutine read_gc_real3d(ncid, fname, varname, ngrid, nsecond, nthird, cell_ids, out)
+    !
+    ! !DESCRIPTION:
+    ! Read a real field declared VAR(nthird, nsecond, gridcell) on the file and
+    ! keep the owned cells, as (cell, nsecond, nthird).
+    !
+    ! Same CDL/Fortran reversal as read_gc_real2d: the LAST CDL dimension varies
+    ! fastest, so MONTHLY_LAI(time, lsmpft, gridcell) is glob(ngrid, lsmpft,
+    ! time) in Fortran -- gridcell first, time last.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    integer          , intent(in)    :: ngrid, nsecond, nthird
+    integer          , intent(in)    :: cell_ids(:)
+    real(r8)         , intent(inout) :: out(:,:,:)
+    !
+    real(r8), allocatable :: glob(:,:,:)
+    integer :: varid, status, i, k, m
+    character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real3d'
+
+    allocate(glob(ngrid, nsecond, nthird))
+    status = pio_inq_varid(ncid, trim(varname), varid)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
+    end if
+    status = pio_get_var(ncid, varid, glob)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
+    end if
+
+    do m = 1, nthird
+       do k = 1, nsecond
+          do i = 1, size(cell_ids)
+             out(i,k,m) = glob(cell_ids(i), k, m)
+          end do
+       end do
+    end do
+
+    deallocate(glob)
+
+  end subroutine read_gc_real3d
+
+  !-----------------------------------------------------------------------
   subroutine elmxx_surfdata_clean()
     !
     implicit none
@@ -303,6 +384,11 @@ contains
     if (associated(organic))     deallocate(organic)
     if (associated(fmax))        deallocate(fmax)
     if (associated(soil_color))  deallocate(soil_color)
+    if (associated(urban_region_id))    deallocate(urban_region_id)
+    if (associated(monthly_lai))        deallocate(monthly_lai)
+    if (associated(monthly_sai))        deallocate(monthly_sai)
+    if (associated(monthly_height_top)) deallocate(monthly_height_top)
+    if (associated(monthly_height_bot)) deallocate(monthly_height_bot)
 
     surfdata_read = .false.
 
