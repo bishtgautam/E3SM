@@ -26,6 +26,8 @@ module lnd_comp_mct
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
+  use elmxx_cpl_indices, only : elmxx_cpl_indices_set
+  use elmxxForcingMod  , only : elmxx_import
 
   !
   ! !PUBLIC TYPES:
@@ -160,6 +162,9 @@ CONTAINS
     call mct_aVect_init(l2x_l, rList=seq_flds_l2x_fields, lsize=lsize)
     call mct_aVect_zero(l2x_l)
 
+    ! Resolve the coupler field indices now that both attribute vectors exist.
+    call elmxx_cpl_indices_set(x2l_l, l2x_l)
+
     !----------------------------------------------------------------------------
     ! Fill infodata that needs to be returned from ELMxx
     !----------------------------------------------------------------------------
@@ -183,8 +188,9 @@ CONTAINS
   ! !IROUTINE: lnd_run_mct
   !
   ! !DESCRIPTION:
-  !     Advance ELMxx by one coupling interval. Currently a no-op: nothing is
-  !     imported from x2l_l and l2x_l is left as it was initialized (zero).
+  !     Advance ELMxx by one coupling interval. Atmospheric forcing is imported
+  !     from x2l_l; l2x_l is still left as initialized (zero) because no physics
+  !     runs yet to produce anything to send back.
   !===============================================================================
 
   subroutine lnd_run_mct( EClock, cdata, x2l_l, l2x_l )
@@ -204,6 +210,8 @@ CONTAINS
     if (.not. do_elmxx) return
 
     coupling_dt_in_sec = get_step_size(EClock)
+
+    call elmxx_import(logunit_lnd, x2l_l)
 
     call elmxx_run(logunit_lnd, coupling_dt_in_sec)
 

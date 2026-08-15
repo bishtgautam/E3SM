@@ -29,6 +29,7 @@ module elmxxMod
                                subgrid_built, num_landunits, num_columns, &
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
+  use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
   use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
@@ -251,6 +252,10 @@ contains
     call shr_sys_flush(logunit)
 
     nstep = 0
+
+    ! Per-timestep atmospheric forcing lives at gridcell level, so it is sized
+    ! from the decomposition and does not depend on the surface dataset.
+    call elmxx_forcing_init(num_cells_owned)
 
     !-----------------------------------------------------------------------
     ! Surface dataset.
@@ -485,6 +490,7 @@ contains
        call ELMxxKokkosFinalize()
     end if
 
+    call elmxx_forcing_clean()
     call elmxx_subgrid_clean()
     call elmxx_surfdata_clean()
 
