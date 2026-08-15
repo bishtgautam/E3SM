@@ -36,6 +36,8 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
+  use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
+                                      any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
                                       elmxx_kokkos_seed_topology, &
@@ -81,6 +83,8 @@ module elmxxMod
   ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
   logical           , public :: elmxx_check_boundary  = .true.
   logical           , public :: elmxx_check_soft_fail = .false.
+  ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
+  character(len=256), public :: elmxx_kernels = ' '
 
   !--------------------------------------------------------------------------
   ! Instance information
@@ -128,7 +132,8 @@ contains
     character(len=*), parameter :: subname = '(elmxx_read_namelist) '
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
-                            elmxx_check_boundary, elmxx_check_soft_fail
+                            elmxx_check_boundary, elmxx_check_soft_fail, &
+                            elmxx_kernels
 
     ! defaults
     do_elmxx   = .true.
@@ -136,6 +141,7 @@ contains
     fsurdat    = ' '
     elmxx_check_boundary  = .true.
     elmxx_check_soft_fail = .false.
+    elmxx_kernels         = ' '
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -170,6 +176,7 @@ contains
     call mpi_bcast (fsurdat   , len(fsurdat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -179,6 +186,7 @@ contains
        write(logunit,*) '   fsurdat    = ', trim(fsurdat)
        write(logunit,*) '   elmxx_check_boundary  = ', elmxx_check_boundary
        write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
+       write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
        call shr_sys_flush(logunit)
     end if
 
@@ -369,6 +377,11 @@ contains
 
        call elmxx_kokkos_seed_topology(elmxx_state, logunit)
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
+
+       ! Parse after seeding, so a blocked kernel's abort names a
+       ! prerequisite that genuinely could not be met rather than one that
+       ! merely had not been met yet at this point in init.
+       call elmxx_kernels_parse(elmxx_kernels, logunit)
     end if
 
     if (masterproc) then
@@ -542,6 +555,15 @@ contains
     !-----------------------------------------------------------------------
     if (kokkos_state_built) then
        call elmxx_kokkos_push_forcing(elmxx_state, logunit)
+    end if
+
+    !-----------------------------------------------------------------------
+    ! Stage 4: run the active kernels, in driver order. After forcing has
+    ! crossed, before the boundary probe -- the probe overwrites state fields
+    ! with fingerprints, so it has to come last in the step.
+    !-----------------------------------------------------------------------
+    if (kokkos_state_built .and. any_kernel_active) then
+       call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit)
     end if
 
     if (kokkos_state_built .and. nstep == 1 .and. elmxx_check_boundary) then

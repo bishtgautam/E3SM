@@ -76,4 +76,28 @@ index map is silent corruption and every kernel added later builds on it. Set
 bring-up.
 </entry>
 
+<entry id="elmxx_kernels"
+       type="char*256"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: '' (no kernels active)
+Comma-separated list of ELMxx Kokkos kernels to activate, in any order --
+they always RUN in driver order, since each reads what the ones before it
+wrote. Valid names, in that driver order:
+
+  surfrad, canhydro, cansunshade, cantemp, baregrnd, canflux,
+  urbanrad, urbanflux, lakeflux, laketemp, soiltemp, soilflux,
+  surfrunoff, rootwater, hydrodrain, lakehydro
+
+There is no Fortran alternative to switch away from: a kernel that is not
+named simply does not run, so the timestep stays incomplete until all of them
+are on. Intermediate runs are diagnostic only.
+
+An unknown name aborts, and so does a name whose prerequisites are not met --
+most kernels still need the Stage 5 albedo port or the iniTimeConst
+pedotransfer port. A kernel run on unset inputs would read zeros and produce
+plausible-looking garbage rather than failing, which is why this is enforced
+at init instead of being left to inspection.
+</entry>
+
 </namelist_definition>
