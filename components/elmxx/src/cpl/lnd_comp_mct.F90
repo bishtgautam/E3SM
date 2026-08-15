@@ -49,7 +49,7 @@ module lnd_comp_mct
 
   private :: lnd_SetgsMap_mct
   private :: lnd_domain_mct
-  private :: get_step_size
+  private :: get_step_size, get_clock_date
   private :: chkrc
 
   !--------------------------------------------------------------------------
@@ -88,6 +88,7 @@ CONTAINS
     integer :: shrlogunit                     ! original log unit
     integer :: shrloglev                      ! original log level
     integer :: mpicom_loc                     ! local mpi communicator
+    integer :: month, day
     logical :: exists                         ! true if file exists
 
     character(*), parameter :: subName = "(lnd_init_mct) "
@@ -144,7 +145,8 @@ CONTAINS
        return
     end if
 
-    call elmxx_init(logunit_lnd)
+    call get_clock_date(EClock, month, day)
+    call elmxx_init(logunit_lnd, month, day)
 
     !----------------------------------------------------------------------------
     ! Register the ELMxx decomposition and domain with the coupler
@@ -205,15 +207,17 @@ CONTAINS
 
     !--- local ---
     integer :: coupling_dt_in_sec
+    integer :: month, day
     !-------------------------------------------------------------------------------
 
     if (.not. do_elmxx) return
 
     coupling_dt_in_sec = get_step_size(EClock)
+    call get_clock_date(EClock, month, day)
 
     call elmxx_import(logunit_lnd, x2l_l)
 
-    call elmxx_run(logunit_lnd, coupling_dt_in_sec)
+    call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day)
 
   end subroutine lnd_run_mct
 
@@ -386,6 +390,26 @@ CONTAINS
     call chkrc(rc, sub//': error return from ESMF_ClockTimeIntervalGet')
 
   end function get_step_size
+
+  !===============================================================================
+
+  subroutine get_clock_date(EClock, month, day)
+
+    ! Extract the component clock date used by satellite phenology.  The
+    ! EClock passed into the run phase is already at the end of this coupling
+    ! interval, matching ELM's get_curr_date(offset=dtime) convention.
+
+    type(ESMF_Clock), intent(inout) :: EClock
+    integer, intent(out) :: month, day
+    type(ESMF_Time) :: current_time
+    integer :: rc, year, seconds
+
+    call ESMF_ClockGet(EClock, currTime=current_time, rc=rc)
+    call chkrc(rc, 'lnd::get_clock_date: error return from ESMF_ClockGet')
+    call ESMF_TimeGet(current_time, yy=year, mm=month, dd=day, s=seconds, rc=rc)
+    call chkrc(rc, 'lnd::get_clock_date: error return from ESMF_TimeGet')
+
+  end subroutine get_clock_date
 
   !===============================================================================
 
