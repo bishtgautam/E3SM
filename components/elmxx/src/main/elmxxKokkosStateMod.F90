@@ -51,6 +51,10 @@ module elmxxKokkosStateMod
   use elmxxSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
                                     patch_height_top
   use elmxxSurfdataMod, only : topo_std, topo_slope
+  use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
+  use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, &
+                               sp_watsat => watsat, sp_bsw => bsw, &
+                               sp_sucsat => sucsat, sp_watfc => watfc
   use elmxxForcingMod , only : forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl
@@ -67,6 +71,8 @@ module elmxxKokkosStateMod
                                ELMxxSetH2osfc, ELMxxSetIntSnow, &
                                ELMxxSetFracH2osfc, ELMxxSetFracSnoEff, &
                                ELMxxSetDoCapsnow, &
+                               ELMxxSetWatsat, ELMxxSetBsw, ELMxxSetSucsat, &
+                               ELMxxSetWatfc, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -105,6 +111,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_topology
   public :: elmxx_kokkos_seed_state
   public :: elmxx_kokkos_seed_canopy_hydrology
+  public :: elmxx_kokkos_seed_soil_properties
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
@@ -447,6 +454,80 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_state
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_soil_properties(elm, logunit)
+    !
+    ! Push the derived soil hydraulic properties, which eight kernels read.
+    !
+    ! THE 2-D LAYOUT TRAP, RESOLVED. SetView2D wraps the caller's pointer in
+    ! the DEVICE VIEW'S OWN LAYOUT and deep-copies -- it does not transpose.
+    ! So a Fortran (column, layer) array is correct only when the views are
+    ! LayoutLeft, which is ELMxx's default (LAYOUT_RIGHT is an option, and it
+    ! is OFF). Under LayoutRight the same call would silently transpose,
+    ! putting layer 2's value in column 2 and reporting success -- the same
+    ! class of bug as the CDL dimension-order reversal in STATUS G.
+    !
+    ! Queried at runtime rather than assumed, because it is a build option of
+    ! a submodule and nothing else here would notice it changing.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kc, c, j, ierr, sz(2)
+    real(r8), allocatable :: buf(:,:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_soil_properties) '
+
+    call require_built(subname)
+    if (.not. soil_prop_built) then
+       call shr_sys_abort(subname//'ERROR: soil properties are not built')
+    end if
+
+    if (ELMxxKokkosIsLayoutRight() /= 0) then
+       call shr_sys_abort(subname//'ERROR: ELMxx was built LayoutRight; the '// &
+            '(column,layer) buffers here are Fortran-ordered and would be '// &
+            'silently transposed. Transpose them here before removing this.')
+    end if
+
+    sz(1) = n_kokkos_col
+    sz(2) = nlevgrnd
+    allocate(buf(n_kokkos_col, nlevgrnd))
+
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_watsat(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetWatsat(elm, buf, sz, ierr); call check(ierr, subname, 'Watsat')
+
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_bsw(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetBsw(elm, buf, sz, ierr);    call check(ierr, subname, 'Bsw')
+
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_sucsat(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetSucsat(elm, buf, sz, ierr); call check(ierr, subname, 'Sucsat')
+
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_watfc(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetWatfc(elm, buf, sz, ierr);  call check(ierr, subname, 'Watfc')
+
+    deallocate(buf)
+
+    write(logunit,*) subname,'rank ',iam,' seeded watsat/bsw/sucsat/watfc for ', &
+                     n_kokkos_col,' columns x ',nlevgrnd,' layers'
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_soil_properties
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_seed_canopy_hydrology(elm, logunit)

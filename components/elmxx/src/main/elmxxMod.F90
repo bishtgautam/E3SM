@@ -36,6 +36,7 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
+  use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
@@ -43,6 +44,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_topology, &
                                       elmxx_kokkos_seed_state, &
                                       elmxx_kokkos_seed_canopy_hydrology, &
+                                      elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
@@ -380,6 +382,12 @@ contains
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
        call elmxx_kokkos_seed_canopy_hydrology(elmxx_state, logunit)
 
+       ! Soil hydraulic properties: derived from surfdata texture here, then
+       ! pushed. Eight kernels read these, and none of them can run until
+       ! they are real rather than zero.
+       call elmxx_soil_prop_init(logunit)
+       call elmxx_kokkos_seed_soil_properties(elmxx_state, logunit)
+
        ! Parse after seeding, so a blocked kernel's abort names a
        ! prerequisite that genuinely could not be met rather than one that
        ! merely had not been met yet at this point in init.
@@ -644,6 +652,7 @@ contains
        end if
        elmxx_state_created = .false.
        call elmxx_kokkos_state_clean()
+       call elmxx_soil_prop_clean()
        call ELMxxKokkosFinalize()
     end if
 
