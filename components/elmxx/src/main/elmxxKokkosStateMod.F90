@@ -52,9 +52,11 @@ module elmxxKokkosStateMod
                                     patch_height_top
   use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
-  use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, &
+  use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, nlevtot, &
                                sp_watsat => watsat, sp_bsw => bsw, &
-                               sp_sucsat => sucsat, sp_watfc => watfc
+                               sp_sucsat => sucsat, sp_watfc => watfc, &
+                               sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
+                               sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
   use elmxxForcingMod , only : forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl
@@ -72,7 +74,8 @@ module elmxxKokkosStateMod
                                ELMxxSetFracH2osfc, ELMxxSetFracSnoEff, &
                                ELMxxSetDoCapsnow, &
                                ELMxxSetWatsat, ELMxxSetBsw, ELMxxSetSucsat, &
-                               ELMxxSetWatfc, &
+                               ELMxxSetWatfc, ELMxxSetDz, ELMxxSetTSoisno, &
+                               ELMxxSetH2osoiLiq, ELMxxSetH2osoiIce, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -523,8 +526,46 @@ contains
 
     deallocate(buf)
 
-    write(logunit,*) subname,'rank ',iam,' seeded watsat/bsw/sucsat/watfc for ', &
-                     n_kokkos_col,' columns x ',nlevgrnd,' layers'
+    ! ---- cold-start column state, on the snow+ground index space ----
+    ! These views are (nc, NLEVTOT = 20), not NLEVGRND: they span ELM's
+    ! -nlevsno+1 .. nlevgrnd. Passing a 15-wide buffer would be rejected with
+    ! ELMXX_ERR_SIZE_MISMATCH and leave the view at zero, silently.
+    sz(2) = nlevtot
+    allocate(buf(n_kokkos_col, nlevtot))
+
+    do j = 1, nlevtot
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_dz(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetDz(elm, buf, sz, ierr);        call check(ierr, subname, 'Dz')
+
+    do j = 1, nlevtot
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_tsoisno(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetTSoisno(elm, buf, sz, ierr);   call check(ierr, subname, 'TSoisno')
+
+    do j = 1, nlevtot
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_liq(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetH2osoiLiq(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiLiq')
+
+    do j = 1, nlevtot
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = sp_ice(col_of_kcol(kc), j)
+       end do
+    end do
+    call ELMxxSetH2osoiIce(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiIce')
+
+    deallocate(buf)
+
+    write(logunit,*) subname,'rank ',iam,' seeded watsat/bsw/sucsat/watfc (', &
+                     nlevgrnd,' layers) and dz/t_soisno/h2osoi_liq/h2osoi_ice (', &
+                     nlevtot,' layers) for ',n_kokkos_col,' columns'
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_soil_properties
