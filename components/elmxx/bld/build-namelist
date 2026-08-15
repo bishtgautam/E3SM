@@ -296,6 +296,11 @@ if ($LND_GRID eq "null") {
     }
     add_default($nl, 'fatmlndfrc', 'val'=>"$LND_DOMAIN_PATH/$LND_DOMAIN_FILE");
 
+    # Stage 3 Fortran<->Kokkos boundary check. On by default and fatal by
+    # default: a wrong index map is silent, and every kernel builds on it.
+    add_default($nl, 'elmxx_check_boundary');
+    add_default($nl, 'elmxx_check_soft_fail');
+
     # fsurdat has no default and no naming convention to fall back on (ELMXX
     # has no -clm_usr_name equivalent), so it comes from user_nl_elmxx if it
     # comes at all. Absent, ELMXX still builds the decomposition and the domain
