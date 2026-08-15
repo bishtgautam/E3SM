@@ -36,6 +36,13 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
+  use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
+                                      elmxx_kokkos_check_map_invariants, &
+                                      elmxx_kokkos_seed_topology, &
+                                      elmxx_kokkos_verify_maps, &
+                                      elmxx_kokkos_state_clean, &
+                                      kokkos_state_built, n_kokkos_col, &
+                                      n_kokkos_patch, n_kokkos_urb
   use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
                                       ELMxxKokkosPrintConfiguration
 
@@ -180,6 +187,7 @@ contains
     integer :: num_cells_grid                  ! ni*nj, including non-land cells
     integer :: ierr_elmxx                      ! ELMxx C API status
     integer :: n_nat_col, n_nat_patch, n_urb_lun
+    integer :: nfail_maps
     integer, allocatable :: land_ids(:)        ! global grid IDs of the active land cells
     character(len=*), parameter :: subname = '(elmxx_init) '
 
@@ -315,6 +323,40 @@ contains
                      n_nat_col,' columns ',n_nat_patch,' patches, urban ', &
                      n_urb_lun,' landunits'
     call shr_sys_flush(logunit)
+
+    !-----------------------------------------------------------------------
+    ! Stage 3: build the packed Fortran<->Kokkos maps and push the one piece
+    ! of topology the kernels dereference.
+    !
+    ! The maps are built by their own pass over the subgrid, so their extents
+    ! are an INDEPENDENT count from the one ELMxxCreate was given. Requiring
+    ! the two to agree is the check that matters: a setter whose length
+    ! disagrees with the allocated view is rejected and leaves that view at
+    ! zero (STATUS.md E.1), which is silent, so it must be impossible by
+    ! construction rather than caught downstream.
+    !-----------------------------------------------------------------------
+    if (subgrid_built) then
+       call elmxx_kokkos_state_init(logunit)
+
+       if (n_kokkos_col /= n_nat_col .or. n_kokkos_patch /= n_nat_patch .or. &
+           n_kokkos_urb /= n_urb_lun) then
+          write(logunit,*) subname,'ERROR: packed map extents ',n_kokkos_col, &
+               n_kokkos_patch, n_kokkos_urb,' disagree with ELMxxCreate ', &
+               n_nat_col, n_nat_patch, n_urb_lun
+          call shr_sys_abort(subname//' ERROR: packed map extents disagree with ELMxxCreate')
+       end if
+
+       ! Semantics before plumbing: the invariant check needs no Kokkos, so
+       ! run it before anything is pushed across the boundary. A map that is
+       ! wrong about which entity is which should fail here, not survive to be
+       ! round-tripped consistently by elmxx_kokkos_verify_maps at step 1.
+       call elmxx_kokkos_check_map_invariants(logunit, nfail_maps)
+       if (nfail_maps /= 0) then
+          call shr_sys_abort(subname//' ERROR: packed map invariants violated')
+       end if
+
+       call elmxx_kokkos_seed_topology(elmxx_state, logunit)
+    end if
 
     if (masterproc) then
        write(logunit,*) 'ELMxx model initialization completed'
@@ -469,12 +511,49 @@ contains
        call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     end if
 
+    !-----------------------------------------------------------------------
+    ! Stage 3 closing check, once, at the end of step 1: round-trip a
+    ! per-entity fingerprint through the Kokkos views and prove the packed
+    ! maps put it back where it came from.
+    !
+    ! Deliberately at the end of step 1 rather than inside init: the plan wants
+    ! the boundary proven after a full coupling interval has been driven, with
+    ! every kernel still off, so nothing between the set and the get could
+    ! legitimately have changed a value.
+    !-----------------------------------------------------------------------
+    if (kokkos_state_built .and. nstep == 1) then
+       call elmxx_verify_kokkos_boundary(logunit)
+    end if
+
     if (masterproc) then
        write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
        call shr_sys_flush(logunit)
     end if
 
   end subroutine elmxx_run
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_verify_kokkos_boundary(logunit)
+    !
+    ! Run the packed-map round-trip and make a failure fatal.
+    !
+    ! Fatal is the right default while the boundary is being brought up: a
+    ! wrong index map is silent corruption, and every kernel added later builds
+    ! on it. Once kernels run, this becomes the URBANxx-style `_check` mode the
+    ! plan describes, with a namelist soft-fail so a long run need not abort.
+    !
+    implicit none
+    integer, intent(in) :: logunit
+    integer :: nfail
+    character(len=*), parameter :: subname = '(elmxx_verify_kokkos_boundary) '
+
+    call elmxx_kokkos_verify_maps(elmxx_state, logunit, nfail)
+
+    if (nfail /= 0) then
+       call shr_sys_abort(subname//' ERROR: packed Fortran<->Kokkos maps do not round-trip')
+    end if
+
+  end subroutine elmxx_verify_kokkos_boundary
 
   !-----------------------------------------------------------------------
   subroutine elmxx_final()
@@ -497,6 +576,7 @@ contains
           write(iulog,*) 'elmxx_final: ELMxxDestroy failed with status ',ierr_elmxx
        end if
        elmxx_state_created = .false.
+       call elmxx_kokkos_state_clean()
        call ELMxxKokkosFinalize()
     end if
 
