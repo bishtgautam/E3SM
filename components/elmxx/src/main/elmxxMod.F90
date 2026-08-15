@@ -31,6 +31,8 @@ module elmxxMod
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
                                    elmxx_update_phenology, elmxx_surface_state_clean
+  use elmxxFilterMod      , only : elmxx_build_filters, elmxx_filters_clean
+  use elmxxInitCheckMod   , only : elmxx_write_init_snapshot
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
@@ -270,6 +272,8 @@ contains
        call elmxx_report_composition(logunit)
        call elmxx_build_subgrid(logunit, num_cells_owned)
        call elmxx_surface_state_init(logunit, month, day)
+       call elmxx_build_filters(logunit, num_cells_owned)
+       call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     else
        if (masterproc) then
           write(logunit,*) subname,'no fsurdat in lnd_in; no surface dataset read'
@@ -460,7 +464,10 @@ contains
 
     nstep = nstep + 1
 
-    if (subgrid_built) call elmxx_update_phenology(logunit, month, day)
+    if (subgrid_built) then
+       call elmxx_update_phenology(logunit, month, day)
+       call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
+    end if
 
     if (masterproc) then
        write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
@@ -495,6 +502,7 @@ contains
 
     call elmxx_forcing_clean()
     call elmxx_surface_state_clean()
+    call elmxx_filters_clean()
     call elmxx_subgrid_clean()
     call elmxx_surfdata_clean()
 
