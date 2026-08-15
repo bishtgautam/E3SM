@@ -205,7 +205,10 @@ def main() -> int:
         assert_same_keys("column", elmxx_col, elm_col)
         assert_same_keys("patch", elmxx_patch, elm_patch)
         checked = assert_values("landunit weight", elmxx_land, elm_land, args.atol)
-        checked += assert_values("column weight", elmxx_col, elm_col, args.atol)
+        checked += assert_values(
+            "column weight", {key: (values[0],) for key, values in elmxx_col.items()},
+            elm_col, args.atol
+        )
         checked += assert_values("patch state", elmxx_patch, elm_patch, args.atol)
         checked += check_source_soil(elmxx_col, args.surfdata, args.atol)
     except AssertionError as exc:

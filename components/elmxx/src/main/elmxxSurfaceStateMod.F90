@@ -23,7 +23,7 @@ module elmxxSurfaceStateMod
                                organic, soil_color, monthly_lai, monthly_sai, &
                                monthly_height_top, monthly_height_bot
   use elmxxSubgridMod , only : num_columns, num_patches, lun_gridcell, lun_itype, &
-                               col_landunit, patch_column, patch_itype, istsoil
+                               col_landunit, patch_column, patch_itype, patch_wtcol, istsoil
 
   implicit none
   save
@@ -133,6 +133,11 @@ contains
     do p = 1, num_patches
        c = patch_column(p)
        if (lun_itype(col_landunit(c)) /= istsoil) cycle
+
+       ! ELM's vegetation filter excludes zero-area natural PFTs.  Retain
+       ! their topology for structural parity, but leave their dynamic state
+       ! zero so the materialized state agrees with ELM's active patch set.
+       if (patch_wtcol(p) <= 0.0_r8) cycle
 
        ! ELM's `noveg` PFT has index zero and receives zero values rather
        ! than values from the monthly stream.  Its 1-based counterpart here
