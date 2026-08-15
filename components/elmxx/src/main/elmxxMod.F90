@@ -39,6 +39,7 @@ module elmxxMod
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
+                                      elmxx_report_fluxes, &
                                       any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
@@ -580,6 +581,7 @@ contains
        if (nstep == 1 .or. mod(nstep, 48) == 0) then
           call elmxx_kernels_report(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_report_cantemp(elmxx_state, n_kokkos_col, logunit)
+          call elmxx_report_fluxes(elmxx_state, n_kokkos_patch, logunit)
        end if
     end if
 

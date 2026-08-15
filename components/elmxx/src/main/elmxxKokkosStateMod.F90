@@ -43,6 +43,7 @@ module elmxxKokkosStateMod
 
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
+  use shr_const_mod   , only : SHR_CONST_RDAIR
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, col_landunit, &
@@ -78,6 +79,7 @@ module elmxxKokkosStateMod
                                ELMxxSetH2osoiLiq, ELMxxSetH2osoiIce, &
                                ELMxxSetSmpmin, ELMxxSetTH2osfc, &
                                ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
+                               ELMxxSetForcRhoCol, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -587,15 +589,14 @@ contains
     call ELMxxSetPatchItype(elm, ipatch1, n_kokkos_patch, ierr)
     call check(ierr, subname, 'PatchItype')
 
-    ! The atmospheric reference height. CanopyTemperature adds roughness and
-    ! displacement to it to get the per-patch heights, so this is the raw
-    ! forcing value, not a derived one.
-    do kp = 1, n_kokkos_patch
-       rpatch1(kp) = forc_z(cell_of_kpatch(kp))
-    end do
-    call ELMxxSetForcHgtPatch(elm, rpatch1, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'ForcHgtPatch')
     deallocate(ipatch1, rpatch1)
+
+    ! NOTE: forc_hgt_patch is NOT seeded here. It comes from forc_z, which the
+    ! coupler import fills in lnd_run_mct -- after init. Seeding it here
+    ! captured the zero the array is allocated with, which made
+    ! zldis = z0mg in BareGroundFluxes, so log(zldis/z0mg) = 0 and ustar
+    ! divided by zero. It is crossed each step instead, with the rest of the
+    ! forcing.
 
     write(logunit,*) subname,'rank ',iam,' seeded watsat/bsw/sucsat/watfc (', &
                      nlevgrnd,' layers) and dz/t_soisno/h2osoi_liq/h2osoi_ice (', &
@@ -735,8 +736,14 @@ contains
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
     integer :: kc, kp, g, ierr
+    real(r8) :: vp
     real(r8), allocatable :: rcol(:), rpatch(:)
     logical, save :: reported = .false.
+    ! ELM's rair is elm_varcon's, which is SHR_CONST_RDAIR. Taken from the
+    ! same shared constant rather than transcribed: it is derived
+    ! (RGAS/MWDAIR), not a literal, so a hand-copied value would differ in the
+    ! last digits and quietly bound how close a future ELM comparison can get.
+    real(r8), parameter :: rair = SHR_CONST_RDAIR
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
 
     call require_built(subname)
@@ -778,6 +785,19 @@ contains
     end do
     call ELMxxSetForcThCol(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'ForcThCol')
 
+    ! Air density. ELM derives this in its coupler import rather than
+    ! receiving it, so ELMxx has to derive it too, from the same three fields
+    ! and the same two-step form -- vapor pressure first, then density with
+    ! the 0.378 moist-air correction. Writing it as one expression would
+    ! change the rounding and make a future comparison against ELM harder to
+    ! read than it needs to be.
+    do kc = 1, n_kokkos_col
+       g  = cell_of_kcol(kc)
+       vp = forc_shum(g) * forc_pbot(g) / (0.622_r8 + 0.378_r8 * forc_shum(g))
+       rcol(kc) = (forc_pbot(g) - 0.378_r8 * vp) / (rair * forc_tbot(g))
+    end do
+    call ELMxxSetForcRhoCol(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ForcRhoCol')
+
     ! ---- patch-level ----
     do kp = 1, n_kokkos_patch
        rpatch(kp) = forc_tbot(cell_of_kpatch(kp))
@@ -797,6 +817,21 @@ contains
        rpatch(kp) = forc_snowc(g) + forc_snowl(g)
     end do
     call ELMxxSetForcSnow(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'ForcSnow')
+
+    ! The atmospheric reference height. This is forcing, not init state:
+    ! CanopyTemperature adds roughness and displacement to it to get the
+    ! per-patch heights, and BareGroundFluxes then takes log(zldis/z0mg), so a
+    ! zero here is not a small error -- it is a division by zero.
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = forc_z(cell_of_kpatch(kp))
+    end do
+    call ELMxxSetForcHgtPatch(elm, rpatch, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'ForcHgtPatch')
+
+    if (.not. reported) then
+       write(logunit,*) subname,'rank ',iam,' forc_z range ', &
+            minval(forc_z(1:size(forc_z))),' .. ',maxval(forc_z(1:size(forc_z))),' m'
+    end if
 
     deallocate(rcol, rpatch)
 
