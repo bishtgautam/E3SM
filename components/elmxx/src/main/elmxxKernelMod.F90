@@ -115,22 +115,30 @@ contains
        why = 'needs SurfaceAlbedo (Stage 5) for albd/albi/fabd/fabi/ftdd/' // &
              'ftid/ftii and albgrd/albgri, plus 2-D forc_solad/forc_solai'
 
-    case (K_CANTEMP, K_BAREGRND, K_CANFLUX, K_SOILTEMP, K_SOILFLUX, &
-          K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
-       ! The hydraulic properties (watsat, watfc, sucsat, bsw) are DONE --
-       ! elmxxSoilPropMod derives them from surfdata texture and seeds them,
-       ! and its vertical grid is bit-identical to ELM's. What is still
-       ! missing is the soil COLUMN STATE those kernels read alongside:
-       ! h2osoi_liq, h2osoi_ice, dz and t_soisno.
-       !
-       ! That is ELM's ColumnDataType InitCold, and it is not a one-liner:
-       ! h2osoi_vol branches on bedrock depth, urban road type, lake, and
-       ! whether FATES is on (0.70*watsat there, 0.15 otherwise). Each branch
-       ! has to be read rather than guessed -- a plausible-looking wrong soil
-       ! moisture is exactly the failure this switch exists to prevent.
-       why = 'needs the ColumnDataType InitCold port for the soil column ' // &
-             'state (h2osoi_liq, h2osoi_ice, dz, t_soisno); the hydraulic ' // &
-             'properties themselves are done'
+    case (K_CANTEMP, K_BAREGRND, K_CANFLUX)
+       ! These read naturalCol directly, and most of what they need is now
+       ! there: watsat/watfc/sucsat/bsw from elmxxSoilPropMod, and dz,
+       ! t_soisno, h2osoi_liq and h2osoi_ice from its cold start. What is left
+       ! is a short list of scalars and per-patch constants -- smpmin, zii,
+       ! t_h2osfc, patch_itype, the four forc_hgt_*_patch reference heights,
+       ! and forc_rho_col, which ELM derives from vapor pressure rather than
+       ! receiving. Two more have no setter at all (t_ssbef, ugust) and need
+       ! checking against what the kernels actually require.
+       ! This is the nearest group to runnable.
+       why = 'needs the remaining naturalCol scalars (smpmin, zii, ' // &
+             't_h2osfc, patch_itype, forc_hgt_*_patch, forc_rho_col)'
+
+    case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
+       ! A different integration surface entirely. These are SHARED kernels:
+       ! they do not read naturalCol, they read their own per-kernel state
+       ! seeded through ST_/SF_/SRI_/RWU_/HD_ setters -- 163 of them -- on top
+       ! of a topology declared by ELMxxInitSharedMetadata with the nolakec,
+       ! nolakep, hydrologyc and urbanc filters and an urbpoi flag.
+       ! elmxxFilterMod already builds all four filters, so the Fortran side
+       ! fits; the seeding does not exist yet.
+       why = 'needs ELMxxInitSharedMetadata plus the shared filters, and ' // &
+             'per-kernel ST_/SF_/SRI_/RWU_/HD_ seeding (163 setters); ' // &
+             'these do not read naturalCol'
 
     case (K_URBANRAD, K_URBANFLUX)
        why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &
