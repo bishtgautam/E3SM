@@ -58,6 +58,7 @@ module elmxxSoilKernelMod
                                    istsoil, istcrop
   use elmxxSurfaceStateMod, only : patch_lai, patch_sai
   use elmxxForcingMod     , only : forc_lwrad
+  use elmxxGroundHeatFluxKernelMod, only : elmxx_ground_heat_flux_kernel
   use elmxxSoilPropMod    , only : nlevsoi, nlevgrnd, nlevsno, nlevtot, nlevbed, &
                                    zsoi, dzsoi, zisoi, &
                                    sp_watsat  => watsat, sp_hksat => hksat, &
@@ -481,10 +482,13 @@ contains
     ! earlier kernels produced. So this is Fortran-side work, exactly as
     ! btran was, and only the result crosses.
     !
-    ! Ported from ELM SoilTemperatureMod.F90 ComputeGroundHeatFluxAndDeriv,
-    ! non-urban branch. Per column:
+    ! THE PHYSICS IS NOT HERE. It is in elmxxGroundHeatFluxKernelMod, which
+    ! depends on nothing but its arguments so that it can be replayed against
+    ! ELM's recorded snapshots -- see tools/validate_ground_heat_flux.py. This
+    ! routine gathers, calls it, and pushes. For reference, what it computes,
+    ! ported from ELM SoilTemperatureMod.F90 ComputeGroundHeatFluxAndDeriv,
+    ! non-urban branch, per column:
     !
-    !   lwrad_emit        = emg * sb * t_grnd^4
     !   dlwrad_emit       = 4 * emg * sb * t_grnd^3
     !   lwrad_emit_soil   = emg * sb * t_soisno(1)^4
     !   lwrad_emit_snow   = emg * sb * t_soisno(snl+1)^4
@@ -511,14 +515,12 @@ contains
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
     logical, intent(in) :: report
-    integer :: kc, kp, c, p, g, ierr, sz(2), lyr_top, j, snl_c
-    real(r8) :: w, fvn, lw_in, gnet_soil, gnet_h2osfc, gnet_snow
-    real(r8) :: le, dle, le_soil, le_snow, le_h2osfc
-    integer , allocatable :: snl(:)
-    real(r8), allocatable :: sabg(:), sabgs(:), sabgn(:), dlrad(:), cgrnd(:)
-    real(r8), allocatable :: shg(:), shsoil(:), shsnow(:), shsfc(:)
-    real(r8), allocatable :: evsoi(:), evsoil(:), evsnow(:), evsfc(:)
-    real(r8), allocatable :: emg(:), htvp(:), tg(:), th2osfc(:)
+    integer :: kc, kp, c, p, g, ierr, sz(2), j, nbad
+    integer , allocatable :: snl(:), patch_col(:), fvn(:)
+    real(r8), allocatable :: sabgs(:), dlrad(:), cgrnd(:), patch_wt(:)
+    real(r8), allocatable :: shsoil(:), shsnow(:), shsfc(:)
+    real(r8), allocatable :: evsoil(:), evsnow(:), evsfc(:)
+    real(r8), allocatable :: emg(:), htvp(:), tg(:), th2osfc(:), lwrad(:)
     real(r8), allocatable :: tsoisno(:,:), sabglyr(:,:), sabglyrc(:,:)
     real(r8), allocatable :: hs_soil(:), hs_snow(:), hs_sfc(:), dhsdt(:)
     real(r8), allocatable :: qtop(:)
@@ -527,28 +529,23 @@ contains
 
     if (.not. soil_kernel_built) call shr_sys_abort(subname//'ERROR: not built')
 
-    allocate(sabg(n_kokkos_patch), sabgs(n_kokkos_patch), sabgn(n_kokkos_patch), &
-             dlrad(n_kokkos_patch), cgrnd(n_kokkos_patch), &
-             shg(n_kokkos_patch), shsoil(n_kokkos_patch), shsnow(n_kokkos_patch), &
-             shsfc(n_kokkos_patch), evsoi(n_kokkos_patch), evsoil(n_kokkos_patch), &
-             evsnow(n_kokkos_patch), evsfc(n_kokkos_patch), &
+    allocate(sabgs(n_kokkos_patch), dlrad(n_kokkos_patch), cgrnd(n_kokkos_patch), &
+             shsoil(n_kokkos_patch), shsnow(n_kokkos_patch), shsfc(n_kokkos_patch), &
+             evsoil(n_kokkos_patch), evsnow(n_kokkos_patch), evsfc(n_kokkos_patch), &
+             patch_col(n_kokkos_patch), patch_wt(n_kokkos_patch), fvn(n_kokkos_patch), &
              sabglyr(n_kokkos_patch, nsnowlyr))
     allocate(emg(n_kokkos_col), htvp(n_kokkos_col), tg(n_kokkos_col), &
-             th2osfc(n_kokkos_col), snl(n_kokkos_col), &
+             th2osfc(n_kokkos_col), snl(n_kokkos_col), lwrad(n_kokkos_col), &
              tsoisno(n_kokkos_col, nlevtot), sabglyrc(n_kokkos_col, nlevtot), &
              hs_soil(n_kokkos_col), hs_snow(n_kokkos_col), hs_sfc(n_kokkos_col), &
              dhsdt(n_kokkos_col), qtop(n_kokkos_col))
 
-    call ELMxxGetSabg(elm, sabg, n_kokkos_patch, ierr);          call check(ierr, subname, 'Sabg')
     call ELMxxGetSabgSoil(elm, sabgs, n_kokkos_patch, ierr);     call check(ierr, subname, 'SabgSoil')
-    call ELMxxGetSabgSnow(elm, sabgn, n_kokkos_patch, ierr);     call check(ierr, subname, 'SabgSnow')
     call ELMxxGetDlrad(elm, dlrad, n_kokkos_patch, ierr);        call check(ierr, subname, 'Dlrad')
     call ELMxxGetCgrnd(elm, cgrnd, n_kokkos_patch, ierr);        call check(ierr, subname, 'Cgrnd')
-    call ELMxxGetEflxShGrnd(elm, shg, n_kokkos_patch, ierr);     call check(ierr, subname, 'EflxShGrnd')
     call ELMxxGetEflxShSoil(elm, shsoil, n_kokkos_patch, ierr);  call check(ierr, subname, 'EflxShSoil')
     call ELMxxGetEflxShSnow(elm, shsnow, n_kokkos_patch, ierr);  call check(ierr, subname, 'EflxShSnow')
     call ELMxxGetEflxShH2osfc(elm, shsfc, n_kokkos_patch, ierr); call check(ierr, subname, 'EflxShH2osfc')
-    call ELMxxGetQflxEvapSoi(elm, evsoi, n_kokkos_patch, ierr);  call check(ierr, subname, 'QflxEvapSoi')
     call ELMxxGetQflxEvSoil(elm, evsoil, n_kokkos_patch, ierr);  call check(ierr, subname, 'QflxEvSoil')
     call ELMxxGetQflxEvSnow(elm, evsnow, n_kokkos_patch, ierr);  call check(ierr, subname, 'QflxEvSnow')
     call ELMxxGetQflxEvH2osfc(elm, evsfc, n_kokkos_patch, ierr); call check(ierr, subname, 'QflxEvH2osfc')
@@ -564,66 +561,43 @@ contains
     sz(1) = n_kokkos_col; sz(2) = nlevtot
     call ELMxxGetTSoisno(elm, tsoisno, sz, ierr);                call check(ierr, subname, 'TSoisno')
 
-    hs_soil = 0.0_r8; hs_snow = 0.0_r8; hs_sfc = 0.0_r8; dhsdt = 0.0_r8
-    sabglyrc = 0.0_r8
-
+    !-----------------------------------------------------------------
+    ! Gather. Patch topology and weights first, then the column forcing.
+    !-----------------------------------------------------------------
     do kp = 1, n_kokkos_patch
        p  = patch_of_kpatch(kp)
        c  = patch_column(p)
        kc = kcol_of_col(c) + 1
-       if (kc <= 0) cycle
-       g  = lun_gridcell(col_landunit(c))
-       w  = patch_wtcol(p)
-
-       ! frac_veg_nosno, on the same 0.05 exposed-area rule the seeding used.
+       patch_col(kp) = kc
+       patch_wt(kp)  = patch_wtcol(p)
+       ! frac_veg_nosno, on ELM's exposed-area rule (SatellitePhenologyMod:394).
+       ! ELM stores this; ELMxx does not, so it is re-derived from the same
+       ! leaf and stem area the phenology interpolation produced.
        if (elai_of(p) + esai_of(p) >= 0.05_r8) then
-          fvn = 1.0_r8
+          fvn(kp) = 1
        else
-          fvn = 0.0_r8
+          fvn(kp) = 0
        end if
-
-       snl_c = snl(kc)
-       ! Top active layer. With no snow, snl = 0 and lyr_top is the first soil
-       ! slot; ELM's j runs -nlevsno+1..1, so slot = nlevsno + j.
-       lyr_top = nlevsno + snl_c + 1
-
-       le        = emg(kc) * sb * tg(kc)**4
-       dle       = 4.0_r8 * emg(kc) * sb * tg(kc)**3
-       le_soil   = emg(kc) * sb * tsoisno(kc, nlevsno + 1)**4
-       le_snow   = emg(kc) * sb * tsoisno(kc, lyr_top)**4
-       le_h2osfc = emg(kc) * sb * th2osfc(kc)**4
-
-       lw_in = (1.0_r8 - fvn) * emg(kc) * forc_lwrad(g)
-
-       gnet_soil   = sabgs(kp) + dlrad(kp) + lw_in - le_soil &
-                   - (shsoil(kp) + evsoil(kp) * htvp(kc))
-       gnet_h2osfc = sabgs(kp) + dlrad(kp) + lw_in - le_h2osfc &
-                   - (shsfc(kp) + evsfc(kp) * htvp(kc))
-       gnet_snow   = sabglyr(kp, lyr_top) + dlrad(kp) + lw_in - le_snow &
-                   - (shsnow(kp) + evsnow(kp) * htvp(kc))
-
-       ! Non-finite guard. The canopy kernels can hand back NaN on vegetated
-       ! patches when their own inputs are unset, and a NaN here silently
-       ! poisons the whole column mean -- minval/maxval would not show it.
-       if (.not. (abs(gnet_soil) >= 0.0_r8) .or. &
-           .not. (abs(gnet_snow) >= 0.0_r8) .or. &
-           .not. (abs(gnet_h2osfc) >= 0.0_r8)) then
-          write(logunit,*) subname,'SUSPECT: non-finite ground heat flux on ', &
-               'packed patch ',kp,' (fvn ',fvn,' weight ',w,') -- an upstream ', &
-               'kernel returned NaN; the column mean is now meaningless'
-       end if
-
-       hs_soil(kc) = hs_soil(kc) + gnet_soil   * w
-       hs_sfc(kc)  = hs_sfc(kc)  + gnet_h2osfc * w
-       hs_snow(kc) = hs_snow(kc) + gnet_snow   * w
-       dhsdt(kc)   = dhsdt(kc)   + (-cgrnd(kp) - dle) * w
-
-       ! Column-mean absorbed solar by layer, top active layer down to the
-       ! first soil layer -- ELM's "do j = lyr_top,1,1".
-       do j = lyr_top, nlevsno + 1
-          sabglyrc(kc, j) = sabglyrc(kc, j) + sabglyr(kp, j) * w
-       end do
     end do
+
+    do kc = 1, n_kokkos_col
+       c = col_of_kcol(kc)
+       g = lun_gridcell(col_landunit(c))
+       lwrad(kc) = forc_lwrad(g)
+    end do
+
+    call elmxx_ground_heat_flux_kernel(n_kokkos_col, n_kokkos_patch, nlevsno,   &
+         nlevtot, nsnowlyr, sb, patch_col, patch_wt, fvn,                       &
+         emg, htvp, tg, th2osfc, snl, tsoisno, lwrad,                           &
+         sabgs, sabglyr, dlrad, cgrnd, shsnow, shsoil, shsfc,                   &
+         evsnow, evsoil, evsfc,                                                 &
+         hs_soil, hs_snow, hs_sfc, dhsdt, sabglyrc, nbad)
+
+    if (nbad > 0) then
+       write(logunit,*) subname,'SUSPECT: non-finite ground heat flux on ',nbad, &
+            ' of ',n_kokkos_patch,' packed patches -- an upstream kernel ', &
+            'returned NaN; the column mean is now meaningless'
+    end if
 
     call ELMxxSetHsSoil(elm, hs_soil, n_kokkos_col, ierr);    call check(ierr, subname, 'HsSoil')
     call ELMxxSetHsTopSnow(elm, hs_snow, n_kokkos_col, ierr); call check(ierr, subname, 'HsTopSnow')
@@ -671,9 +645,9 @@ contains
        call shr_sys_flush(logunit)
     end if
 
-    deallocate(sabg, sabgs, sabgn, dlrad, cgrnd, shg, shsoil, shsnow, shsfc, &
-               evsoi, evsoil, evsnow, evsfc, sabglyr)
-    deallocate(emg, htvp, tg, th2osfc, snl, tsoisno, sabglyrc, &
+    deallocate(sabgs, dlrad, cgrnd, shsoil, shsnow, shsfc, &
+               evsoil, evsnow, evsfc, patch_col, patch_wt, fvn, sabglyr)
+    deallocate(emg, htvp, tg, th2osfc, snl, lwrad, tsoisno, sabglyrc, &
                hs_soil, hs_snow, hs_sfc, dhsdt, qtop)
 
   end subroutine elmxx_soil_kernel_push
