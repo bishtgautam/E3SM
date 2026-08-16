@@ -215,6 +215,38 @@ contains
       call BuildSnowFilter(bounds, num_nolakec, filter_nolakec, &
            num_snowc, filter_snowc, num_nosnowc, filter_nosnowc)
 
+      ! Direct SnowHydrology contract: records the state consumed by
+      ! SnowWater before downstream hydrology changes it.
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('snowhydro_in:snl', snl(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:frac_sno', col_ws%frac_sno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:h2osno', col_ws%h2osno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:snow_depth', snow_depth(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('snowhydro_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowhydro_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowhydro_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_1d('snowhydro_in:qflx_snomelt', col_wf%qflx_snomelt(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:qflx_rain_grnd', col_wf%qflx_rain_grnd(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:qflx_sub_snow', col_wf%qflx_sub_snow(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:qflx_dew_snow', col_wf%qflx_dew_snow(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:qflx_evap_grnd', col_wf%qflx_evap_grnd(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_in:qflx_dew_grnd', col_wf%qflx_dew_grnd(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+      end if
 
       ! Determine the change of snow mass and the snow water onto soil
 
@@ -542,6 +574,36 @@ contains
 
       call BuildSnowFilter(bounds, num_nolakec, filter_nolakec, &
            num_snowc, filter_snowc, num_nosnowc, filter_nosnowc)
+
+      ! Complete SnowHydrology contract: SnowWater, the intervening soil-only
+      ! hydrology, and compaction/layer combine/divide have all run. The
+      ! intervening soil routines do not mutate this snow-layer state.
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('snowhydro_out:snl', snl(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:frac_sno', col_ws%frac_sno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:h2osno', col_ws%h2osno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:snow_depth', snow_depth(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:int_snow', col_ws%int_snow(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('snowhydro_out:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowhydro_out:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowhydro_out:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowhydro_out:snw_rds', snw_rds(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_1d('snowhydro_out:qflx_snow_melt', col_wf%qflx_snow_melt(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowhydro_out:qflx_top_soil', col_wf%qflx_top_soil(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+      end if
 
       ! For columns where snow exists, accumulate 'time-covered-by-snow' counters.
       ! Otherwise, re-zero counter, since it is bareland

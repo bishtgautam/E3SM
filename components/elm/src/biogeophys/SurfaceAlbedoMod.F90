@@ -27,6 +27,7 @@ module SurfaceAlbedoMod
   use ColumnDataType    , only : col_es, col_ws
   use VegetationType    , only : veg_pp
   use VegetationDataType, only : veg_es, veg_ws
+  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_enabled
 
   use SurfaceAlbedoType , only : lake_melt_icealb, alblak, alblakwi
   use SurfaceAlbedoType , only : albice, albsat, albdry, isoicol
@@ -674,6 +675,36 @@ contains
                            albsni(bounds%begc:bounds%endc, :), &
                            flx_absi_snw(bounds%begc:bounds%endc, :, :) )
        endif ! end if use_snicar_ad
+
+    ! SNICAR contract. Capture the clean-snow inputs and the direct/diffuse
+    ! albedos and layer absorptions before SurfaceAlbedo mixes them with bare
+    ! ground and canopy radiation.
+    if (diag_enabled) then
+       call diag_snapshot_1d('snicar_in:cosinc', cosinc_col(bounds%begc:bounds%endc), &
+            bounds%endc-bounds%begc+1)
+       call diag_snapshot_1d('snicar_in:frac_sno', frac_sno(bounds%begc:bounds%endc), &
+            bounds%endc-bounds%begc+1)
+       call diag_snapshot_2d('snicar_in:albsfc', albsfc(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, numrad)
+       call diag_snapshot_2d('snicar_in:h2osno_liq', h2osno_liq(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, nlevsno)
+       call diag_snapshot_2d('snicar_in:h2osno_ice', h2osno_ice(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, nlevsno)
+       call diag_snapshot_2d('snicar_in:snw_rds', snw_rds(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, nlevsno)
+       call diag_snapshot_2d('snicar_out:albsnd', albsnd(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, numrad)
+       call diag_snapshot_2d('snicar_out:albsni', albsni(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, numrad)
+       call diag_snapshot_2d('snicar_out:flx_absd_vis', flx_absd_snw(bounds%begc:bounds%endc, :, 1), &
+            bounds%endc-bounds%begc+1, nlevsno+1)
+       call diag_snapshot_2d('snicar_out:flx_absd_nir', flx_absd_snw(bounds%begc:bounds%endc, :, 2), &
+            bounds%endc-bounds%begc+1, nlevsno+1)
+       call diag_snapshot_2d('snicar_out:flx_absi_vis', flx_absi_snw(bounds%begc:bounds%endc, :, 1), &
+            bounds%endc-bounds%begc+1, nlevsno+1)
+       call diag_snapshot_2d('snicar_out:flx_absi_nir', flx_absi_snw(bounds%begc:bounds%endc, :, 2), &
+            bounds%endc-bounds%begc+1, nlevsno+1)
+    end if
 
     ! ground albedos and snow-fraction weighting of snow absorption factors
     do ib = 1, nband
