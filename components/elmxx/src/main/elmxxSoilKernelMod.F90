@@ -118,6 +118,8 @@ module elmxxSoilKernelMod
                                    ELMxxGetEflxShSnow, ELMxxGetEflxShH2osfc, &
                                    ELMxxGetQflxEvapSoi, ELMxxGetQflxEvSoil, &
                                    ELMxxGetQflxEvSnow, ELMxxGetQflxEvH2osfc, &
+                                   ELMxxGetQflxRainGrnd, &
+                                   ELMxxGetH2osoiLiqSoi, ELMxxGetH2osoiIceSoi, &
                                    ELMxxGetEmg, ELMxxGetHtvp, ELMxxGetTGrnd, &
                                    ELMxxGetTH2osfc, ELMxxGetTSoisno, ELMxxGetSnl
 
@@ -138,6 +140,7 @@ module elmxxSoilKernelMod
 
   public :: elmxx_soil_kernel_init
   public :: elmxx_soil_kernel_push
+  public :: elmxx_soil_kernel_pull
   public :: elmxx_soil_kernel_clean
 
 contains
@@ -495,6 +498,7 @@ contains
     real(r8), allocatable :: emg(:), htvp(:), tg(:), th2osfc(:)
     real(r8), allocatable :: tsoisno(:,:), sabglyr(:,:), sabglyrc(:,:)
     real(r8), allocatable :: hs_soil(:), hs_snow(:), hs_sfc(:), dhsdt(:)
+    real(r8), allocatable :: qtop(:)
     character(len=*), parameter :: subname = '(elmxx_soil_kernel_push) '
     real(r8), parameter :: sb = SHR_CONST_STEBOL
 
@@ -510,7 +514,7 @@ contains
              th2osfc(n_kokkos_col), snl(n_kokkos_col), &
              tsoisno(n_kokkos_col, nlevtot), sabglyrc(n_kokkos_col, nlevtot), &
              hs_soil(n_kokkos_col), hs_snow(n_kokkos_col), hs_sfc(n_kokkos_col), &
-             dhsdt(n_kokkos_col))
+             dhsdt(n_kokkos_col), qtop(n_kokkos_col))
 
     call ELMxxGetSabg(elm, sabg, n_kokkos_patch, ierr);          call check(ierr, subname, 'Sabg')
     call ELMxxGetSabgSoil(elm, sabgs, n_kokkos_patch, ierr);     call check(ierr, subname, 'SabgSoil')
@@ -603,6 +607,26 @@ contains
     call ELMxxSetHsH2osfc(elm, hs_sfc, n_kokkos_col, ierr);   call check(ierr, subname, 'HsH2osfc')
     call ELMxxSetDhsdT(elm, dhsdt, n_kokkos_col, ierr);       call check(ierr, subname, 'DhsdT')
 
+    ! WATER INPUT TO THE SOIL SURFACE. Without this SurfRunInfil has nothing
+    ! to infiltrate, so runoff and infiltration both compute zero, the soil
+    ! never wets, and btran stays pinned at zero forever -- a hydrology that
+    ! runs and moves nothing. This is the same omission that cost the ELMxx
+    ! test suite five failures (STATUS E.3).
+    !
+    ! ELM SnowHydrologyMod:472, the no-snow branch:
+    !     qflx_top_soil(c) = qflx_rain_grnd(c) + qflx_snomelt(c)
+    ! Snowmelt is zero here: there is no snow at a cold start on these twins,
+    ! and no SnowHydrology kernel to produce melt if there were. That second
+    ! reason is the one that will stop being true first.
+    call ELMxxGetQflxRainGrnd(elm, qtop, n_kokkos_col, ierr)
+    call check(ierr, subname, 'QflxRainGrnd')
+    call ELMxxSetQflxTopSoil(elm, qtop, n_kokkos_col, ierr)
+    call check(ierr, subname, 'QflxTopSoil')
+    if (report) then
+       write(logunit,*) subname,'    qflx_top_soil [kg/m2/s] ', &
+            minval(qtop),' .. ',maxval(qtop)
+    end if
+
     sz(1) = n_kokkos_col; sz(2) = nlevtot
     call ELMxxSetSabgLyrCol(elm, sabglyrc, sz, ierr);         call check(ierr, subname, 'SabgLyrCol')
 
@@ -627,9 +651,62 @@ contains
     deallocate(sabg, sabgs, sabgn, dlrad, cgrnd, shg, shsoil, shsnow, shsfc, &
                evsoi, evsoil, evsnow, evsfc, sabglyr)
     deallocate(emg, htvp, tg, th2osfc, snl, tsoisno, sabglyrc, &
-               hs_soil, hs_snow, hs_sfc, dhsdt)
+               hs_soil, hs_snow, hs_sfc, dhsdt, qtop)
 
   end subroutine elmxx_soil_kernel_push
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_soil_kernel_pull(elm, logunit, report)
+    !
+    ! Read the updated soil column back into the Fortran arrays.
+    !
+    ! WITHOUT THIS THE WATER CYCLE DOES NOT CLOSE. btran is computed on the
+    ! Fortran side (elmxxRootMod) from col_h2osoi_liq/ice, and the hydrology
+    ! kernels update the Kokkos views -- two separate copies. Left alone,
+    ! btran keeps being recomputed from the cold-start moisture while the
+    ! Kokkos column wets underneath it, so btran stays pinned at zero forever
+    ! and no amount of rain ever reaches the plant.
+    !
+    ! The readback needed two new C entry points. The only h2osoi getter in
+    ! the API was ELMxxGetST_H2osoiLiqOut, which reads the STANDALONE
+    ! SoilTemperature struct -- empty when the ...Natural variants are used.
+    ! An integrated driver could push soil moisture in and not read it back.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    logical, intent(in) :: report
+    integer :: kc, c, j, ierr, sz(2)
+    real(r8), allocatable :: buf(:,:)
+    character(len=*), parameter :: subname = '(elmxx_soil_kernel_pull) '
+
+    if (.not. soil_kernel_built) return
+
+    sz = (/ n_kokkos_col, nlevgrnd /)
+    allocate(buf(n_kokkos_col, nlevgrnd))
+
+    call ELMxxGetH2osoiLiqSoi(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiLiqSoi')
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          sp_liq(col_of_kcol(kc), nlevsno + j) = buf(kc,j)
+       end do
+    end do
+    if (report) then
+       write(logunit,*) subname,'rank ',iam,' h2osoi_liq [kg/m2] ', &
+            minval(buf),' .. ',maxval(buf)
+    end if
+
+    call ELMxxGetH2osoiIceSoi(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiIceSoi')
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          sp_ice(col_of_kcol(kc), nlevsno + j) = buf(kc,j)
+       end do
+    end do
+
+    deallocate(buf)
+
+  end subroutine elmxx_soil_kernel_pull
 
   !-----------------------------------------------------------------------
   subroutine build_column_patch_index(logunit)
