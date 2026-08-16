@@ -64,13 +64,45 @@ module elmxxKernelMod
   ! should be activated in. It is ELM's driver order, not alphabetical.
   integer, parameter, public :: NKERNEL = 16
 
-  integer, parameter, public :: K_SURFRAD     =  1
-  integer, parameter, public :: K_CANHYDRO    =  2
-  integer, parameter, public :: K_CANSUNSHADE =  3
-  integer, parameter, public :: K_CANTEMP     =  4
-  integer, parameter, public :: K_BAREGRND    =  5
-  integer, parameter, public :: K_CANFLUX     =  6
-  integer, parameter, public :: K_URBANRAD    =  7
+  !--------------------------------------------------------------------------
+  ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
+  !
+  ! The sequence of processes here must match ELM's, because each kernel reads
+  ! what the ones before it wrote and ELM's ordering encodes those
+  ! dependencies. Line numbers are elm_driver.F90:
+  !
+  !    743  CanopyHydrology
+  !    780  CanopySunShadeFractions        <- BEFORE SurfaceRadiation
+  !    795  SurfaceRadiation
+  !    815  UrbanRadiation
+  !    835  CanopyTemperature
+  !    852  BareGroundFluxes
+  !    863  CanopyFluxes
+  !    880  UrbanFluxes
+  !    899  LakeFluxes
+  !    951  LakeTemperature
+  !    966  SoilTemperature
+  !    983  SoilFluxes
+  !   1008  HydrologyNoDrainage, which contains
+  !           SurfaceRunoff + Infiltration  -> surfrunoff
+  !           SoilWater's root extraction   -> rootwater
+  !   1045  LakeHydrology                  <- BEFORE HydrologyDrainage
+  !   1345  HydrologyDrainage
+  !   1500  SurfaceAlbedo                  <- END of the step; see STATUS
+  !
+  ! CORRECTED 2026-08-15. This list previously began with surfrad, put
+  ! cansunshade after it, and put hydrodrain before lakehydro. All three were
+  ! wrong: ELM runs CanopyHydrology first, CanopySunShadeFractions before
+  ! SurfaceRadiation, and LakeHydrology before HydrologyDrainage.
+  !--------------------------------------------------------------------------
+
+  integer, parameter, public :: K_CANHYDRO    =  1
+  integer, parameter, public :: K_CANSUNSHADE =  2
+  integer, parameter, public :: K_SURFRAD     =  3
+  integer, parameter, public :: K_URBANRAD    =  4
+  integer, parameter, public :: K_CANTEMP     =  5
+  integer, parameter, public :: K_BAREGRND    =  6
+  integer, parameter, public :: K_CANFLUX     =  7
   integer, parameter, public :: K_URBANFLUX   =  8
   integer, parameter, public :: K_LAKEFLUX    =  9
   integer, parameter, public :: K_LAKETEMP    = 10
@@ -78,16 +110,16 @@ module elmxxKernelMod
   integer, parameter, public :: K_SOILFLUX    = 12
   integer, parameter, public :: K_SURFRUNOFF  = 13
   integer, parameter, public :: K_ROOTWATER   = 14
-  integer, parameter, public :: K_HYDRODRAIN  = 15
-  integer, parameter, public :: K_LAKEHYDRO   = 16
+  integer, parameter, public :: K_LAKEHYDRO   = 15
+  integer, parameter, public :: K_HYDRODRAIN  = 16
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
-       'surfrad         ', 'canhydro        ', 'cansunshade     ', &
-       'cantemp         ', 'baregrnd        ', 'canflux         ', &
-       'urbanrad        ', 'urbanflux       ', 'lakeflux        ', &
+       'canhydro        ', 'cansunshade     ', 'surfrad         ', &
+       'urbanrad        ', 'cantemp         ', 'baregrnd        ', &
+       'canflux         ', 'urbanflux       ', 'lakeflux        ', &
        'laketemp        ', 'soiltemp        ', 'soilflux        ', &
-       'surfrunoff      ', 'rootwater       ', 'hydrodrain      ', &
-       'lakehydro       ' ]
+       'surfrunoff      ', 'rootwater       ', 'lakehydro       ', &
+       'hydrodrain      ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -135,18 +167,28 @@ contains
        why = ' '
 
     case (K_CANSUNSHADE)
-       ! Both read the full canopy/ground albedo set -- albd, albi, fabd,
-       ! fabi, ftdd, ftid, ftii, albgrd, albgri, albso*, albsn*_hst, and the
-       ! SNICAR flx_abs* factors. Every one of those is SurfaceAlbedo's
-       ! output, and SurfaceAlbedo is a Stage 5 port that does not exist.
-       ! They also read forc_solad/forc_solai, which Stage 3 does not cross.
-       ! Needs the sunlit/shaded canopy decomposition -- fabd_sun_z,
-       ! fabd_sha_z, fabi_sun_z, fabi_sha_z, tlai_z, nrad -- which is
-       ! SurfaceAlbedo's per-canopy-layer output. Unlike the bulk albedos
-       ! there is no meaningful cold-start constant for a vertical profile,
-       ! so this one genuinely waits for the port.
-       why = 'needs SurfaceAlbedo for the per-canopy-layer sunlit/shaded ' // &
-             'decomposition (fabd_sun_z, fabi_sun_z, tlai_z, nrad)'
+       ! Runnable, and the earlier reason recorded here was wrong.
+       !
+       ! It said this kernel "needs SurfaceAlbedo for the per-canopy-layer
+       ! sunlit/shaded decomposition". But CanopySunShadeFractionsPatch
+       ! COMPUTES that decomposition -- it is the kernel's whole job:
+       !     laisun = tlai_z * fsun_z
+       !     laisha = tlai_z * (1 - fsun_z)
+       ! What it reads is nrad, tlai_z and fsun_z, and the albedo set feeds
+       ! only parsun_z/parsha_z, the absorbed PAR that goes on to
+       ! photosynthesis. Blocking the whole kernel for the PAR half also
+       ! withheld the LAI half, which nothing required.
+       !
+       ! nlevcan = 1 in both models, and on that path ELM does not need the
+       ! two-stream for the first two either -- SurfaceAlbedoMod sets
+       ! nrad = 1 and tlai_z = elai outright. Only fsun_z is genuinely a
+       ! two-stream output, and ELM's cold start leaves it at zero.
+       !
+       ! LIMIT: fsun_z frozen at zero means the canopy is entirely shaded, so
+       ! parsun/laisun stay zero and sunlit photosynthesis cannot switch on.
+       ! ELM's own step one looks the same; a multi-day run does not, and that
+       ! resolves when SurfaceAlbedo lands.
+       why = ' '
 
     case (K_CANTEMP)
        ! Runnable. Everything it reads is now seeded: the hydraulic properties
@@ -159,37 +201,38 @@ contains
        why = ' '
 
     case (K_CANFLUX)
-       ! BLOCKED. It was marked runnable, it ran, and it produced NaN on every
-       ! vegetated patch for several sessions. Recording why, because the way
-       ! it hid is the reusable part.
+       ! Runnable. Two earlier explanations for its NaN were both wrong, and
+       ! both are recorded because each cost a cycle of guessing.
        !
-       ! CanopyFluxes forms the dry-leaf evaporation fraction as
-       !     rppdry = fdry * rb * (laisun/(rb + rssun) + laisha/(rb + rssha)) / elai
-       ! and reads laisun, laisha, rssun_iter and rssha_iter as INPUTS. Two
-       ! separate things have to supply them:
+       ! WRONG #1: "btran is zero, so canflux cannot be graded." btran only
+       ! gates whether transpiration is drawn from rppdry; rppdry was already
+       ! NaN by then.
        !
-       !   laisun / laisha        CanopySunShadeFractions -- itself blocked on
-       !                          SurfaceAlbedo.
-       !   rssun_iter/rssha_iter  stomatal resistance per Newton iteration.
-       !                          THERE IS NO PHOTOSYNTHESIS KERNEL IN ELMxx.
-       !                          ELM computes these inside CanopyFluxes by
-       !                          calling Photosynthesis; ELMxx expects the
-       !                          caller to hand them over.
+       ! WRONG #2: "it needs laisun/laisha from cansunshade and rssun/rssha
+       ! from a Photosynthesis port." Running cansunshade changed nothing, and
+       ! zero stomatal resistance is finite arithmetic, not a NaN.
        !
-       ! With all four at zero the expression is 0/0, so rppdry is NaN and it
-       ! propagates into every canopy flux, t_veg included.
+       ! ACTUAL CAUSE: dleaf, the leaf characteristic dimension, was never
+       ! seeded. CanopyFluxes forms
+       !     cf = 0.01 / (sqrt(uaf) * sqrt(dleaf))    rb = 1/(cf*uaf)
+       ! so dleaf = 0 makes cf infinite and rb EXACTLY ZERO -- and rb is the
+       ! denominator of
+       !     rppdry = fdry*rb*(laisun/(rb+rssun) + laisha/(rb+rssha))/elai
+       ! giving elai/0 and 0/0 together. It is a pftcon parameter that ELMxx
+       ! stores per patch rather than per PFT, which is why it was missed
+       ! alongside z0mr and displar. elmxxPftconMod now reads it and aborts on
+       ! a non-positive value for a vegetated PFT.
        !
-       ! HOW IT HID: minval/maxval skip NaN. Three NaN among seventeen patches
-       ! printed a clean finite range, and t_veg read 283 K -- its cold-start
-       ! value -- because the finite bare patches were all the reduction saw.
-       ! The reports now count non-finite values next to every range.
+       ! THE PATTERN, THIRD OCCURRENCE: an unseeded parameter view reads zero,
+       ! and zero is a legal number that produces NaN several kernels later.
+       ! z0mr/displar zeroed ustar; dleaf zeroed rb. Ask of every parameter a
+       ! kernel divides by whether anything actually sets it.
        !
-       ! btran being zero is NOT the cause. That was the earlier hypothesis and
-       ! it is wrong: btran only gates whether transpiration is taken from
-       ! rppdry, and rppdry is already NaN by then.
-       why = 'needs laisun/laisha from cansunshade (hence SurfaceAlbedo) and ' // &
-             'rssun_iter/rssha_iter, which need a Photosynthesis port that ' // &
-             'does not exist -- without them rppdry is 0/0'
+       ! REMAINING LIMIT, real but not a blocker: rssun_iter/rssha_iter are
+       ! zero because ELMxx has no Photosynthesis kernel, so stomata offer no
+       ! resistance. With btran zero as well, transpiration is off entirely.
+       ! Bounded and finite; not yet the right physics.
+       why = ' '
 
     case (K_BAREGRND)
        ! Their inputs are CanopyTemperature's outputs -- qg, thv, htvp, the
@@ -377,11 +420,6 @@ contains
 
     if (phase == 1) then
 
-    if (kernel_active(K_SURFRAD)) then
-       call ELMxxComputeSurfaceRadiation(elm, ierr)
-       call check(ierr, logunit, K_SURFRAD)
-    end if
-
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
        call check(ierr, logunit, K_CANHYDRO)
@@ -390,6 +428,16 @@ contains
     if (kernel_active(K_CANSUNSHADE)) then
        call ELMxxComputeCanopySunShadeFractions(elm, ierr)
        call check(ierr, logunit, K_CANSUNSHADE)
+    end if
+
+    if (kernel_active(K_SURFRAD)) then
+       call ELMxxComputeSurfaceRadiation(elm, ierr)
+       call check(ierr, logunit, K_SURFRAD)
+    end if
+
+    if (kernel_active(K_URBANRAD)) then
+       call ELMxxComputeUrbanRadiation(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
 
     if (kernel_active(K_CANTEMP)) then
@@ -405,11 +453,6 @@ contains
     if (kernel_active(K_CANFLUX)) then
        call ELMxxComputeCanopyFluxes(elm, dtime, ierr)
        call check(ierr, logunit, K_CANFLUX)
-    end if
-
-    if (kernel_active(K_URBANRAD)) then
-       call ELMxxComputeUrbanRadiation(elm, ierr)
-       call check(ierr, logunit, K_URBANRAD)
     end if
 
     if (kernel_active(K_URBANFLUX)) then
@@ -451,14 +494,14 @@ contains
        call check(ierr, logunit, K_ROOTWATER)
     end if
 
-    if (kernel_active(K_HYDRODRAIN)) then
-       call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
-       call check(ierr, logunit, K_HYDRODRAIN)
-    end if
-
     if (kernel_active(K_LAKEHYDRO)) then
        call ELMxxComputeLakeHydrology(elm, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
+    end if
+
+    if (kernel_active(K_HYDRODRAIN)) then
+       call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
+       call check(ierr, logunit, K_HYDRODRAIN)
     end if
 
     end if

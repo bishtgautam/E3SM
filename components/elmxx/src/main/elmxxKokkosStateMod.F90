@@ -59,7 +59,7 @@ module elmxxKokkosStateMod
                                sp_sucsat => sucsat, sp_watfc => watfc, &
                                sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
-  use elmxxPftconMod  , only : z0mr, displar, npft_param, pftcon_read
+  use elmxxPftconMod  , only : z0mr, displar, dleaf, npft_param, pftcon_read
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl, &
@@ -101,7 +101,12 @@ module elmxxKokkosStateMod
                                ELMxxSetFsun       , ELMxxGetFsun, &
                                ELMxxSetUrbanTaf   , ELMxxGetUrbanTaf, &
                                ELMxxSetUrbanQaf   , ELMxxGetUrbanQaf, &
-                               ELMxxSetZ0mrPft    , ELMxxSetDisplarPft
+                               ELMxxSetZ0mrPft    , ELMxxSetDisplarPft, &
+                               ELMxxSetDleaf      , &
+                               ELMxxSetNrad       , ELMxxSetTlaiZ, &
+                               ELMxxSetFsunZ      , ELMxxSetFabdSunZ, &
+                               ELMxxSetFabiSunZ   , ELMxxSetFabdShaZ, &
+                               ELMxxSetFabiShaZ
 
   implicit none
   save
@@ -649,8 +654,10 @@ contains
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
-    integer :: ierr, szc(2), szp(2), szs(2)
+    integer :: ierr, kp, szc(2), szp(2), szs(2)
     real(r8), allocatable :: bufc(:,:), bufp(:,:), bufs(:,:)
+    real(r8), allocatable :: bufp1(:)
+    integer , allocatable :: ibufp(:)
     integer, parameter :: numrad = 2               ! VIS, NIR
     integer, parameter :: nsnowlyr = 6             ! NLEVSNO + 1
     real(r8), parameter :: alb_ground = 0.2_r8     ! ELM InitCold
@@ -664,6 +671,7 @@ contains
     szs = (/ n_kokkos_col,   nsnowlyr /)
     allocate(bufc(n_kokkos_col, numrad), bufp(n_kokkos_patch, numrad), &
              bufs(n_kokkos_col, nsnowlyr))
+    allocate(bufp1(n_kokkos_patch), ibufp(n_kokkos_patch))
 
     bufc = alb_ground
     call ELMxxSetAlbgrd(elm, bufc, szc, ierr); call check(ierr, subname, 'Albgrd')
@@ -685,6 +693,43 @@ contains
     call ELMxxSetFtdd(elm, bufp, szp, ierr); call check(ierr, subname, 'Ftdd')
     call ELMxxSetFtii(elm, bufp, szp, ierr); call check(ierr, subname, 'Ftii')
 
+    ! ---- the canopy-layer discretisation CanopySunShadeFractions reads ----
+    !
+    ! nlevcan = 1 in both models, and on that path ELM does NOT need the
+    ! two-stream to produce nrad or tlai_z -- SurfaceAlbedoMod sets them
+    ! outright:
+    !     nrad(p) = 1
+    !     tlai_z(p,1) = elai(p)
+    ! so they are derivable here with no albedo at all.
+    !
+    ! fsun_z IS a genuine two-stream output, and ELM's cold start leaves it at
+    ! ZERO (SurfaceAlbedoType allocates fsun_z = 0, and the restart fallback
+    ! re-zeroes it). So step one has laisun = 0 and laisha = tlai_z, and that
+    ! is ELM's own step-one state rather than a stand-in invented here.
+    !
+    ! LIMIT: with fsun_z frozen at zero the canopy is entirely shaded, so
+    ! sunlit photosynthesis cannot switch on. Correct for a bootstrap, wrong
+    ! for a multi-day run, and it resolves when SurfaceAlbedo lands.
+    do kp = 1, n_kokkos_patch
+       if (elai_seeded(kp) > 0.0_r8) then
+          ibufp(kp) = 1
+       else
+          ibufp(kp) = 0
+       end if
+       bufp1(kp) = elai_seeded(kp)
+    end do
+    call ELMxxSetNrad(elm, ibufp, n_kokkos_patch, ierr);  call check(ierr, subname, 'Nrad')
+    call ELMxxSetTlaiZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'TlaiZ')
+
+    bufp1 = 0.0_r8
+    call ELMxxSetFsunZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'FsunZ')
+
+    ! Per-layer absorbed fractions: zero, matching the bulk fabd/fabi above.
+    call ELMxxSetFabdSunZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'FabdSunZ')
+    call ELMxxSetFabiSunZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'FabiSunZ')
+    call ELMxxSetFabdShaZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'FabdShaZ')
+    call ELMxxSetFabiShaZ(elm, bufp1, n_kokkos_patch, ierr); call check(ierr, subname, 'FabiShaZ')
+
     bufs = 0.0_r8
     call ELMxxSetFlxAbsdv(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsdv')
     call ELMxxSetFlxAbsdn(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsdn')
@@ -692,6 +737,7 @@ contains
     call ELMxxSetFlxAbsin(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsin')
 
     deallocate(bufc, bufp, bufs)
+    deallocate(bufp1, ibufp)
 
     write(logunit,*) subname,'rank ',iam,' seeded ELM cold-start albedos ', &
                      '(ground/canopy 0.2, snow 0.6, ftdd/ftii 1) for ', &
@@ -861,6 +907,21 @@ contains
     buf(1:numpft_kokkos) = displar(0:numpft_kokkos-1)
     call ELMxxSetDisplarPft(elm, buf, numpft_kokkos, ierr)
     call check(ierr, subname, 'DisplarPft')
+
+    ! dleaf is PER PATCH, not a PFT-indexed view -- ELMxx stores it broadcast
+    ! onto the patch rather than looked up. Same parameter, different shape.
+    block
+      real(r8), allocatable :: bufp(:)
+      integer :: kp
+      allocate(bufp(n_kokkos_patch))
+      do kp = 1, n_kokkos_patch
+         bufp(kp) = dleaf(patch_itype(patch_of_kpatch(kp)))
+      end do
+      call ELMxxSetDleaf(elm, bufp, n_kokkos_patch, ierr)
+      call check(ierr, subname, 'Dleaf')
+      write(logunit,*) subname,'rank ',iam,' dleaf [m] ',minval(bufp),' .. ',maxval(bufp)
+      deallocate(bufp)
+    end block
 
     write(logunit,*) subname,'rank ',iam,' seeded ',numpft_kokkos, &
          ' PFT roughness/displacement ratios; z0mr ',minval(z0mr(1:numpft_kokkos-1)), &
