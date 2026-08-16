@@ -85,19 +85,38 @@ Comma-separated list of ELMxx Kokkos kernels to activate, in any order --
 they always RUN in driver order, since each reads what the ones before it
 wrote. Valid names, in that driver order:
 
-  surfrad, canhydro, cansunshade, cantemp, baregrnd, canflux,
-  urbanrad, urbanflux, lakeflux, laketemp, soiltemp, soilflux,
-  surfrunoff, rootwater, hydrodrain, lakehydro
+  canhydro, cansunshade, surfrad, urbanrad, cantemp, baregrnd,
+  canflux, urbanflux, lakeflux, laketemp, soiltemp, soilflux,
+  surfrunoff, rootwater, lakehydro, hydrodrain
+
+This is ELM's driver order, taken from elm_driver.F90 -- CanopyHydrology
+first, CanopySunShadeFractions before SurfaceRadiation, LakeHydrology before
+HydrologyDrainage.
 
 There is no Fortran alternative to switch away from: a kernel that is not
 named simply does not run, so the timestep stays incomplete until all of them
 are on. Intermediate runs are diagnostic only.
 
-An unknown name aborts, and so does a name whose prerequisites are not met --
-most kernels still need the Stage 5 albedo port or the iniTimeConst
-pedotransfer port. A kernel run on unset inputs would read zeros and produce
-plausible-looking garbage rather than failing, which is why this is enforced
-at init instead of being left to inspection.
+An unknown name aborts, and so does a name whose prerequisites are not met.
+The eleven kernels 1x1_brazil needs are all runnable; urbanrad/urbanflux still
+need UrbanAlbedo, and the three lake kernels need the lake state allocation.
+A kernel run on unset inputs would read zeros and produce plausible-looking
+garbage rather than failing, which is why this is enforced at init instead of
+being left to inspection.
+</entry>
+
+<entry id="elmxx_do_albedo"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: .false.
+Run the ported SurfaceAlbedo at the end of each timestep, as ELM does.
+When .false. the albedos stay at ELM's cold-start constants (0.2 ground and
+canopy, 0.6 snow), which is correct for step one and increasingly wrong after
+that -- there is no solar-zenith dependence, no snow aging and no wetness
+effect. Requires fparamfile, since the two-stream reads the canopy optical
+parameters from it.
 </entry>
 
 <entry id="fparamfile"
@@ -108,12 +127,15 @@ at init instead of being left to inspection.
        valid_values="" >
 Default: ''
 Full pathname of the PFT parameter file (ELM's clm_params). ELMXX reads only
-the fields a ported kernel needs -- roota_par and rootb_par for the root
-profile, smpso and smpsc for stomatal response, tc_stress for the cold cutoff
-on root water uptake -- rather than the whole file, so that every field read
-has a consumer.
+the fields a ported kernel needs -- roota_par/rootb_par for the root profile,
+smpso/smpsc for stomatal response, tc_stress for the cold cutoff on root water
+uptake, z0mr/displar/dleaf for the canopy aerodynamic chain, and
+xl/rhol/rhos/taul/taus for the two-stream canopy optics -- rather than the
+whole file, so that every field read has a consumer.
 
-Required once any kernel needing root water stress is active. Use the same
+Required once any canopy kernel is active. z0mr, displar and dleaf are not
+optional: unseeded they read zero, which drives ustar and rb to zero and NaNs
+every canopy flux, so they are checked at read time. Use the same
 file as the ELM twin, or the two models are not comparable.
 </entry>
 

@@ -40,6 +40,8 @@ module elmxxMod
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
                                       elmxx_root_clean, root_built
+  use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, &
+                                      elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
                                       elmxx_soil_kernel_push, &
                                       elmxx_soil_kernel_clean, soil_kernel_built
@@ -90,11 +92,22 @@ module elmxxMod
   real(r8), public, pointer :: maskc_g(:)                ! domain mask (0 or 1)
   real(r8), public, pointer :: fracc_g(:)                ! land fraction
 
+  ! Per-owned-cell centres, in DEGREES, gathered from the global arrays.
+  ! SurfaceAlbedo needs them for the solar zenith angle, and it indexes by
+  ! local cell like the forcing does.
+  real(r8), public, pointer :: cell_lat(:) => null()
+  real(r8), public, pointer :: cell_lon(:) => null()
+
   !--------------------------------------------------------------------------
   ! Namelist (&elmxx_inparm in lnd_in)
   !--------------------------------------------------------------------------
   logical           , public :: do_elmxx   = .true.
   character(len=256), public :: fatmlndfrc = ' '
+
+  ! Run the ported SurfaceAlbedo at the end of each step. Off by default, so
+  ! that turning it on is a deliberate act and a run without it keeps the
+  ! frozen cold-start albedos it has been graded against.
+  logical, public :: elmxx_do_albedo = .false.
   character(len=256), public :: fsurdat    = ' '
   ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
   logical           , public :: elmxx_check_boundary  = .true.
@@ -151,7 +164,7 @@ contains
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
-                            elmxx_kernels, fparamfile
+                            elmxx_kernels, fparamfile, elmxx_do_albedo
 
     ! defaults
     do_elmxx   = .true.
@@ -305,6 +318,14 @@ contains
 
     ! Per-timestep atmospheric forcing lives at gridcell level, so it is sized
     ! from the decomposition and does not depend on the surface dataset.
+    ! Per-cell centres for the solar zenith angle. Gathered here rather than
+    ! looked up per step: the decomposition does not change.
+    allocate(cell_lat(num_cells_owned), cell_lon(num_cells_owned))
+    do i = 1, num_cells_owned
+       cell_lat(i) = latc_g(natural_id_cells_owned(i))
+       cell_lon(i) = lonc_g(natural_id_cells_owned(i))
+    end do
+
     call elmxx_forcing_init(num_cells_owned)
 
     !-----------------------------------------------------------------------
@@ -557,7 +578,8 @@ contains
   end subroutine elmxx_report_composition
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_run(logunit, coupling_dt_in_sec, month, day)
+  subroutine elmxx_run(logunit, coupling_dt_in_sec, month, day, &
+                       nextsw_cday, declinp1)
     !
     ! !DESCRIPTION:
     ! Advance ELMxx one coupling interval.
@@ -569,6 +591,8 @@ contains
     !
     integer, intent(in) :: logunit
     integer, intent(in) :: coupling_dt_in_sec
+    real(r8), intent(in) :: nextsw_cday   ! calendar day of the next radiation step
+    real(r8), intent(in) :: declinp1      ! solar declination for it, radians
     integer, intent(in) :: month, day
 
     nstep = nstep + 1
@@ -646,6 +670,21 @@ contains
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
+
+       ! SURFACE ALBEDO RUNS HERE, AT THE END OF THE STEP, BECAUSE ELM RUNS IT
+       ! HERE (elm_driver.F90, gated on doalb). SurfaceRadiation therefore
+       ! never consumes an albedo computed in its own step -- it reads the
+       ! previous step's, and step one reads the InitCold constants
+       ! elmxx_kokkos_seed_albedo supplied. Moving this to the top of the step
+       ! would also change which state the two-stream sees: t_veg, fwet and
+       ! h2osoi_vol have all been updated by now.
+       if (elmxx_do_albedo) then
+          call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
+               cell_lat, cell_lon, logunit)
+          if (nstep == 1 .or. mod(nstep, 24) == 0) then
+             call elmxx_surface_albedo_report(logunit)
+          end if
+       end if
        ! Report on the first step, then TWICE daily -- not once. The extra
        ! sample is what makes the radiation readable: step 48k lands at model
        ! midnight, where incident shortwave is zero and every SurfaceRadiation

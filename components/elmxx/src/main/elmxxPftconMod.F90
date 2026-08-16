@@ -54,6 +54,17 @@ module elmxxPftconMod
   ! of rppdry. Zero dleaf is therefore not a small leaf; it is a NaN.
   real(r8), public, pointer :: dleaf(:) => null()
 
+  ! Canopy optical properties, per PFT and waveband (1 = VIS, 2 = NIR).
+  ! rhol/rhos are leaf and stem reflectance, taul/taus leaf and stem
+  ! transmittance, xl the leaf/stem orientation index. These are the inputs to
+  ! the Sellers two-stream in elmxxSurfaceAlbedoMod. On file each band is its
+  ! own variable (rholvis/rholnir and so on) rather than a banded array.
+  real(r8), public, pointer :: rhol(:,:) => null()   ! (0:npft-1, numrad)
+  real(r8), public, pointer :: rhos(:,:) => null()
+  real(r8), public, pointer :: taul(:,:) => null()
+  real(r8), public, pointer :: taus(:,:) => null()
+  real(r8), public, pointer :: xl(:)     => null()
+
   ! Critical soil temperature for soil water stress [C]. Scalar on file
   ! (dimension allpfts = 1), not per PFT, despite living with the PFT params.
   real(r8), public :: tc_stress = 0.0_r8
@@ -95,7 +106,9 @@ contains
     allocate(roota_par(0:npft_param-1), rootb_par(0:npft_param-1), &
              smpso(0:npft_param-1), smpsc(0:npft_param-1), &
              z0mr(0:npft_param-1), displar(0:npft_param-1), &
-             dleaf(0:npft_param-1))
+             dleaf(0:npft_param-1), xl(0:npft_param-1), &
+             rhol(0:npft_param-1,2), rhos(0:npft_param-1,2), &
+             taul(0:npft_param-1,2), taus(0:npft_param-1,2))
 
     call read_pft_real(ncid, fname, 'roota_par', roota_par)
     call read_pft_real(ncid, fname, 'rootb_par', rootb_par)
@@ -104,6 +117,15 @@ contains
     call read_pft_real(ncid, fname, 'z0mr'     , z0mr)
     call read_pft_real(ncid, fname, 'displar'  , displar)
     call read_pft_real(ncid, fname, 'dleaf'    , dleaf)
+    call read_pft_real(ncid, fname, 'xl'       , xl)
+    call read_pft_real(ncid, fname, 'rholvis'  , rhol(:,1))
+    call read_pft_real(ncid, fname, 'rholnir'  , rhol(:,2))
+    call read_pft_real(ncid, fname, 'rhosvis'  , rhos(:,1))
+    call read_pft_real(ncid, fname, 'rhosnir'  , rhos(:,2))
+    call read_pft_real(ncid, fname, 'taulvis'  , taul(:,1))
+    call read_pft_real(ncid, fname, 'taulnir'  , taul(:,2))
+    call read_pft_real(ncid, fname, 'tausvis'  , taus(:,1))
+    call read_pft_real(ncid, fname, 'tausnir'  , taus(:,2))
 
     ! tc_stress is dimensioned allpfts = 1, so it reads as a length-1 array.
     status = pio_inq_varid(ncid, 'tc_stress', varid)
@@ -128,6 +150,9 @@ contains
        write(logunit,*) '    z0mr      [-]   ',minval(z0mr),' .. ',maxval(z0mr)
        write(logunit,*) '    displar   [-]   ',minval(displar),' .. ',maxval(displar)
        write(logunit,*) '    dleaf     [m]   ',minval(dleaf),' .. ',maxval(dleaf)
+       write(logunit,*) '    xl        [-]   ',minval(xl),' .. ',maxval(xl)
+       write(logunit,*) '    rhol vis  [-]   ',minval(rhol(:,1)),' .. ',maxval(rhol(:,1))
+       write(logunit,*) '    taul vis  [-]   ',minval(taul(:,1)),' .. ',maxval(taul(:,1))
        write(logunit,*) '    tc_stress [C]   ',tc_stress
        call shr_sys_flush(logunit)
     end if
@@ -187,9 +212,15 @@ contains
     if (associated(z0mr))      deallocate(z0mr)
     if (associated(displar))   deallocate(displar)
     if (associated(dleaf))     deallocate(dleaf)
+    if (associated(xl))        deallocate(xl)
+    if (associated(rhol))      deallocate(rhol)
+    if (associated(rhos))      deallocate(rhos)
+    if (associated(taul))      deallocate(taul)
+    if (associated(taus))      deallocate(taus)
     roota_par => null(); rootb_par => null()
     smpso => null(); smpsc => null()
-    z0mr => null(); displar => null(); dleaf => null()
+    z0mr => null(); displar => null(); dleaf => null(); xl => null()
+    rhol => null(); rhos => null(); taul => null(); taus => null()
     pftcon_read = .false.
   end subroutine elmxx_pftcon_clean
 

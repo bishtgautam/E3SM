@@ -721,10 +721,15 @@ contains
     if (inc > 1.0_r8) then
        refl_frac = maxval(fsr) / inc
        write(logunit,*) '    incident  [W/m2] ',inc
-       write(logunit,*) '    fsr/incident [-] ',refl_frac,'  (expect 0.2 while albedos are frozen)'
-       if (abs(refl_frac - 0.2_r8) > 1.0e-3_r8) &
-            write(logunit,*) subname,'SUSPECT: reflected fraction is not the ', &
-                 'cold-start albedo -- check band order or 2-D layout'
+       write(logunit,*) '    fsr/incident [-] ',refl_frac
+       ! With frozen cold-start albedos this had to be EXACTLY 0.2, which
+       ! pinned the band mapping and the 2-D layout in one number. That check
+       ! is spent: SurfaceAlbedo now computes a real albedo, so the fraction
+       ! varies with sun angle, soil wetness and canopy state, as it should.
+       ! What survives is the bound -- a surface cannot reflect more than it
+       ! receives, nor a negative amount.
+       if (refl_frac < 0.0_r8 .or. refl_frac > 1.0_r8) &
+            write(logunit,*) subname,'SUSPECT: reflected fraction outside [0,1]'
     end if
 
     if (minval(fsa) < 0.0_r8 .or. minval(fsr) < 0.0_r8) &

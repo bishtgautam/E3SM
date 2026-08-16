@@ -23,6 +23,7 @@ module lnd_comp_mct
   use shr_file_mod    , only : shr_file_freeunit
   use elmxxSpmdMod    , only : masterproc, mpicom_lnd, iam, npes, LNDID, elmxxSpmdInit
   use elmxxMod        , only : elmxx_read_namelist, elmxx_init, elmxx_run, elmxx_final
+  use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
@@ -208,6 +209,10 @@ CONTAINS
     !--- local ---
     integer :: coupling_dt_in_sec
     integer :: month, day
+    type(seq_infodata_type), pointer :: infodata
+    real(r8) :: nextsw_cday      ! calendar day of the NEXT radiation step
+    real(r8) :: declinp1         ! solar declination for that step, radians
+    real(r8) :: eccen, obliqr, lambm0, mvelpp, eccf
     !-------------------------------------------------------------------------------
 
     if (.not. do_elmxx) return
@@ -215,9 +220,21 @@ CONTAINS
     coupling_dt_in_sec = get_step_size(EClock)
     call get_clock_date(EClock, month, day)
 
+    ! Orbital state for SurfaceAlbedo. Taken from the coupler rather than
+    ! recomputed from the model clock: nextsw_cday is the day of the
+    ! ATMOSPHERE's next radiation step, and the land albedo has to be
+    ! computed for that instant or the two drift apart. This is exactly what
+    ! ELM's lnd_comp_mct hands to elm_drv.
+    call seq_cdata_setptrs(cdata, infodata=infodata)
+    call seq_infodata_GetData(infodata, nextsw_cday=nextsw_cday, &
+         orb_eccen=eccen, orb_mvelpp=mvelpp, &
+         orb_lambm0=lambm0, orb_obliqr=obliqr)
+    call shr_orb_decl(nextsw_cday, eccen, mvelpp, lambm0, obliqr, declinp1, eccf)
+
     call elmxx_import(logunit_lnd, x2l_l)
 
-    call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day)
+    call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
+                   nextsw_cday, declinp1)
 
   end subroutine lnd_run_mct
 
