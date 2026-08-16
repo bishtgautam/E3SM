@@ -59,6 +59,7 @@ module elmxxKokkosStateMod
                                sp_sucsat => sucsat, sp_watfc => watfc, &
                                sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
+  use elmxxPftconMod  , only : z0mr, displar, npft_param, pftcon_read
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl, &
@@ -99,7 +100,8 @@ module elmxxKokkosStateMod
                                ELMxxSetTVeg       , ELMxxGetTVeg, &
                                ELMxxSetFsun       , ELMxxGetFsun, &
                                ELMxxSetUrbanTaf   , ELMxxGetUrbanTaf, &
-                               ELMxxSetUrbanQaf   , ELMxxGetUrbanQaf
+                               ELMxxSetUrbanQaf   , ELMxxGetUrbanQaf, &
+                               ELMxxSetZ0mrPft    , ELMxxSetDisplarPft
 
   implicit none
   save
@@ -131,6 +133,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_canopy_hydrology
   public :: elmxx_kokkos_seed_soil_properties
   public :: elmxx_kokkos_seed_albedo
+  public :: elmxx_kokkos_seed_pftpar
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_btran
   public :: elmxx_kokkos_verify_maps
@@ -806,6 +809,65 @@ contains
     esai_seeded = patch_sai(patch_of_kpatch(kp))
     if (esai_seeded < 0.05_r8) esai_seeded = 0.0_r8
   end function esai_seeded
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_pftpar(elm, logunit)
+    !
+    ! The two PFT-parameter views ELMxx carries: z0mr and displar.
+    !
+    ! THESE ARE NOT OPTIONAL TUNING KNOBS. CanopyTemperature forms
+    !     z0mv = z0mr(pft) * htop      displa = displar(pft) * htop
+    ! and CanopyFluxes then builds its entire resistance chain on them --
+    ! ustar, ram1, uaf, rb, and every conductance in the canopy energy
+    ! balance. At zero the chain does not merely become inert: ustar is zero,
+    ! ram1 is Infinity, rb is NaN, and every canopy flux on every vegetated
+    ! patch is NaN.
+    !
+    ! That is precisely what happened, and it went unseen through several
+    ! runs that reported clean ranges, because MINVAL AND MAXVAL SKIP NaN.
+    ! Seventeen patches with three NaN among them printed a tidy finite
+    ! interval. The kernel reports now carry non-finite counts alongside every
+    ! range for exactly this reason.
+    !
+    ! The views are (NUMPFT+1) = 17 long -- PFT 0 is bare ground -- while the
+    ! parameter file carries 25. The extra entries are crops ELMxx does not
+    ! index; passing all 25 would be rejected on length.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr, n
+    integer, parameter :: numpft_kokkos = 17     ! NUMPFT + 1
+    real(r8) :: buf(numpft_kokkos)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_pftpar) '
+
+    call require_built(subname)
+    if (.not. pftcon_read) then
+       call shr_sys_abort(subname//'ERROR: PFT parameters are not read; '// &
+            'fparamfile must be set before the canopy kernels can run')
+    end if
+
+    n = min(numpft_kokkos, npft_param)
+    if (n < numpft_kokkos) then
+       call shr_sys_abort(subname//'ERROR: parameter file carries fewer PFTs '// &
+            'than ELMxx indexes')
+    end if
+
+    buf(1:numpft_kokkos) = z0mr(0:numpft_kokkos-1)
+    call ELMxxSetZ0mrPft(elm, buf, numpft_kokkos, ierr)
+    call check(ierr, subname, 'Z0mrPft')
+
+    buf(1:numpft_kokkos) = displar(0:numpft_kokkos-1)
+    call ELMxxSetDisplarPft(elm, buf, numpft_kokkos, ierr)
+    call check(ierr, subname, 'DisplarPft')
+
+    write(logunit,*) subname,'rank ',iam,' seeded ',numpft_kokkos, &
+         ' PFT roughness/displacement ratios; z0mr ',minval(z0mr(1:numpft_kokkos-1)), &
+         ' .. ',maxval(z0mr(1:numpft_kokkos-1))
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_pftpar
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_push_forcing(elm, logunit)

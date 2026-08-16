@@ -37,11 +37,11 @@ module elmxxKernelMod
                                ELMxxComputeUrbanFluxes, &
                                ELMxxComputeLakeFluxes, &
                                ELMxxComputeLakeTemperature, &
-                               ELMxxComputeSoilTemperature, &
-                               ELMxxComputeSoilFluxes, &
-                               ELMxxComputeSurfRunInfil, &
-                               ELMxxComputeRootWaterUpdate, &
-                               ELMxxComputeHydrologyDrainage, &
+                               ELMxxComputeSoilTemperatureNatural, &
+                               ELMxxComputeSoilFluxesNatural, &
+                               ELMxxComputeSurfRunInfilHydroActive, &
+                               ELMxxComputeRootWaterUpdateNatural, &
+                               ELMxxComputeHydrologyDrainageNatural, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
                                ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
@@ -51,6 +51,9 @@ module elmxxKernelMod
                                ELMxxGetQflxEvapSoi, ELMxxGetQflxTranVeg, &
                                ELMxxGetTVeg, ELMxxGetBtran, &
                                ELMxxGetFsa, ELMxxGetFsr, ELMxxGetSabv, &
+                               ELMxxGetUstar, ELMxxGetRb1, ELMxxGetRam1, &
+                               ELMxxGetDispla, ELMxxGetZ0mv, ELMxxGetFsun, &
+                               ELMxxGetRssun, ELMxxGetRssha, ELMxxGetLaisun, &
                                ELMxxGetSabg, ELMxxGetSabgSoil
 
   implicit none
@@ -156,22 +159,37 @@ contains
        why = ' '
 
     case (K_CANFLUX)
-       ! btran now has a source: elmxxRootMod computes it from rootfr and soil
-       ! matric potential, and it crosses each step.
+       ! BLOCKED. It was marked runnable, it ran, and it produced NaN on every
+       ! vegetated patch for several sessions. Recording why, because the way
+       ! it hid is the reusable part.
        !
-       ! IT WILL BE ZERO, AND THAT IS CORRECT. The cold-start soil is 0.15 by
-       ! volume, about 28% of saturation, which at bsw ~ 8 gives a matric
-       ! potential near -4.7e6 mm -- roughly eighteen times drier than these
-       ! PFTs' closure threshold of -2.55e5. The smp_node clamp pins it to
-       ! smpsc, rresis goes to zero, and the plant transpires nothing. ELM
-       ! would do the same from the same cold start.
+       ! CanopyFluxes forms the dry-leaf evaporation fraction as
+       !     rppdry = fdry * rb * (laisun/(rb + rssun) + laisha/(rb + rssha)) / elai
+       ! and reads laisun, laisha, rssun_iter and rssha_iter as INPUTS. Two
+       ! separate things have to supply them:
        !
-       ! So this kernel runs but cannot be meaningfully GRADED yet: nothing
-       ! wets the soil until the hydrology kernels are active, so btran stays
-       ! zero and every canopy flux with it. Structurally exercised,
-       ! numerically trivial -- worth knowing before reading its output as
-       ! evidence of anything.
-       why = ' '
+       !   laisun / laisha        CanopySunShadeFractions -- itself blocked on
+       !                          SurfaceAlbedo.
+       !   rssun_iter/rssha_iter  stomatal resistance per Newton iteration.
+       !                          THERE IS NO PHOTOSYNTHESIS KERNEL IN ELMxx.
+       !                          ELM computes these inside CanopyFluxes by
+       !                          calling Photosynthesis; ELMxx expects the
+       !                          caller to hand them over.
+       !
+       ! With all four at zero the expression is 0/0, so rppdry is NaN and it
+       ! propagates into every canopy flux, t_veg included.
+       !
+       ! HOW IT HID: minval/maxval skip NaN. Three NaN among seventeen patches
+       ! printed a clean finite range, and t_veg read 283 K -- its cold-start
+       ! value -- because the finite bare patches were all the reduction saw.
+       ! The reports now count non-finite values next to every range.
+       !
+       ! btran being zero is NOT the cause. That was the earlier hypothesis and
+       ! it is wrong: btran only gates whether transpiration is taken from
+       ! rppdry, and rppdry is already NaN by then.
+       why = 'needs laisun/laisha from cansunshade (hence SurfaceAlbedo) and ' // &
+             'rssun_iter/rssha_iter, which need a Photosynthesis port that ' // &
+             'does not exist -- without them rppdry is 0/0'
 
     case (K_BAREGRND)
        ! Their inputs are CanopyTemperature's outputs -- qg, thv, htvp, the
@@ -186,37 +204,31 @@ contains
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
-       ! CORRECTED 2026-08-15. An earlier note here claimed these "cannot
-       ! usefully precede SurfaceAlbedo". That conflated two different things
-       ! and is withdrawn.
+       ! Runnable, on the ...Natural kernel variants.
        !
-       ! What is true: SoilTemperature is driven by hs_soil / hs_top_snow /
-       ! hs_h2osfc, the ground surface energy balance, which ELM builds in
-       ! SoilTemperatureMod as
-       !     eflx_gnet_soil = sabg_soil + dlrad
-       !                    + (1-frac_veg_nosno)*emg*forc_lwrad
-       !                    - lwrad_emit_soil
-       !                    - (eflx_sh_soil + qflx_ev_soil*htvp)
-       ! so they do need sabg, and sabg comes from SurfaceRadiation. That is a
-       ! dependency on the SURFRAD KERNEL, which runs earlier in this same
-       ! timestep and is now active.
+       ! TWO CORRECTIONS ARE FOLDED IN HERE, both recorded because each cost
+       ! real time.
        !
-       ! What was false: that it is a dependency on the SurfaceAlbedo PORT.
-       ! SurfaceAlbedo runs at the END of ELM's timestep, so SurfaceRadiation
-       ! never consumes an albedo computed in its own step -- it reads the
-       ! previous step's, and step one reads InitCold's constants. Frozen
-       ! albedos cost realism, not runnability.
+       ! (1) An earlier note claimed these "cannot usefully precede
+       ! SurfaceAlbedo". Withdrawn. They do need sabg, but sabg comes from the
+       ! SURFRAD KERNEL, which runs earlier in this same timestep and is now
+       ! active. SurfaceAlbedo runs at the END of ELM's step, so it was never
+       ! a within-step dependency.
        !
-       ! So the only thing left blocking these five is the integration
-       ! surface, and it is a different one entirely. These are SHARED kernels:
-       ! they do not read naturalCol, they read their own per-kernel state
-       ! seeded through ST_/SF_/SRI_/RWU_/HD_ setters -- 163 of them -- on top
-       ! of a topology declared by ELMxxInitSharedMetadata with the nolakec,
-       ! nolakep, hydrologyc and urbanc filters and an urbpoi flag.
-       ! elmxxFilterMod already builds all four filters, so the Fortran side
-       ! fits; the seeding does not exist yet.
-       why = 'needs ELMxxInitSharedMetadata, the shared filters, and ' // &
-             'per-kernel ST_/SF_/SRI_/RWU_/HD_ seeding'
+       ! (2) An earlier note counted "163 calls, 127 distinct" of
+       ! ST_/SF_/SRI_/RWU_/HD_ seeding on top of ELMxxInitSharedMetadata. That
+       ! describes the STANDALONE entry points, which run on a separate
+       ! allocation and exist so the validation driver can replay ELM
+       ! diagnostic snapshots. The ...Natural variants build their view
+       ! straight from naturalCol/naturalPatch -- the state the canopy kernels
+       ! already use -- so none of those setters is needed. Decision #8 chose
+       ! the Natural variants; what was missed is how much that deletes.
+       !
+       ! What IS needed is in elmxxSoilKernelMod: the shared filters, the
+       ! naturalCol views the canopy kernels never touched (the _p1 and _soi
+       ! layer representations, thermal properties, column metadata), and the
+       ! ground surface energy balance, which ELMxx genuinely does not compute.
+       why = ' '
 
     case (K_URBANRAD, K_URBANFLUX)
        why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &
@@ -332,7 +344,7 @@ contains
   end subroutine elmxx_kernels_parse
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_kernels_run(elm, dtime, logunit)
+  subroutine elmxx_kernels_run(elm, dtime, logunit, phase)
     !
     ! Dispatch the active kernels in driver order.
     !
@@ -340,14 +352,30 @@ contains
     ! namelist -- a kernel reads what the ones before it wrote, so letting the
     ! namelist reorder them would silently change the physics.
     !
+    ! TWO PHASES, because something has to happen between them. The ground
+    ! surface energy balance (elmxxSoilKernelMod) is built from the radiation
+    ! and turbulent fluxes phase 1 produces, and SoilTemperature in phase 2
+    ! consumes it. ELMxx does not compute it, so the driver must, and it must
+    ! do so at exactly this point. A single dispatch would have left that
+    ! ordering as a comment; two phases make it a signature.
+    !
+    !   phase 1: surfrad .. laketemp   -- radiation, canopy, surface fluxes
+    !   phase 2: soiltemp .. lakehydro -- the soil column and hydrology
+    !
     implicit none
     type(ELMxxType), intent(in) :: elm
     real(r8), intent(in) :: dtime
     integer, intent(in) :: logunit
+    integer, intent(in) :: phase
     integer :: ierr
     character(len=*), parameter :: subname = '(elmxx_kernels_run) '
 
     if (.not. any_kernel_active) return
+    if (phase /= 1 .and. phase /= 2) then
+       call shr_sys_abort(subname//'ERROR: phase must be 1 or 2')
+    end if
+
+    if (phase == 1) then
 
     if (kernel_active(K_SURFRAD)) then
        call ELMxxComputeSurfaceRadiation(elm, ierr)
@@ -399,34 +427,40 @@ contains
        call check(ierr, logunit, K_LAKETEMP)
     end if
 
+    end if
+
+    if (phase == 2) then
+
     if (kernel_active(K_SOILTEMP)) then
-       call ELMxxComputeSoilTemperature(elm, ierr)
+       call ELMxxComputeSoilTemperatureNatural(elm, ierr)
        call check(ierr, logunit, K_SOILTEMP)
     end if
 
     if (kernel_active(K_SOILFLUX)) then
-       call ELMxxComputeSoilFluxes(elm, ierr)
+       call ELMxxComputeSoilFluxesNatural(elm, ierr)
        call check(ierr, logunit, K_SOILFLUX)
     end if
 
     if (kernel_active(K_SURFRUNOFF)) then
-       call ELMxxComputeSurfRunInfil(elm, ierr)
+       call ELMxxComputeSurfRunInfilHydroActive(elm, ierr)
        call check(ierr, logunit, K_SURFRUNOFF)
     end if
 
     if (kernel_active(K_ROOTWATER)) then
-       call ELMxxComputeRootWaterUpdate(elm, ierr)
+       call ELMxxComputeRootWaterUpdateNatural(elm, ierr)
        call check(ierr, logunit, K_ROOTWATER)
     end if
 
     if (kernel_active(K_HYDRODRAIN)) then
-       call ELMxxComputeHydrologyDrainage(elm, ierr)
+       call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
        call check(ierr, logunit, K_HYDRODRAIN)
     end if
 
     if (kernel_active(K_LAKEHYDRO)) then
        call ELMxxComputeLakeHydrology(elm, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
+    end if
+
     end if
 
   end subroutine elmxx_kernels_run
@@ -567,12 +601,18 @@ contains
     call ELMxxGetBtran(elm, btr, npatch, ierr);       call check(ierr, logunit, K_CANFLUX)
 
     write(logunit,*) subname,'rank ',iam,' surface fluxes over ',npatch,' patches:'
-    write(logunit,*) '    eflx_sh_grnd  [W/m2]   ',minval(shg),' .. ',maxval(shg)
-    write(logunit,*) '    eflx_sh_veg   [W/m2]   ',minval(shv),' .. ',maxval(shv)
-    write(logunit,*) '    qflx_evap_soi [kg/m2/s]',minval(evs),' .. ',maxval(evs)
-    write(logunit,*) '    qflx_tran_veg [kg/m2/s]',minval(trv),' .. ',maxval(trv)
-    write(logunit,*) '    t_veg         [K]      ',minval(tv) ,' .. ',maxval(tv)
-    write(logunit,*) '    btran         [-]      ',minval(btr),' .. ',maxval(btr)
+    write(logunit,*) '    eflx_sh_grnd  [W/m2]   ',minval(shg),' .. ',maxval(shg),' nan ',nonfinite(shg)
+    write(logunit,*) '    eflx_sh_veg   [W/m2]   ',minval(shv),' .. ',maxval(shv),' nan ',nonfinite(shv)
+    write(logunit,*) '    qflx_evap_soi [kg/m2/s]',minval(evs),' .. ',maxval(evs),' nan ',nonfinite(evs)
+    write(logunit,*) '    qflx_tran_veg [kg/m2/s]',minval(trv),' .. ',maxval(trv),' nan ',nonfinite(trv)
+    write(logunit,*) '    t_veg         [K]      ',minval(tv) ,' .. ',maxval(tv) ,' nan ',nonfinite(tv)
+    write(logunit,*) '    btran         [-]      ',minval(btr),' .. ',maxval(btr),' nan ',nonfinite(btr)
+
+    if (nonfinite(shg) + nonfinite(shv) + nonfinite(evs) + nonfinite(trv) + &
+        nonfinite(tv) + nonfinite(btr) > 0) then
+       write(logunit,*) subname,'SUSPECT: non-finite surface flux'
+       call diagnose_canflux(elm, npatch, logunit)
+    end if
 
     ! Bounds that hold whatever the forcing is.
     if (minval(tv) < 200.0_r8 .or. maxval(tv) > 350.0_r8) &
@@ -655,6 +695,71 @@ contains
     deallocate(fsa, fsr, sabv, sabg, sabgs)
 
   end subroutine elmxx_report_surfrad
+
+
+  !-----------------------------------------------------------------------
+  subroutine diagnose_canflux(elm, npatch, logunit)
+    !
+    ! Walk CanopyFluxes' resistance chain when its outputs go non-finite.
+    !
+    ! The chain is ustar -> ram1 -> uaf -> rb -> the conductances, and every
+    ! link divides by the one before it, so a zero anywhere upstream becomes a
+    ! NaN downstream. Printing the whole chain says WHICH link failed instead
+    ! of leaving it to be guessed -- which is the point, given that guessing
+    ! has already lost twice here.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: npatch, logunit
+    integer :: ierr
+    real(r8), allocatable :: us(:), rb(:), ram(:), dsp(:), z0(:), rsun(:), rsha(:), lsun(:)
+    character(len=*), parameter :: subname = '(diagnose_canflux) '
+
+    allocate(us(npatch), rb(npatch), ram(npatch), dsp(npatch), z0(npatch), &
+             rsun(npatch), rsha(npatch), lsun(npatch))
+    call ELMxxGetUstar(elm, us, npatch, ierr)
+    call ELMxxGetRb1(elm, rb, npatch, ierr)
+    call ELMxxGetRam1(elm, ram, npatch, ierr)
+    call ELMxxGetDispla(elm, dsp, npatch, ierr)
+    call ELMxxGetZ0mv(elm, z0, npatch, ierr)
+    call ELMxxGetRssun(elm, rsun, npatch, ierr)
+    call ELMxxGetRssha(elm, rsha, npatch, ierr)
+    call ELMxxGetLaisun(elm, lsun, npatch, ierr)
+
+    write(logunit,*) subname,'resistance chain (range, then nan count):'
+    write(logunit,*) '    ustar  ',minval(us)  ,maxval(us)  ,nonfinite(us)
+    write(logunit,*) '    ram1   ',minval(ram) ,maxval(ram) ,nonfinite(ram)
+    write(logunit,*) '    rb1    ',minval(rb)  ,maxval(rb)  ,nonfinite(rb)
+    write(logunit,*) '    displa ',minval(dsp) ,maxval(dsp) ,nonfinite(dsp)
+    write(logunit,*) '    z0mv   ',minval(z0)  ,maxval(z0)  ,nonfinite(z0)
+    write(logunit,*) '    rssun  ',minval(rsun),maxval(rsun),nonfinite(rsun)
+    write(logunit,*) '    rssha  ',minval(rsha),maxval(rsha),nonfinite(rsha)
+    write(logunit,*) '    laisun ',minval(lsun),maxval(lsun),nonfinite(lsun)
+    call shr_sys_flush(logunit)
+    deallocate(us, rb, ram, dsp, z0, rsun, rsha, lsun)
+
+  end subroutine diagnose_canflux
+
+  !-----------------------------------------------------------------------
+  integer function nonfinite(a)
+    !
+    ! Count NaN/Inf. This exists because MINVAL AND MAXVAL DO NOT SHOW THEM:
+    ! gfortran's reductions skip NaN, so an array with three NaN among
+    ! seventeen values reports a clean finite range. That blind spot hid a
+    ! NaN in CanopyFluxes' component fluxes through several "graded" runs --
+    ! the same failure mode as a dict-keyed comparison that cannot see
+    ! ordering (STATUS G). Every range printed here is now accompanied by
+    ! this count.
+    !
+    implicit none
+    real(r8), intent(in) :: a(:)
+    integer :: i
+    nonfinite = 0
+    do i = 1, size(a)
+       if (.not. (abs(a(i)) >= 0.0_r8)) nonfinite = nonfinite + 1
+    end do
+  end function nonfinite
+
   !-----------------------------------------------------------------------
   subroutine check(ierr, logunit, k)
     implicit none

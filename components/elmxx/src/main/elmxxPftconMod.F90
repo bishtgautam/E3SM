@@ -40,6 +40,14 @@ module elmxxPftconMod
   real(r8), public, pointer :: smpso(:) => null()
   real(r8), public, pointer :: smpsc(:) => null()
 
+  ! Canopy roughness and displacement, as RATIOS of canopy top height.
+  ! CanopyTemperature forms z0mv = z0mr*htop and displa = displar*htop, and
+  ! every aerodynamic resistance in CanopyFluxes divides by something derived
+  ! from them -- so leaving these at zero does not damp the canopy, it makes
+  ! ustar zero and every flux NaN. See STATUS.
+  real(r8), public, pointer :: z0mr(:)   => null()
+  real(r8), public, pointer :: displar(:) => null()
+
   ! Critical soil temperature for soil water stress [C]. Scalar on file
   ! (dimension allpfts = 1), not per PFT, despite living with the PFT params.
   real(r8), public :: tc_stress = 0.0_r8
@@ -79,12 +87,15 @@ contains
 
     call elmxx_pftcon_clean()
     allocate(roota_par(0:npft_param-1), rootb_par(0:npft_param-1), &
-             smpso(0:npft_param-1), smpsc(0:npft_param-1))
+             smpso(0:npft_param-1), smpsc(0:npft_param-1), &
+             z0mr(0:npft_param-1), displar(0:npft_param-1))
 
     call read_pft_real(ncid, fname, 'roota_par', roota_par)
     call read_pft_real(ncid, fname, 'rootb_par', rootb_par)
     call read_pft_real(ncid, fname, 'smpso'    , smpso)
     call read_pft_real(ncid, fname, 'smpsc'    , smpsc)
+    call read_pft_real(ncid, fname, 'z0mr'     , z0mr)
+    call read_pft_real(ncid, fname, 'displar'  , displar)
 
     ! tc_stress is dimensioned allpfts = 1, so it reads as a length-1 array.
     status = pio_inq_varid(ncid, 'tc_stress', varid)
@@ -106,6 +117,8 @@ contains
        write(logunit,*) '    rootb_par [1/m] ',minval(rootb_par),' .. ',maxval(rootb_par)
        write(logunit,*) '    smpso     [mm]  ',minval(smpso),' .. ',maxval(smpso)
        write(logunit,*) '    smpsc     [mm]  ',minval(smpsc),' .. ',maxval(smpsc)
+       write(logunit,*) '    z0mr      [-]   ',minval(z0mr),' .. ',maxval(z0mr)
+       write(logunit,*) '    displar   [-]   ',minval(displar),' .. ',maxval(displar)
        write(logunit,*) '    tc_stress [C]   ',tc_stress
        call shr_sys_flush(logunit)
     end if
@@ -116,6 +129,14 @@ contains
     ! Checked over vegetated PFTs only -- bare ground is zero by design.
     if (any(smpso(1:npft_param-1) <= smpsc(1:npft_param-1))) then
        call shr_sys_abort(subname//'ERROR: smpso must exceed smpsc for vegetated PFTs')
+    end if
+
+    ! Vegetated PFTs must have a positive roughness ratio. Zero here is not a
+    ! smooth canopy -- it drives ustar to zero and NaNs every canopy flux, and
+    ! it is exactly what an unseeded view looks like. Aborting makes the
+    ! failure name itself instead of surfacing as NaN four kernels later.
+    if (any(z0mr(1:npft_param-1) <= 0.0_r8)) then
+       call shr_sys_abort(subname//'ERROR: z0mr must be positive for vegetated PFTs')
     end if
 
   end subroutine elmxx_read_pftcon
@@ -151,8 +172,11 @@ contains
     if (associated(rootb_par)) deallocate(rootb_par)
     if (associated(smpso))     deallocate(smpso)
     if (associated(smpsc))     deallocate(smpsc)
+    if (associated(z0mr))      deallocate(z0mr)
+    if (associated(displar))   deallocate(displar)
     roota_par => null(); rootb_par => null()
     smpso => null(); smpsc => null()
+    z0mr => null(); displar => null()
     pftcon_read = .false.
   end subroutine elmxx_pftcon_clean
 
