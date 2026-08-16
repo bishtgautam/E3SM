@@ -306,6 +306,9 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'elmxx_kernels', 'nofail'=>1);
     add_default($nl, 'elmxx_do_albedo');
 
+    # Placeholder for the unported Photosynthesis; off by default.
+    add_default($nl, 'elmxx_stomata_closed');
+
     # PFT parameter file. No default and no naming convention to derive one,
     # same as fsurdat; needed once root water stress is in play.
     if (defined $nl->get_value('fparamfile')) {
