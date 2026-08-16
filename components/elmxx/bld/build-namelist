@@ -309,6 +309,10 @@ if ($LND_GRID eq "null") {
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'elmxx_stomata_closed');
 
+    # Photosynthesis inside the CanopyFluxes iteration; off by default.
+    add_default($nl, 'elmxx_do_photosynthesis');
+    add_default($nl, 'elmxx_co2_ppmv');
+
     # PFT parameter file. No default and no naming convention to derive one,
     # same as fsurdat; needed once root water stress is in play.
     if (defined $nl->get_value('fparamfile')) {
