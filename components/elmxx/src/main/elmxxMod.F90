@@ -40,6 +40,8 @@ module elmxxMod
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
                                       elmxx_root_clean, root_built
+  use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
+                                    elmxx_photosyn_update, photosyn_built
   use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, &
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
@@ -117,6 +119,14 @@ module elmxxMod
   ! a placeholder, and the two settings bracket the truth rather than either
   ! being right. See elmxx_kokkos_seed_stomata_closed.
   logical, public :: elmxx_stomata_closed = .false.
+
+  ! Run the ported Photosynthesis inside the CanopyFluxes Newton iteration.
+  ! Off by default, like elmxx_do_albedo. Requires elmxx_do_albedo (vcmaxcint
+  ! is SurfaceAlbedo's output) and fparamfile, both checked at init.
+  logical, public :: elmxx_do_photosynthesis = .false.
+  ! Atmospheric CO2 [ppmv]. ELM takes this from its own namelist with
+  ! co2_type = 'constant'; the I1850 twin uses 284.7.
+  real(r8), public :: elmxx_co2_ppmv = 284.7_r8
   character(len=256), public :: fsurdat    = ' '
   ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
   logical           , public :: elmxx_check_boundary  = .true.
@@ -174,7 +184,8 @@ contains
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
                             elmxx_kernels, fparamfile, elmxx_do_albedo, &
-                            elmxx_stomata_closed
+                            elmxx_stomata_closed, elmxx_do_photosynthesis, &
+                            elmxx_co2_ppmv
 
     ! defaults
     do_elmxx   = .true.
@@ -186,6 +197,8 @@ contains
     fparamfile            = ' '
     elmxx_do_albedo       = .false.
     elmxx_stomata_closed  = .false.
+    elmxx_do_photosynthesis = .false.
+    elmxx_co2_ppmv        = 284.7_r8
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -453,6 +466,27 @@ contains
           call elmxx_root_init(logunit)
        end if
 
+       ! Photosynthesis. Needs the PFT parameters, and needs SurfaceAlbedo to
+       ! be running because vcmaxcint is its output -- both checked here so a
+       ! misconfiguration names itself instead of surfacing as a zero
+       ! stomatal resistance, which is a legal number and looks like an
+       ! answer.
+       if (elmxx_do_photosynthesis) then
+          if (len_trim(fparamfile) == 0) then
+             call shr_sys_abort(subname//' ERROR: elmxx_do_photosynthesis '// &
+                  'requires fparamfile')
+          end if
+          if (.not. elmxx_do_albedo) then
+             call shr_sys_abort(subname//' ERROR: elmxx_do_photosynthesis '// &
+                  'requires elmxx_do_albedo -- vcmaxcintsun/sha are '// &
+                  'SurfaceAlbedo outputs and nothing else computes them')
+          end if
+          ! The rest waits for the first step: elmxx_photosyn_init needs
+          ! dtime to size the 10-day running mean, and dtime is an argument to
+          ! elmxx_run, not to init. Same reason the soil kernel surface is
+          ! built on step one.
+       end if
+
        ! Parse after seeding, so a blocked kernel's abort names a
        ! prerequisite that genuinely could not be met rather than one that
        ! merely had not been met yet at this point in init.
@@ -679,6 +713,28 @@ contains
        ! whole ordered set in one call. So the canopy half runs first, then
        ! this, then the soil half. Splitting the dispatch is what makes the
        ! ordering explicit rather than implicit in a comment.
+       ! PHOTOSYNTHESIS INPUTS GO HERE, before the first kernel block, because
+       ! canflux is in it and canflux is what consumes them. Placing this after
+       ! the kernels -- next to SurfaceAlbedo, where it superficially belongs
+       ! with the other end-of-step work -- would hand the canopy the previous
+       ! step's daylength and a t10 that had not seen this step's temperature.
+       !
+       ! vcmaxcint is SurfaceAlbedo's output and SurfaceAlbedo runs at the END
+       ! of the step, so on step one it does not exist yet. That is the same
+       ! temporal dependency the albedos themselves have, and ELM has it too --
+       ! its SurfaceAlbedo runs in initialize2 so step one has a value. ELMxx
+       ! has no such call, so step one runs with vcmaxcint = 0, which is one
+       ! step of no photosynthesis and is stated rather than hidden.
+       if (elmxx_do_photosynthesis) then
+          if (.not. photosyn_built) then
+             call elmxx_photosyn_init(cell_lat, real(coupling_dt_in_sec, r8), logunit)
+             call elmxx_photosyn_seed(elmxx_state, logunit)
+          end if
+          call elmxx_photosyn_update(elmxx_state, nstep, declinp1, &
+               elmxx_co2_ppmv, logunit, &
+               nstep == 1 .or. mod(nstep, 24) == 0)
+       end if
+
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 1)
 
        if (soil_kernel_built) then

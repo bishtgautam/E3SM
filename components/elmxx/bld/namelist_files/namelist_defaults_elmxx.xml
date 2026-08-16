@@ -24,6 +24,8 @@ attributes to express the dependency.
 <elmxx_check_soft_fail>.false.</elmxx_check_soft_fail>
 <elmxx_do_albedo>.false.</elmxx_do_albedo>
 <elmxx_stomata_closed>.false.</elmxx_stomata_closed>
+<elmxx_do_photosynthesis>.false.</elmxx_do_photosynthesis>
+<elmxx_co2_ppmv>284.7</elmxx_co2_ppmv>
 
 <!-- elmxx_kernels defaults to empty: no kernel is activated unless asked for -->
 <elmxx_kernels></elmxx_kernels>

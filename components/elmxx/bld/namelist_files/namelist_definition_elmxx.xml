@@ -119,6 +119,36 @@ effect. Requires fparamfile, since the two-stream reads the canopy optical
 parameters from it.
 </entry>
 
+<entry id="elmxx_do_photosynthesis"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: .false.
+Run the ported Photosynthesis (Farquhar/Collatz with Ball-Berry) inside the
+CanopyFluxes Newton iteration, so stomatal resistance is computed at every
+iterate instead of read from a caller-supplied table.
+
+Requires elmxx_do_albedo, because the leaf-to-canopy vcmax scaling
+(vcmaxcintsun/sha) is SurfaceAlbedo's output, and requires fparamfile for the
+PFT parameters. Both are checked at initialization.
+
+Supersedes elmxx_stomata_closed: with photosynthesis on, the placeholder
+resistances are ignored.
+</entry>
+
+<entry id="elmxx_co2_ppmv"
+       type="real"
+       category="elmxx"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: 284.7
+Atmospheric CO2 concentration [ppmv], used to form the CO2 partial pressure
+the leaf model needs. ELM takes the same number from its own namelist under
+co2_type = 'constant'; 284.7 is what the I1850 twins use, so the default
+matches them.
+</entry>
+
 <entry id="elmxx_stomata_closed"
        type="logical"
        category="elmxx"
