@@ -119,6 +119,24 @@ effect. Requires fparamfile, since the two-stream reads the canopy optical
 parameters from it.
 </entry>
 
+<entry id="elmxx_stomata_closed"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: .false.
+Pin the per-iteration stomatal resistances CanopyFluxes reads at ELM's
+closed-stomata limit, rsmax0 = 2e4 s/m, instead of leaving them at zero.
+
+A PLACEHOLDER for the unported Photosynthesis, and wrong in a known
+direction. Zero resistance is not "no stomatal model" -- it is stomata held
+wide open, so transpiration is unbounded from above. This setting puts the
+error at the other extreme, near-zero transpiration, so that the two runs
+bracket the truth instead of one of them silently looking plausible. Turn it
+on to grade the SoilWater profile without a confounding root sink; delete it
+when Photosynthesis lands.
+</entry>
+
 <entry id="fparamfile"
        type="char*256"
        category="elmxx"

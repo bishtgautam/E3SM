@@ -59,6 +59,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_canopy_hydrology, &
                                       elmxx_kokkos_seed_albedo, &
                                       elmxx_kokkos_seed_pftpar, &
+                                      elmxx_kokkos_seed_stomata_closed, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_btran, &
@@ -109,6 +110,13 @@ module elmxxMod
   ! that turning it on is a deliberate act and a run without it keeps the
   ! frozen cold-start albedos it has been graded against.
   logical, public :: elmxx_do_albedo = .false.
+
+  ! Hold stomata closed instead of leaving them wide open. Photosynthesis is
+  ! not ported, so rssun/rssha are zero and transpiration is unbounded from
+  ! above; this pins them at ELM's closed limit instead. Off by default: it is
+  ! a placeholder, and the two settings bracket the truth rather than either
+  ! being right. See elmxx_kokkos_seed_stomata_closed.
+  logical, public :: elmxx_stomata_closed = .false.
   character(len=256), public :: fsurdat    = ' '
   ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
   logical           , public :: elmxx_check_boundary  = .true.
@@ -165,7 +173,8 @@ contains
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
-                            elmxx_kernels, fparamfile, elmxx_do_albedo
+                            elmxx_kernels, fparamfile, elmxx_do_albedo, &
+                            elmxx_stomata_closed
 
     ! defaults
     do_elmxx   = .true.
@@ -175,6 +184,8 @@ contains
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
     fparamfile            = ' '
+    elmxx_do_albedo       = .false.
+    elmxx_stomata_closed  = .false.
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -422,6 +433,11 @@ contains
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
        call elmxx_kokkos_seed_canopy_hydrology(elmxx_state, logunit)
        call elmxx_kokkos_seed_albedo(elmxx_state, logunit)
+
+       ! Constant for the whole run, so seeded once here rather than per step.
+       if (elmxx_stomata_closed) then
+          call elmxx_kokkos_seed_stomata_closed(elmxx_state, logunit)
+       end if
 
        ! Soil hydraulic properties: derived from surfdata texture here, then
        ! pushed. Eight kernels read these, and none of them can run until

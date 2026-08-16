@@ -103,6 +103,7 @@ module elmxxKokkosStateMod
                                ELMxxSetUrbanQaf   , ELMxxGetUrbanQaf, &
                                ELMxxSetZ0mrPft    , ELMxxSetDisplarPft, &
                                ELMxxSetDleaf      , ELMxxSetQflxSnowMelt, &
+                               ELMxxSetRssunIter  , ELMxxSetRsshaIter   , &
                                ELMxxSetNrad       , ELMxxSetTlaiZ, &
                                ELMxxSetFsunZ      , ELMxxSetFabdSunZ, &
                                ELMxxSetFabiSunZ   , ELMxxSetFabdShaZ, &
@@ -139,6 +140,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_soil_properties
   public :: elmxx_kokkos_seed_albedo
   public :: elmxx_kokkos_seed_pftpar
+  public :: elmxx_kokkos_seed_stomata_closed
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_btran
   public :: elmxx_kokkos_verify_maps
@@ -939,6 +941,56 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_pftpar
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_stomata_closed(elm, logunit)
+    !
+    ! Hold stomata SHUT for every Newton iteration of CanopyFluxes.
+    !
+    ! A PLACEHOLDER, AND DELIBERATELY THE WRONG ANSWER IN A KNOWN DIRECTION.
+    ! CanopyFluxes reads rssun_iter/rssha_iter, one value per iteration, and
+    ! Photosynthesis is what writes them in ELM. It is not ported, so the
+    ! views sit at zero -- and zero stomatal resistance is not "no stomatal
+    ! model", it is stomata held WIDE OPEN, which leaves transpiration
+    ! unbounded from above. The resulting ~2.4 mm/day looked plausible and was
+    ! plausible for the wrong reason.
+    !
+    ! rsmax0 = 2e4 s/m is ELM's own closed-stomata limit, the value its
+    ! Photosynthesis clamps to when the leaf cannot assimilate. Seeding it
+    ! puts the error at the OTHER extreme -- transpiration near zero instead
+    ! of unbounded -- and the point of that is not realism, it is that the two
+    ! runs BRACKET the truth. With this on, SoilWater's profile is a clean
+    ! infiltration-and-drainage response with no root sink to confound it,
+    ! which is what makes the Richards solve gradeable at all (STATUS J.1 #6).
+    !
+    ! DELETE THIS SUBROUTINE when Photosynthesis lands. It has no other use.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr, sz(2)
+    integer, parameter :: itmax = 41              ! CANOPY_FLUX_ITMAX
+    real(r8), parameter :: rsmax0 = 2.0e4_r8      ! ELM elm_varcon, [s/m]
+    real(r8), allocatable :: buf(:,:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_stomata_closed) '
+
+    call require_built(subname)
+
+    allocate(buf(n_kokkos_patch, itmax))
+    buf = rsmax0
+    sz = (/ n_kokkos_patch, itmax /)
+
+    call ELMxxSetRssunIter(elm, buf, sz, ierr)
+    call check(ierr, subname, 'RssunIter')
+    call ELMxxSetRsshaIter(elm, buf, sz, ierr)
+    call check(ierr, subname, 'RsshaIter')
+    deallocate(buf)
+
+    write(logunit,*) subname,'rank ',iam,' stomatal resistance pinned at ', &
+         rsmax0,' s/m for all ',itmax,' iterations (PLACEHOLDER for Photosynthesis)'
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_stomata_closed
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_push_forcing(elm, logunit)
