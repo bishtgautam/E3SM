@@ -40,9 +40,14 @@ module elmxxMod
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
                                       elmxx_root_clean, root_built
+  use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
+                                      elmxx_soil_kernel_push, &
+                                      elmxx_soil_kernel_clean, soil_kernel_built
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
+                                      K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, &
+                                      K_ROOTWATER, K_HYDRODRAIN, kernel_active, &
                                       any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
@@ -50,6 +55,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_state, &
                                       elmxx_kokkos_seed_canopy_hydrology, &
                                       elmxx_kokkos_seed_albedo, &
+                                      elmxx_kokkos_seed_pftpar, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_btran, &
@@ -405,6 +411,7 @@ contains
        ! after both. btran itself is per-step and is computed in elmxx_run.
        if (len_trim(fparamfile) > 0) then
           call elmxx_read_pftcon(logunit, fparamfile)
+          call elmxx_kokkos_seed_pftpar(elmxx_state, logunit)
           call elmxx_root_init(logunit)
        end if
 
@@ -412,6 +419,10 @@ contains
        ! prerequisite that genuinely could not be met rather than one that
        ! merely had not been met yet at this point in init.
        call elmxx_kernels_parse(elmxx_kernels, logunit)
+
+       ! The five soil/hydrology kernels' surface is NOT built here. It needs
+       ! the coupling timestep, and elmxx_init does not have it -- dt is an
+       ! argument to elmxx_run. Built on the first step instead; see there.
     end if
 
     if (masterproc) then
@@ -602,8 +613,39 @@ contains
     ! crossed, before the boundary probe -- the probe overwrites state fields
     ! with fingerprints, so it has to come last in the step.
     !-----------------------------------------------------------------------
+    ! The five soil/hydrology kernels' surface, built on the first step
+    ! because it needs dtime.
+    !
+    ! ELMxxInitSharedMetadata IS NOT OPTIONAL AND IS NOT ONLY ABOUT FILTERS.
+    ! It is the only thing in the whole C API that assigns elm->dtime, and
+    ! BuildSoilTemperatureNaturalView reads exactly that -- so skipping it
+    ! would leave the soil column integrating on whatever dtime the object was
+    ! constructed with. The canopy kernels do not expose this, since
+    ! ELMxxComputeCanopyHydrology takes dtime as an explicit argument.
+    if (kokkos_state_built .and. .not. soil_kernel_built) then
+       if (kernel_active(K_SOILTEMP)   .or. kernel_active(K_SOILFLUX)  .or. &
+           kernel_active(K_SURFRUNOFF) .or. kernel_active(K_ROOTWATER) .or. &
+           kernel_active(K_HYDRODRAIN)) then
+          call elmxx_soil_kernel_init(elmxx_state, &
+               real(coupling_dt_in_sec, r8), logunit)
+       end if
+    end if
+
     if (kokkos_state_built .and. any_kernel_active) then
-       call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit)
+       ! The ground surface energy balance has to be formed AFTER the canopy
+       ! and radiation kernels of this step have run and BEFORE
+       ! SoilTemperature consumes it -- but elmxx_kernels_run dispatches the
+       ! whole ordered set in one call. So the canopy half runs first, then
+       ! this, then the soil half. Splitting the dispatch is what makes the
+       ! ordering explicit rather than implicit in a comment.
+       call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 1)
+
+       if (soil_kernel_built) then
+          call elmxx_soil_kernel_push(elmxx_state, logunit, &
+               nstep == 1 .or. mod(nstep, 24) == 0)
+       end if
+
+       call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
        ! Report on the first step, then TWICE daily -- not once. The extra
        ! sample is what makes the radiation readable: step 48k lands at model
        ! midnight, where incident shortwave is zero and every SurfaceRadiation
@@ -689,6 +731,7 @@ contains
           write(iulog,*) 'elmxx_final: ELMxxDestroy failed with status ',ierr_elmxx
        end if
        elmxx_state_created = .false.
+       call elmxx_soil_kernel_clean()
        call elmxx_kokkos_state_clean()
        call elmxx_soil_prop_clean()
        call elmxx_root_clean()
