@@ -48,6 +48,12 @@ module elmxxPftconMod
   real(r8), public, pointer :: z0mr(:)   => null()
   real(r8), public, pointer :: displar(:) => null()
 
+  ! Leaf characteristic dimension [m]. CanopyFluxes forms the leaf boundary
+  ! layer conductance as cf = 0.01/(sqrt(uaf)*sqrt(dleaf)), so a zero here
+  ! makes cf infinite and rb exactly zero -- and rb sits in the denominator
+  ! of rppdry. Zero dleaf is therefore not a small leaf; it is a NaN.
+  real(r8), public, pointer :: dleaf(:) => null()
+
   ! Critical soil temperature for soil water stress [C]. Scalar on file
   ! (dimension allpfts = 1), not per PFT, despite living with the PFT params.
   real(r8), public :: tc_stress = 0.0_r8
@@ -88,7 +94,8 @@ contains
     call elmxx_pftcon_clean()
     allocate(roota_par(0:npft_param-1), rootb_par(0:npft_param-1), &
              smpso(0:npft_param-1), smpsc(0:npft_param-1), &
-             z0mr(0:npft_param-1), displar(0:npft_param-1))
+             z0mr(0:npft_param-1), displar(0:npft_param-1), &
+             dleaf(0:npft_param-1))
 
     call read_pft_real(ncid, fname, 'roota_par', roota_par)
     call read_pft_real(ncid, fname, 'rootb_par', rootb_par)
@@ -96,6 +103,7 @@ contains
     call read_pft_real(ncid, fname, 'smpsc'    , smpsc)
     call read_pft_real(ncid, fname, 'z0mr'     , z0mr)
     call read_pft_real(ncid, fname, 'displar'  , displar)
+    call read_pft_real(ncid, fname, 'dleaf'    , dleaf)
 
     ! tc_stress is dimensioned allpfts = 1, so it reads as a length-1 array.
     status = pio_inq_varid(ncid, 'tc_stress', varid)
@@ -119,6 +127,7 @@ contains
        write(logunit,*) '    smpsc     [mm]  ',minval(smpsc),' .. ',maxval(smpsc)
        write(logunit,*) '    z0mr      [-]   ',minval(z0mr),' .. ',maxval(z0mr)
        write(logunit,*) '    displar   [-]   ',minval(displar),' .. ',maxval(displar)
+       write(logunit,*) '    dleaf     [m]   ',minval(dleaf),' .. ',maxval(dleaf)
        write(logunit,*) '    tc_stress [C]   ',tc_stress
        call shr_sys_flush(logunit)
     end if
@@ -137,6 +146,9 @@ contains
     ! failure name itself instead of surfacing as NaN four kernels later.
     if (any(z0mr(1:npft_param-1) <= 0.0_r8)) then
        call shr_sys_abort(subname//'ERROR: z0mr must be positive for vegetated PFTs')
+    end if
+    if (any(dleaf(1:npft_param-1) <= 0.0_r8)) then
+       call shr_sys_abort(subname//'ERROR: dleaf must be positive for vegetated PFTs')
     end if
 
   end subroutine elmxx_read_pftcon
@@ -174,9 +186,10 @@ contains
     if (associated(smpsc))     deallocate(smpsc)
     if (associated(z0mr))      deallocate(z0mr)
     if (associated(displar))   deallocate(displar)
+    if (associated(dleaf))     deallocate(dleaf)
     roota_par => null(); rootb_par => null()
     smpso => null(); smpsc => null()
-    z0mr => null(); displar => null()
+    z0mr => null(); displar => null(); dleaf => null()
     pftcon_read = .false.
   end subroutine elmxx_pftcon_clean
 
