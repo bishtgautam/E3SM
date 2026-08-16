@@ -41,6 +41,7 @@ module elmxxKernelMod
                                ELMxxComputeSoilFluxesNatural, &
                                ELMxxComputeSurfRunInfilHydroActive, &
                                ELMxxComputeRootWaterUpdateNatural, &
+                               ELMxxComputeSoilWaterNatural, &
                                ELMxxComputeHydrologyDrainageNatural, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
@@ -62,7 +63,7 @@ module elmxxKernelMod
 
   ! Driver order. This is the order the kernels run in, and the order they
   ! should be activated in. It is ELM's driver order, not alphabetical.
-  integer, parameter, public :: NKERNEL = 16
+  integer, parameter, public :: NKERNEL = 17
 
   !--------------------------------------------------------------------------
   ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
@@ -86,6 +87,7 @@ module elmxxKernelMod
   !   1008  HydrologyNoDrainage, which contains
   !           SurfaceRunoff + Infiltration  -> surfrunoff
   !           SoilWater's root extraction   -> rootwater
+  !           SoilWater (Richards solve)    -> soilwater
   !   1045  LakeHydrology                  <- BEFORE HydrologyDrainage
   !   1345  HydrologyDrainage
   !   1500  SurfaceAlbedo                  <- END of the step; see STATUS
@@ -110,16 +112,17 @@ module elmxxKernelMod
   integer, parameter, public :: K_SOILFLUX    = 12
   integer, parameter, public :: K_SURFRUNOFF  = 13
   integer, parameter, public :: K_ROOTWATER   = 14
-  integer, parameter, public :: K_LAKEHYDRO   = 15
-  integer, parameter, public :: K_HYDRODRAIN  = 16
+  integer, parameter, public :: K_SOILWATER   = 15
+  integer, parameter, public :: K_LAKEHYDRO   = 16
+  integer, parameter, public :: K_HYDRODRAIN  = 17
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
        'canhydro        ', 'cansunshade     ', 'surfrad         ', &
        'urbanrad        ', 'cantemp         ', 'baregrnd        ', &
        'canflux         ', 'urbanflux       ', 'lakeflux        ', &
        'laketemp        ', 'soiltemp        ', 'soilflux        ', &
-       'surfrunoff      ', 'rootwater       ', 'lakehydro       ', &
-       'hydrodrain      ' ]
+       'surfrunoff      ', 'rootwater       ', 'soilwater       ', &
+       'lakehydro       ', 'hydrodrain      ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -244,6 +247,18 @@ contains
        ! 2026-08-15). BareGroundFluxes reads it, so it will see zero, which is
        ! ELM's no-gustiness case rather than an unset value -- but it is worth
        ! confirming against the kernel before trusting its fluxes.
+       why = ' '
+
+    case (K_SOILWATER)
+       ! The Richards solve. Runnable once surfrunoff and rootwater are on,
+       ! since it consumes exactly their outputs -- qflx_infl and
+       ! qflx_rootsoi -- and ELM places SoilWater at the same point inside
+       ! HydrologyNoDrainage.
+       !
+       ! THIS IS THE KERNEL THAT CLOSES THE WATER CYCLE. Before it existed,
+       ! infiltration was computed and discarded: soil moisture held at its
+       ! cold-start value through days of rain, so btran stayed pinned at zero
+       ! and transpiration never switched on.
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
@@ -492,6 +507,11 @@ contains
     if (kernel_active(K_ROOTWATER)) then
        call ELMxxComputeRootWaterUpdateNatural(elm, ierr)
        call check(ierr, logunit, K_ROOTWATER)
+    end if
+
+    if (kernel_active(K_SOILWATER)) then
+       call ELMxxComputeSoilWaterNatural(elm, dtime, ierr)
+       call check(ierr, logunit, K_SOILWATER)
     end if
 
     if (kernel_active(K_LAKEHYDRO)) then

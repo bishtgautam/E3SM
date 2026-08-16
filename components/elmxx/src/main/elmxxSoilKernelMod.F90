@@ -92,6 +92,7 @@ module elmxxSoilKernelMod
                                    ELMxxSetDzP1, ELMxxSetTSoisnoP1, &
                                    ELMxxSetH2osoiLiqP1, ELMxxSetH2osoiIceP1, &
                                    ELMxxSetDzSoi, ELMxxSetWatsatSoi, &
+                                   ELMxxSetZcSoi, ELMxxSetZiSoi, &
                                    ELMxxSetH2osoiLiqSoi, ELMxxSetH2osoiIceSoi, &
                                    ELMxxSetH2osoiVol, &
                                    ELMxxSetTkmg, ELMxxSetTkdry, ELMxxSetTksatu, &
@@ -357,6 +358,16 @@ contains
     end do
     call ELMxxSetDzSoi(elm, buf, sz, ierr); call check(ierr, subname, 'DzSoi')
 
+    ! Node depths on the SAME soil-only indexing. The Richards solve needs
+    ! these separately from z_p1, which carries a standing-water slot between
+    ! the snow and the soil and so puts layer j one slot further down.
+    do j = 1, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc,j) = zsoi(j)
+       end do
+    end do
+    call ELMxxSetZcSoi(elm, buf, sz, ierr); call check(ierr, subname, 'ZcSoi')
+
     call fill_soi(buf, sp_watsat); call ELMxxSetWatsatSoi(elm, buf, sz, ierr)
     call check(ierr, subname, 'WatsatSoi')
     call fill_soi(buf, sp_hksat);  call ELMxxSetHksat(elm, buf, sz, ierr)
@@ -385,6 +396,18 @@ contains
        end do
     end do
     call ELMxxSetH2osoiIceSoi(elm, buf, sz, ierr); call check(ierr, subname, 'H2osoiIceSoi')
+    deallocate(buf)
+
+    ! Soil interfaces: one more than the node count. zisoi is 0-based in
+    ! elmxxSoilPropMod (0 = the surface), so slot k holds zisoi(k-1).
+    sz(2) = nlevgrnd + 1
+    allocate(buf(n_kokkos_col, nlevgrnd + 1))
+    do j = 0, nlevgrnd
+       do kc = 1, n_kokkos_col
+          buf(kc, j+1) = zisoi(j)
+       end do
+    end do
+    call ELMxxSetZiSoi(elm, buf, sz, ierr); call check(ierr, subname, 'ZiSoi')
     deallocate(buf)
 
     !-----------------------------------------------------------------
