@@ -44,7 +44,8 @@ module elmxxMod
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
                                       elmxx_soil_kernel_push, &
-                                      elmxx_soil_kernel_clean, soil_kernel_built
+                                      elmxx_soil_kernel_clean, soil_kernel_built, &
+                                      elmxx_soil_kernel_pull
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
@@ -670,6 +671,13 @@ contains
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
+
+       ! Read the wetted soil column back, so next step's Fortran-side btran
+       ! sees what the hydrology kernels just did rather than the cold start.
+       if (soil_kernel_built) then
+          call elmxx_soil_kernel_pull(elmxx_state, logunit, &
+               nstep == 1 .or. mod(nstep, 24) == 0)
+       end if
 
        ! SURFACE ALBEDO RUNS HERE, AT THE END OF THE STEP, BECAUSE ELM RUNS IT
        ! HERE (elm_driver.F90, gated on doalb). SurfaceRadiation therefore
