@@ -102,7 +102,7 @@ module elmxxKokkosStateMod
                                ELMxxSetUrbanTaf   , ELMxxGetUrbanTaf, &
                                ELMxxSetUrbanQaf   , ELMxxGetUrbanQaf, &
                                ELMxxSetZ0mrPft    , ELMxxSetDisplarPft, &
-                               ELMxxSetDleaf      , &
+                               ELMxxSetDleaf      , ELMxxSetQflxSnowMelt, &
                                ELMxxSetNrad       , ELMxxSetTlaiZ, &
                                ELMxxSetFsunZ      , ELMxxSetFabdSunZ, &
                                ELMxxSetFabiSunZ   , ELMxxSetFabdShaZ, &
@@ -803,6 +803,16 @@ contains
     call ELMxxSetIntSnow(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'IntSnow')
     call ELMxxSetFracH2osfc(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FracH2osfc')
     call ELMxxSetFracSnoEff(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FracSnoEff')
+    ! Snowmelt. CanopyHydrology reads it -- snowmelt*dtime drives the
+    ! snow-cover fraction update -- so it is an input to an ACTIVE kernel, not
+    ! a placeholder. Zero is right here: no snow at a cold start on these
+    ! twins, and no SnowHydrology kernel to produce melt if there were. Set
+    ! explicitly rather than left at the allocation zero, because an unseeded
+    ! view that happens to want zero is indistinguishable from one that was
+    ! forgotten -- which is how z0mr, displar and dleaf each cost a session.
+    call ELMxxSetQflxSnowMelt(elm, rcol, n_kokkos_col, ierr)
+    call check(ierr, subname, 'QflxSnowMelt')
+
     icol = 0
     call ELMxxSetDoCapsnow(elm, icol, n_kokkos_col, ierr);  call check(ierr, subname, 'DoCapsnow')
 
