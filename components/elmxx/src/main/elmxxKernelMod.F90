@@ -49,7 +49,9 @@ module elmxxKernelMod
                                ELMxxGetHtvp, ELMxxGetSoilbeta, ELMxxGetZ0mg, &
                                ELMxxGetEflxShGrnd, ELMxxGetEflxShVeg, &
                                ELMxxGetQflxEvapSoi, ELMxxGetQflxTranVeg, &
-                               ELMxxGetTVeg, ELMxxGetBtran
+                               ELMxxGetTVeg, ELMxxGetBtran, &
+                               ELMxxGetFsa, ELMxxGetFsr, ELMxxGetSabv, &
+                               ELMxxGetSabg, ELMxxGetSabgSoil
 
   implicit none
   save
@@ -92,6 +94,7 @@ module elmxxKernelMod
   public :: elmxx_kernels_report
   public :: elmxx_report_cantemp
   public :: elmxx_report_fluxes
+  public :: elmxx_report_surfrad
 
 contains
 
@@ -113,14 +116,34 @@ contains
 
     select case (k)
 
-    case (K_SURFRAD, K_CANSUNSHADE)
+    case (K_SURFRAD)
+       ! Runnable on ELM's cold-start albedos.
+       !
+       ! SurfaceAlbedo runs at the END of ELM's timestep, so the albedos
+       ! SurfaceRadiation reads at step N came from step N-1; the dependency
+       ! is temporal, not within-step. ELM bootstraps step one from
+       ! SurfaceAlbedoType InitCold, and elmxx_kokkos_seed_albedo supplies the
+       ! same constants. Also needs the 2-D forc_solad/forc_solai, crossed
+       ! with the rest of the forcing.
+       !
+       ! LIMIT: with albedos frozen there is no solar-zenith dependence, no
+       ! snow aging, no wetness effect. Bounded and gradeable, but a multi-day
+       ! run is not physically right until SurfaceAlbedo is ported.
+       why = ' '
+
+    case (K_CANSUNSHADE)
        ! Both read the full canopy/ground albedo set -- albd, albi, fabd,
        ! fabi, ftdd, ftid, ftii, albgrd, albgri, albso*, albsn*_hst, and the
        ! SNICAR flx_abs* factors. Every one of those is SurfaceAlbedo's
        ! output, and SurfaceAlbedo is a Stage 5 port that does not exist.
        ! They also read forc_solad/forc_solai, which Stage 3 does not cross.
-       why = 'needs SurfaceAlbedo (Stage 5) for albd/albi/fabd/fabi/ftdd/' // &
-             'ftid/ftii and albgrd/albgri, plus 2-D forc_solad/forc_solai'
+       ! Needs the sunlit/shaded canopy decomposition -- fabd_sun_z,
+       ! fabd_sha_z, fabi_sun_z, fabi_sha_z, tlai_z, nrad -- which is
+       ! SurfaceAlbedo's per-canopy-layer output. Unlike the bulk albedos
+       ! there is no meaningful cold-start constant for a vertical profile,
+       ! so this one genuinely waits for the port.
+       why = 'needs SurfaceAlbedo for the per-canopy-layer sunlit/shaded ' // &
+             'decomposition (fabd_sun_z, fabi_sun_z, tlai_z, nrad)'
 
     case (K_CANTEMP)
        ! Runnable. Everything it reads is now seeded: the hydraulic properties
@@ -163,33 +186,37 @@ contains
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
-       ! ORDERING FINDING (2026-08-15): these cannot usefully precede
-       ! SurfaceAlbedo, whatever the driver order suggests.
+       ! CORRECTED 2026-08-15. An earlier note here claimed these "cannot
+       ! usefully precede SurfaceAlbedo". That conflated two different things
+       ! and is withdrawn.
        !
-       ! SoilTemperature is driven by hs_soil / hs_top_snow / hs_h2osfc, the
-       ! ground surface energy balance, which ELM builds in SoilTemperatureMod
-       ! as
+       ! What is true: SoilTemperature is driven by hs_soil / hs_top_snow /
+       ! hs_h2osfc, the ground surface energy balance, which ELM builds in
+       ! SoilTemperatureMod as
        !     eflx_gnet_soil = sabg_soil + dlrad
        !                    + (1-frac_veg_nosno)*emg*forc_lwrad
        !                    - lwrad_emit_soil
        !                    - (eflx_sh_soil + qflx_ev_soil*htvp)
-       ! sabg_soil is absorbed shortwave, a SurfaceRadiation output, and
-       ! SurfaceRadiation needs SurfaceAlbedo. It also reads sabg_lyr
-       ! directly. Wiring these five with sabg zero would drive the soil
-       ! column with its dominant daytime term missing -- a run that completes
-       ! and means nothing, which is the failure this switch exists to stop.
+       ! so they do need sabg, and sabg comes from SurfaceRadiation. That is a
+       ! dependency on the SURFRAD KERNEL, which runs earlier in this same
+       ! timestep and is now active.
        !
-       ! A different integration surface entirely. These are SHARED kernels:
+       ! What was false: that it is a dependency on the SurfaceAlbedo PORT.
+       ! SurfaceAlbedo runs at the END of ELM's timestep, so SurfaceRadiation
+       ! never consumes an albedo computed in its own step -- it reads the
+       ! previous step's, and step one reads InitCold's constants. Frozen
+       ! albedos cost realism, not runnability.
+       !
+       ! So the only thing left blocking these five is the integration
+       ! surface, and it is a different one entirely. These are SHARED kernels:
        ! they do not read naturalCol, they read their own per-kernel state
        ! seeded through ST_/SF_/SRI_/RWU_/HD_ setters -- 163 of them -- on top
        ! of a topology declared by ELMxxInitSharedMetadata with the nolakec,
        ! nolakep, hydrologyc and urbanc filters and an urbpoi flag.
        ! elmxxFilterMod already builds all four filters, so the Fortran side
        ! fits; the seeding does not exist yet.
-       why = 'needs SurfaceAlbedo first -- their surface energy balance ' // &
-             'is driven by sabg from SurfaceRadiation -- then ' // &
-             'ELMxxInitSharedMetadata, the shared filters, and per-kernel ' // &
-             'ST_/SF_/SRI_/RWU_/HD_ seeding'
+       why = 'needs ELMxxInitSharedMetadata, the shared filters, and ' // &
+             'per-kernel ST_/SF_/SRI_/RWU_/HD_ seeding'
 
     case (K_URBANRAD, K_URBANFLUX)
        why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &
@@ -560,6 +587,74 @@ contains
 
   end subroutine elmxx_report_fluxes
 
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_report_surfrad(elm, npatch, logunit)
+    !
+    ! SurfaceRadiation's outputs, graded by the one thing that makes a
+    ! radiation kernel checkable: CONSERVATION. Incident shortwave is either
+    ! absorbed or reflected, so fsa + fsr must equal what came in, and with the
+    ! cold-start albedos frozen at 0.2 the split is not merely conserved but
+    ! PREDICTABLE -- fsr/(fsa+fsr) should sit at 0.2 to rounding.
+    !
+    ! That is a much stronger check than a range, and it is available precisely
+    ! because the albedos are constants right now. It stops being available the
+    ! moment SurfaceAlbedo lands and starts varying them, so it is worth
+    ! spending here: it pins the band mapping, the 2-D layout and the
+    ! patch-level broadcast all at once. A transposed forc_solad would still
+    ! conserve, but it would not hold 0.2 unless both bands carried equal
+    ! flux -- and vis/NIR direct differ by day.
+    !
+    ! sabg is also split soil/snow. With no snow at a cold start, sabg_soil
+    ! should account for all of sabg.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: npatch, logunit
+    integer :: ierr
+    real(r8) :: inc, refl_frac
+    real(r8), allocatable :: fsa(:), fsr(:), sabv(:), sabg(:), sabgs(:)
+    character(len=*), parameter :: subname = '(elmxx_kernels_report) '
+
+    if (.not. kernel_active(K_SURFRAD)) return
+    if (npatch <= 0) return
+
+    allocate(fsa(npatch), fsr(npatch), sabv(npatch), sabg(npatch), sabgs(npatch))
+    call ELMxxGetFsa(elm, fsa, npatch, ierr);        call check(ierr, logunit, K_SURFRAD)
+    call ELMxxGetFsr(elm, fsr, npatch, ierr);        call check(ierr, logunit, K_SURFRAD)
+    call ELMxxGetSabv(elm, sabv, npatch, ierr);      call check(ierr, logunit, K_SURFRAD)
+    call ELMxxGetSabg(elm, sabg, npatch, ierr);      call check(ierr, logunit, K_SURFRAD)
+    call ELMxxGetSabgSoil(elm, sabgs, npatch, ierr); call check(ierr, logunit, K_SURFRAD)
+
+    write(logunit,*) subname,'rank ',iam,' surfrad over ',npatch,' patches:'
+    write(logunit,*) '    fsa       [W/m2] ',minval(fsa)  ,' .. ',maxval(fsa)
+    write(logunit,*) '    fsr       [W/m2] ',minval(fsr)  ,' .. ',maxval(fsr)
+    write(logunit,*) '    sabv      [W/m2] ',minval(sabv) ,' .. ',maxval(sabv)
+    write(logunit,*) '    sabg      [W/m2] ',minval(sabg) ,' .. ',maxval(sabg)
+    write(logunit,*) '    sabg_soil [W/m2] ',minval(sabgs),' .. ',maxval(sabgs)
+
+    ! The reflected fraction, which the frozen albedos make a known constant.
+    inc = maxval(fsa) + maxval(fsr)
+    if (inc > 1.0_r8) then
+       refl_frac = maxval(fsr) / inc
+       write(logunit,*) '    incident  [W/m2] ',inc
+       write(logunit,*) '    fsr/incident [-] ',refl_frac,'  (expect 0.2 while albedos are frozen)'
+       if (abs(refl_frac - 0.2_r8) > 1.0e-3_r8) &
+            write(logunit,*) subname,'SUSPECT: reflected fraction is not the ', &
+                 'cold-start albedo -- check band order or 2-D layout'
+    end if
+
+    if (minval(fsa) < 0.0_r8 .or. minval(fsr) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative absorbed or reflected shortwave'
+    if (minval(sabg) < 0.0_r8) &
+         write(logunit,*) subname,'SUSPECT: negative ground absorption'
+    if (maxval(abs(sabg - sabgs)) > 1.0e-10_r8) &
+         write(logunit,*) subname,'SUSPECT: sabg /= sabg_soil with no snow present'
+
+    call shr_sys_flush(logunit)
+    deallocate(fsa, fsr, sabv, sabg, sabgs)
+
+  end subroutine elmxx_report_surfrad
   !-----------------------------------------------------------------------
   subroutine check(ierr, logunit, k)
     implicit none

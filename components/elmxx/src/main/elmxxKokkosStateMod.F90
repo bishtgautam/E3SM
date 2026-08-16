@@ -61,7 +61,8 @@ module elmxxKokkosStateMod
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
-                               forc_snowc, forc_snowl
+                               forc_snowc, forc_snowl, &
+                               forc_swvdr, forc_swndr, forc_swvdf, forc_swndf
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxSetPatchColumn, &
                                ELMxxSetElai, ELMxxSetEsai, ELMxxSetHtop, &
@@ -80,7 +81,16 @@ module elmxxKokkosStateMod
                                ELMxxSetH2osoiLiq, ELMxxSetH2osoiIce, &
                                ELMxxSetSmpmin, ELMxxSetTH2osfc, &
                                ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
+                               ELMxxSetForcSolad, ELMxxSetForcSolai, &
                                ELMxxSetForcRhoCol, ELMxxSetBtran, &
+                               ELMxxSetAlbgrd, ELMxxSetAlbgri, &
+                               ELMxxSetAlbsod, ELMxxSetAlbsoi, &
+                               ELMxxSetAlbsndHst, ELMxxSetAlbsniHst, &
+                               ELMxxSetAlbd, ELMxxSetAlbi, &
+                               ELMxxSetFabd, ELMxxSetFabi, &
+                               ELMxxSetFtdd, ELMxxSetFtid, ELMxxSetFtii, &
+                               ELMxxSetFlxAbsdv, ELMxxSetFlxAbsdn, &
+                               ELMxxSetFlxAbsiv, ELMxxSetFlxAbsin, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
                                ELMxxSetSnowDepth  , ELMxxGetSnowDepth, &
                                ELMxxSetFracSno    , ELMxxGetFracSno, &
@@ -120,6 +130,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_state
   public :: elmxx_kokkos_seed_canopy_hydrology
   public :: elmxx_kokkos_seed_soil_properties
+  public :: elmxx_kokkos_seed_albedo
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_btran
   public :: elmxx_kokkos_verify_maps
@@ -608,6 +619,85 @@ contains
   end subroutine elmxx_kokkos_seed_soil_properties
 
   !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_seed_albedo(elm, logunit)
+    !
+    ! ELM's cold-start albedos (SurfaceAlbedoType InitCold).
+    !
+    ! WHY THIS IS ENOUGH TO START, AND WHY IT IS NOT ENOUGH TO FINISH.
+    !
+    ! SurfaceAlbedo runs at the END of ELM's timestep (elm_driver line ~1500,
+    ! gated on doalb), so the albedos SurfaceRadiation reads at step N were
+    ! computed at the end of step N-1. The dependency is TEMPORAL, not
+    ! within-step -- which is why SurfaceRadiation can run before
+    ! SurfaceAlbedo exists, provided something supplies step one's values.
+    !
+    ! ELM supplies them exactly here: lnd_run_mct wraps elm_drv in
+    ! `do while (.not. dosend)` and sets doalb = .false. at nstep == 0, so the
+    ! first pass runs on InitCold constants -- 0.2 for ground and canopy, 0.6
+    ! for snow, ftdd and ftii unity (fully transmitting), fabd/fabi and the
+    ! SNICAR flx_abs* zero.
+    !
+    ! THE LIMIT, STATED PLAINLY: frozen at these values, the radiation does
+    ! not evolve. No solar-zenith dependence, no snow aging, no wetness
+    ! effect. Kernels downstream become exercisable and gradeable against
+    ! bounds, but a multi-day run is not physically right until SurfaceAlbedo
+    ! is ported. Do not mistake "runs and looks sensible" for "correct".
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr, szc(2), szp(2), szs(2)
+    real(r8), allocatable :: bufc(:,:), bufp(:,:), bufs(:,:)
+    integer, parameter :: numrad = 2               ! VIS, NIR
+    integer, parameter :: nsnowlyr = 6             ! NLEVSNO + 1
+    real(r8), parameter :: alb_ground = 0.2_r8     ! ELM InitCold
+    real(r8), parameter :: alb_snow   = 0.6_r8
+    character(len=*), parameter :: subname = '(elmxx_kokkos_seed_albedo) '
+
+    call require_built(subname)
+
+    szc = (/ n_kokkos_col,   numrad /)
+    szp = (/ n_kokkos_patch, numrad /)
+    szs = (/ n_kokkos_col,   nsnowlyr /)
+    allocate(bufc(n_kokkos_col, numrad), bufp(n_kokkos_patch, numrad), &
+             bufs(n_kokkos_col, nsnowlyr))
+
+    bufc = alb_ground
+    call ELMxxSetAlbgrd(elm, bufc, szc, ierr); call check(ierr, subname, 'Albgrd')
+    call ELMxxSetAlbgri(elm, bufc, szc, ierr); call check(ierr, subname, 'Albgri')
+    call ELMxxSetAlbsod(elm, bufc, szc, ierr); call check(ierr, subname, 'Albsod')
+    call ELMxxSetAlbsoi(elm, bufc, szc, ierr); call check(ierr, subname, 'Albsoi')
+    bufc = alb_snow
+    call ELMxxSetAlbsndHst(elm, bufc, szc, ierr); call check(ierr, subname, 'AlbsndHst')
+    call ELMxxSetAlbsniHst(elm, bufc, szc, ierr); call check(ierr, subname, 'AlbsniHst')
+
+    bufp = alb_ground
+    call ELMxxSetAlbd(elm, bufp, szp, ierr); call check(ierr, subname, 'Albd')
+    call ELMxxSetAlbi(elm, bufp, szp, ierr); call check(ierr, subname, 'Albi')
+    bufp = 0.0_r8
+    call ELMxxSetFabd(elm, bufp, szp, ierr); call check(ierr, subname, 'Fabd')
+    call ELMxxSetFabi(elm, bufp, szp, ierr); call check(ierr, subname, 'Fabi')
+    call ELMxxSetFtid(elm, bufp, szp, ierr); call check(ierr, subname, 'Ftid')
+    bufp = 1.0_r8
+    call ELMxxSetFtdd(elm, bufp, szp, ierr); call check(ierr, subname, 'Ftdd')
+    call ELMxxSetFtii(elm, bufp, szp, ierr); call check(ierr, subname, 'Ftii')
+
+    bufs = 0.0_r8
+    call ELMxxSetFlxAbsdv(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsdv')
+    call ELMxxSetFlxAbsdn(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsdn')
+    call ELMxxSetFlxAbsiv(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsiv')
+    call ELMxxSetFlxAbsin(elm, bufs, szs, ierr); call check(ierr, subname, 'FlxAbsin')
+
+    deallocate(bufc, bufp, bufs)
+
+    write(logunit,*) subname,'rank ',iam,' seeded ELM cold-start albedos ', &
+                     '(ground/canopy 0.2, snow 0.6, ftdd/ftii 1) for ', &
+                     n_kokkos_col,' columns ',n_kokkos_patch,' patches'
+    call shr_sys_flush(logunit)
+
+  end subroutine elmxx_kokkos_seed_albedo
+
+  !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_seed_canopy_hydrology(elm, logunit)
     !
     ! The extra inputs CanopyHydrology needs beyond elmxx_kokkos_seed_state.
@@ -729,20 +819,22 @@ contains
     ! belongs to gridcell lun_gridcell(col_landunit(c)); that is the only
     ! defensible route from one level to the other.
     !
-    ! NOT YET CROSSED: ForcSolad / ForcSolai are 2-D over the radiation bands
-    ! and need the LayoutRight/LayoutLeft question settled first
-    ! (ELMxxKokkosIsLayoutRight exists for exactly this), and ForcRhoCol needs
-    ! air density, which ELM derives from vapor pressure in its import rather
-    ! than receiving it. Both are named in STATUS as the remaining crossing
-    ! work; neither is guessed at here.
+    ! ALL FORCING IS NOW ACROSS. The two that lagged are both here:
+    ! ForcRhoCol, derived from vapor pressure as ELM's import derives it, and
+    ! ForcSolad / ForcSolai, 2-D over the radiation bands. The latter waited on
+    ! the LayoutLeft question, which elmxx_kokkos_state_init settles at startup
+    ! by querying ELMxxKokkosIsLayoutRight and aborting on a LayoutRight build.
     !
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
     integer :: kc, kp, g, ierr
+    integer :: szp(2)
     real(r8) :: vp
     real(r8), allocatable :: rcol(:), rpatch(:)
+    real(r8), allocatable :: rsol(:,:)
     logical, save :: reported = .false.
+    integer, parameter :: numrad = 2   ! 1 = visible, 2 = near-IR
     ! ELM's rair is elm_varcon's, which is SHR_CONST_RDAIR. Taken from the
     ! same shared constant rather than transcribed: it is derived
     ! (RGAS/MWDAIR), not a literal, so a hand-copied value would differ in the
@@ -751,7 +843,8 @@ contains
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
 
     call require_built(subname)
-    allocate(rcol(n_kokkos_col), rpatch(n_kokkos_patch))
+    allocate(rcol(n_kokkos_col), rpatch(n_kokkos_patch), &
+             rsol(n_kokkos_patch, numrad))
 
     ! ---- column-level ----
     do kc = 1, n_kokkos_col
@@ -832,12 +925,40 @@ contains
     call ELMxxSetForcHgtPatch(elm, rpatch, n_kokkos_patch, ierr)
     call check(ierr, subname, 'ForcHgtPatch')
 
+    ! Incident shortwave, the only 2-D forcing. Direct and diffuse are separate
+    ! views, and the band index is ELM's: 1 is visible, 2 is near-IR. That is
+    ! lnd_import_export's assignment, not a convention chosen here --
+    !     forc_solad(g,1) = swvdr    forc_solad(g,2) = swndr
+    !     forc_solai(g,1) = swvdf    forc_solai(g,2) = swndf
+    ! -- and getting it backwards would swap the bands against albedos that
+    ! genuinely differ between them (0.2 is the cold-start constant in both,
+    ! so this would hide today and surface the moment SurfaceAlbedo lands).
+    !
+    ! LAYOUT: rsol is (patch, band) and crosses under LayoutLeft, which is the
+    ! Fortran-native order SetView2D wraps without transposing. A LayoutRight
+    ! build would transpose here AND REPORT SUCCESS; that is why startup
+    ! aborts on one rather than trusting this comment.
+    do kp = 1, n_kokkos_patch
+       g = cell_of_kpatch(kp)
+       rsol(kp,1) = forc_swvdr(g)
+       rsol(kp,2) = forc_swndr(g)
+    end do
+    szp = (/ n_kokkos_patch, numrad /)
+    call ELMxxSetForcSolad(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolad')
+
+    do kp = 1, n_kokkos_patch
+       g = cell_of_kpatch(kp)
+       rsol(kp,1) = forc_swvdf(g)
+       rsol(kp,2) = forc_swndf(g)
+    end do
+    call ELMxxSetForcSolai(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolai')
+
     if (.not. reported) then
        write(logunit,*) subname,'rank ',iam,' forc_z range ', &
             minval(forc_z(1:size(forc_z))),' .. ',maxval(forc_z(1:size(forc_z))),' m'
     end if
 
-    deallocate(rcol, rpatch)
+    deallocate(rcol, rpatch, rsol)
 
     if (.not. reported) then
        write(logunit,*) subname,'rank ',iam,' pushing forcing each step to ', &

@@ -42,13 +42,14 @@ module elmxxMod
                                       elmxx_root_clean, root_built
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
-                                      elmxx_report_fluxes, &
+                                      elmxx_report_fluxes, elmxx_report_surfrad, &
                                       any_kernel_active
   use elmxxKokkosStateMod    , only : elmxx_kokkos_state_init, &
                                       elmxx_kokkos_check_map_invariants, &
                                       elmxx_kokkos_seed_topology, &
                                       elmxx_kokkos_seed_state, &
                                       elmxx_kokkos_seed_canopy_hydrology, &
+                                      elmxx_kokkos_seed_albedo, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_btran, &
@@ -392,6 +393,7 @@ contains
        call elmxx_kokkos_seed_topology(elmxx_state, logunit)
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
        call elmxx_kokkos_seed_canopy_hydrology(elmxx_state, logunit)
+       call elmxx_kokkos_seed_albedo(elmxx_state, logunit)
 
        ! Soil hydraulic properties: derived from surfdata texture here, then
        ! pushed. Eight kernels read these, and none of them can run until
@@ -602,9 +604,15 @@ contains
     !-----------------------------------------------------------------------
     if (kokkos_state_built .and. any_kernel_active) then
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit)
-       ! Report on the first step and daily after, so a five-day run leaves a
-       ! readable trace without one block per half-hour timestep.
-       if (nstep == 1 .or. mod(nstep, 48) == 0) then
+       ! Report on the first step, then TWICE daily -- not once. The extra
+       ! sample is what makes the radiation readable: step 48k lands at model
+       ! midnight, where incident shortwave is zero and every SurfaceRadiation
+       ! output is trivially zero, so a once-daily report would show a
+       ! radiation kernel that appears to do nothing. Sampling half a day out
+       ! catches daylight. It also gives the surface fluxes a day/night
+       ! contrast, which is worth having for free.
+       if (nstep == 1 .or. mod(nstep, 24) == 0) then
+          call elmxx_report_surfrad(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_kernels_report(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_report_cantemp(elmxx_state, n_kokkos_col, logunit)
           call elmxx_report_fluxes(elmxx_state, n_kokkos_patch, logunit)
