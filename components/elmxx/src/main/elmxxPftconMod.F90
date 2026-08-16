@@ -65,6 +65,29 @@ module elmxxPftconMod
   real(r8), public, pointer :: taus(:,:) => null()
   real(r8), public, pointer :: xl(:)     => null()
 
+  ! Photosynthesis PFT parameters. Nine that genuinely vary between PFTs...
+  real(r8), public, pointer :: c3psn(:)    => null()   ! 1 = C3, 0 = C4
+  real(r8), public, pointer :: leafcn(:)   => null()   ! leaf C:N [gC/gN]
+  real(r8), public, pointer :: flnr(:)     => null()   ! leaf N in Rubisco
+  real(r8), public, pointer :: fnitr(:)    => null()   ! foliage N limitation
+  real(r8), public, pointer :: slatop(:)   => null()   ! specific leaf area [m2/gC]
+  real(r8), public, pointer :: qe_ps(:)    => null()   ! quantum efficiency, C4
+  real(r8), public, pointer :: theta_cj(:) => null()   ! ac/aj co-limitation
+  real(r8), public, pointer :: bbbopt(:)   => null()   ! Ball-Berry intercept
+  real(r8), public, pointer :: mbbopt(:)   => null()   ! Ball-Berry slope
+
+  ! ...and fourteen that are UNIFORM across every PFT on clm_params. They are
+  ! read per PFT anyway and the uniformity is ASSERTED, because the C++ side
+  ! carries them as scalars and a parameter file that broke the assumption
+  ! would otherwise be silently wrong for every PFT but the first.
+  ! Order matches ELMxxSetPhotoUniform.
+  integer, parameter, public :: n_photo_uniform = 14
+  real(r8), public :: photo_uniform(n_photo_uniform) = 0.0_r8
+  character(len=8), parameter, public :: photo_uniform_names(n_photo_uniform) = &
+       (/ 'fnr     ', 'act25   ', 'kcha    ', 'koha    ', 'cpha    ', &
+          'vcmaxha ', 'jmaxha  ', 'tpuha   ', 'lmrha   ', 'vcmaxhd ', &
+          'jmaxhd  ', 'tpuhd   ', 'lmrhd   ', 'lmrse   ' /)
+
   ! Critical soil temperature for soil water stress [C]. Scalar on file
   ! (dimension allpfts = 1), not per PFT, despite living with the PFT params.
   real(r8), public :: tc_stress = 0.0_r8
@@ -108,7 +131,12 @@ contains
              z0mr(0:npft_param-1), displar(0:npft_param-1), &
              dleaf(0:npft_param-1), xl(0:npft_param-1), &
              rhol(0:npft_param-1,2), rhos(0:npft_param-1,2), &
-             taul(0:npft_param-1,2), taus(0:npft_param-1,2))
+             taul(0:npft_param-1,2), taus(0:npft_param-1,2), &
+             c3psn(0:npft_param-1), leafcn(0:npft_param-1), &
+             flnr(0:npft_param-1), fnitr(0:npft_param-1), &
+             slatop(0:npft_param-1), qe_ps(0:npft_param-1), &
+             theta_cj(0:npft_param-1), bbbopt(0:npft_param-1), &
+             mbbopt(0:npft_param-1))
 
     call read_pft_real(ncid, fname, 'roota_par', roota_par)
     call read_pft_real(ncid, fname, 'rootb_par', rootb_par)
@@ -126,6 +154,44 @@ contains
     call read_pft_real(ncid, fname, 'taulnir'  , taul(:,2))
     call read_pft_real(ncid, fname, 'tausvis'  , taus(:,1))
     call read_pft_real(ncid, fname, 'tausnir'  , taus(:,2))
+
+    ! ---- Photosynthesis: the nine that vary by PFT ----
+    call read_pft_real(ncid, fname, 'c3psn'    , c3psn)
+    call read_pft_real(ncid, fname, 'leafcn'   , leafcn)
+    call read_pft_real(ncid, fname, 'flnr'     , flnr)
+    call read_pft_real(ncid, fname, 'fnitr'    , fnitr)
+    call read_pft_real(ncid, fname, 'slatop'   , slatop)
+    call read_pft_real(ncid, fname, 'qe'       , qe_ps)
+    call read_pft_real(ncid, fname, 'theta_cj' , theta_cj)
+    call read_pft_real(ncid, fname, 'bbbopt'   , bbbopt)
+    call read_pft_real(ncid, fname, 'mbbopt'   , mbbopt)
+
+    ! ---- Photosynthesis: the fourteen claimed uniform ----
+    ! Read per PFT and CHECKED, not assumed. The C++ kernel takes these as
+    ! scalars; if a parameter file ever varies one by PFT, that treatment
+    ! becomes wrong for every PFT but the first, and silently so.
+    block
+      real(r8), allocatable :: tmp(:)
+      integer :: k, ipft
+      real(r8) :: lo, hi
+      allocate(tmp(0:npft_param-1))
+      do k = 1, n_photo_uniform
+         call read_pft_real(ncid, fname, trim(photo_uniform_names(k)), tmp)
+         lo = tmp(0); hi = tmp(0)
+         do ipft = 0, npft_param-1
+            lo = min(lo, tmp(ipft))
+            hi = max(hi, tmp(ipft))
+         end do
+         if (hi /= lo) then
+            call shr_sys_abort(subname//'ERROR: '// &
+                 trim(photo_uniform_names(k))//' varies by PFT on '// &
+                 trim(fname)//'; ELMxx carries it as a scalar and that is '// &
+                 'no longer valid -- make it a per-patch view')
+         end if
+         photo_uniform(k) = tmp(0)
+      end do
+      deallocate(tmp)
+    end block
 
     ! tc_stress is dimensioned allpfts = 1, so it reads as a length-1 array.
     status = pio_inq_varid(ncid, 'tc_stress', varid)
