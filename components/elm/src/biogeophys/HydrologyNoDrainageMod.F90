@@ -19,7 +19,7 @@ Module HydrologyNoDrainageMod
   use SoilStateType     , only : soilstate_type
   use LandunitType      , only : lun_pp
   use ColumnType        , only : col_pp
-  use ColumnDataType    , only : col_es, col_ws, col_wf
+  use ColumnDataType    , only : col_es, col_ef, col_ws, col_wf
   use VegetationType    , only : veg_pp
   use TopounitDataType  , only : top_as, top_af ! Atmospheric state and flux variables
   use elm_instMod       , only : alm_fates , ep_betr
@@ -567,7 +567,37 @@ contains
       end if
       
       ! Natural compaction and metamorphosis.
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('snowcompact_in:snl', snl(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowcompact_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('snowcompact_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:frac_iceold', col_ws%frac_iceold(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:imelt', real(col_ef%imelt(bounds%begc:bounds%endc, -nlevsno+1:0), r8), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowcompact_in:snw_rds', snw_rds(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         ! Inputs to the subgridflag==1 melt-compaction branch, which is the
+         ! branch SnowCompaction actually takes for soil and crop columns.
+         call diag_snapshot_2d('snowcompact_in:swe_old', col_ws%swe_old(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_1d('snowcompact_in:int_snow', col_ws%int_snow(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowcompact_in:n_melt', col_pp%n_melt(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+      end if
       call SnowCompaction(bounds, num_snowc, filter_snowc, top_as, dtime)
+      if (diag_enabled) call diag_snapshot_2d('snowcompact_out:dz', &
+           dz(bounds%begc:bounds%endc, -nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
 
       ! Combine thin snow elements
       call CombineSnowLayers(bounds, num_snowc, filter_snowc, &
