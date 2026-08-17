@@ -599,6 +599,28 @@ contains
       if (diag_enabled) call diag_snapshot_2d('snowcompact_out:dz', &
            dz(bounds%begc:bounds%endc, -nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
 
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('snowlayer_in:snl', snl(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_in:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_in:h2osno', col_ws%h2osno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_in:snow_depth', snow_depth(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('snowlayer_in:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:z', z(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:zi', zi(bounds%begc:bounds%endc, -nlevsno:0), &
+              bounds%endc-bounds%begc+1, nlevsno+1)
+         call diag_snapshot_2d('snowlayer_in:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+      end if
       ! Combine thin snow elements
       call CombineSnowLayers(bounds, num_snowc, filter_snowc, &
            aerosol_vars, dtime)
@@ -612,6 +634,29 @@ contains
               aerosol_vars,  is_lake=.false.)
       endif
       
+      if (diag_enabled) then
+         call diag_snapshot_int_1d('snowlayer_out:snl', snl(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_out:frac_sno_eff', frac_sno_eff(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_out:h2osno', col_ws%h2osno(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_1d('snowlayer_out:snow_depth', snow_depth(bounds%begc:bounds%endc), &
+              bounds%endc-bounds%begc+1)
+         call diag_snapshot_2d('snowlayer_out:dz', dz(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:z', z(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:zi', zi(bounds%begc:bounds%endc, -nlevsno:0), &
+              bounds%endc-bounds%begc+1, nlevsno+1)
+         call diag_snapshot_2d('snowlayer_out:t_soisno', t_soisno(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+      end if
+
       ! Set empty snow layers to zero
       do j = -nlevsno+1,0
          do fc = 1, num_snowc
