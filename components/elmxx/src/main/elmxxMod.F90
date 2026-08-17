@@ -36,7 +36,8 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
-  use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean
+  use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
+                                      nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
                                       elmxx_root_clean, root_built
@@ -48,6 +49,10 @@ module elmxxMod
                                       elmxx_soil_kernel_push, &
                                       elmxx_soil_kernel_clean, soil_kernel_built, &
                                       elmxx_soil_kernel_pull
+  use elmxxDiagnosticsMod , only : elmxx_diag_init, elmxx_diag_finalize,   &
+                                   elmxx_diag_new_timestep,                &
+                                   elmxx_diag_snapshot_state,              &
+                                   elmxx_diag_write_maps
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
@@ -502,6 +507,23 @@ contains
        call shr_sys_flush(logunit)
     end if
 
+
+    !-----------------------------------------------------------------------
+    ! Diagnostic trace. Writes ELM's own ELMDIAG1 format so a free-running
+    ! ELMxx run can be diffed against elm_diagnostics.bin with the existing
+    ! tooling. Off unless ELMXX_DIAG is set in the environment.
+    !-----------------------------------------------------------------------
+    block
+      character(len=256) :: diag_path
+      integer :: dlen
+      call get_environment_variable('ELMXX_DIAG', diag_path, dlen)
+      if (dlen > 0) then
+         call elmxx_diag_init(trim(diag_path), .true.)
+         call elmxx_diag_write_maps()
+         if (masterproc) write(logunit,*) 'ELMxx: diagnostics -> ',trim(diag_path)
+      end if
+    end block
+
   end subroutine elmxx_init
 
   !-----------------------------------------------------------------------
@@ -647,6 +669,7 @@ contains
     integer, intent(in) :: month, day
 
     nstep = nstep + 1
+    call elmxx_diag_new_timestep()
 
     if (subgrid_built) then
        call elmxx_update_phenology(logunit, month, day)
@@ -734,6 +757,10 @@ contains
                elmxx_co2_ppmv, logunit, &
                nstep == 1 .or. mod(nstep, 24) == 0)
        end if
+
+       ! State at the top of the step, before any kernel. ELM's matching
+       ! anchor is canhydro_in: -- its first kernel -- so these line up.
+       call elmxx_diag_snapshot_state(elmxx_state, nlevtot, nlevgrnd, 'elmxx_in')
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 1)
 
@@ -870,6 +897,8 @@ contains
     if (associated(areac_g)) deallocate(areac_g)
     if (associated(maskc_g)) deallocate(maskc_g)
     if (associated(fracc_g)) deallocate(fracc_g)
+
+    call elmxx_diag_finalize()
 
   end subroutine elmxx_final
 
