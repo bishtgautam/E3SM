@@ -620,6 +620,22 @@ contains
               bounds%endc-bounds%begc+1, nlevsno)
          call diag_snapshot_2d('snowlayer_in:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
               bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_bcphi', aerosol_vars%mss_bcphi_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_bcpho', aerosol_vars%mss_bcpho_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_ocphi', aerosol_vars%mss_ocphi_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_ocpho', aerosol_vars%mss_ocpho_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_dst1', aerosol_vars%mss_dst1_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_dst2', aerosol_vars%mss_dst2_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_dst3', aerosol_vars%mss_dst3_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_in:mss_dst4', aerosol_vars%mss_dst4_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
       end if
       ! Combine thin snow elements
       call CombineSnowLayers(bounds, num_snowc, filter_snowc, &
@@ -654,6 +670,22 @@ contains
          call diag_snapshot_2d('snowlayer_out:h2osoi_liq', h2osoi_liq(bounds%begc:bounds%endc, -nlevsno+1:0), &
               bounds%endc-bounds%begc+1, nlevsno)
          call diag_snapshot_2d('snowlayer_out:h2osoi_ice', h2osoi_ice(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_bcphi', aerosol_vars%mss_bcphi_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_bcpho', aerosol_vars%mss_bcpho_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_ocphi', aerosol_vars%mss_ocphi_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_ocpho', aerosol_vars%mss_ocpho_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_dst1', aerosol_vars%mss_dst1_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_dst2', aerosol_vars%mss_dst2_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_dst3', aerosol_vars%mss_dst3_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
+              bounds%endc-bounds%begc+1, nlevsno)
+         call diag_snapshot_2d('snowlayer_out:mss_dst4', aerosol_vars%mss_dst4_col(bounds%begc:bounds%endc, -nlevsno+1:0), &
               bounds%endc-bounds%begc+1, nlevsno)
       end if
 
