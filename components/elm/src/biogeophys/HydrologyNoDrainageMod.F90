@@ -506,8 +506,37 @@ contains
       else
       !------------------------------------------------------------------------------------
 
+        ! Richards solve contract. rootr/qflx_rootsoi (the transpiration sink)
+        ! are recorded separately under rootwu_*; these bracket the solve so it
+        ! can be replayed on its own.
+        if (diag_enabled) then
+           call diag_snapshot_2d('soilwater_in:h2osoi_liq', &
+                h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_2d('soilwater_in:h2osoi_ice', &
+                h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_2d('soilwater_in:qflx_rootsoi', &
+                col_wf%qflx_rootsoi(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_1d('soilwater_in:qflx_infl', &
+                col_wf%qflx_infl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+           call diag_snapshot_1d('soilwater_in:zwt', &
+                soilhydrology_vars%zwt_col(bounds%begc:bounds%endc), &
+                bounds%endc-bounds%begc+1)
+        end if
+
         call SoilWater(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
             soilhydrology_vars, soilstate_vars, dtime)
+
+        if (diag_enabled) then
+           call diag_snapshot_2d('soilwater_out:h2osoi_liq', &
+                h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_1d('soilwater_out:zwt', &
+                soilhydrology_vars%zwt_col(bounds%begc:bounds%endc), &
+                bounds%endc-bounds%begc+1)
+        end if
 
       !------------------------------------------------------------------------------------
       end if
