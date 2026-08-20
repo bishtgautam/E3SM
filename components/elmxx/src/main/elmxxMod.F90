@@ -52,6 +52,7 @@ module elmxxMod
   use elmxxDiagnosticsMod , only : elmxx_diag_init, elmxx_diag_finalize,   &
                                    elmxx_diag_new_timestep,                &
                                    elmxx_diag_snapshot_state,              &
+                                   elmxx_diag_snapshot_fluxes,             &
                                    elmxx_diag_write_maps
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -783,6 +784,8 @@ contains
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
+
+       call elmxx_diag_snapshot_fluxes(elmxx_state, 'elmxx_out')
 
        ! Read the wetted soil column back, so next step's Fortran-side btran
        ! sees what the hydrology kernels just did rather than the cold start.
