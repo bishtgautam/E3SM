@@ -169,11 +169,16 @@ contains
        do j = 1, nlevbed
           m = j + nlevsno             ! packed slot for ELM layer j
 
-          eff_por = watsat(c,j) - col_h2osoi_ice(c,m) / (col_dz(c,m)*denice)
-          if (eff_por <= 0.0_r8) cycle
+          ! ELM floors eff_porosity at 0.01 (HydrologyNoDrainageMod, where the
+          ! array the stress calc reads is actually set) rather than skipping
+          ! the layer. Neither binds without ice, but the floor is what ELM does.
+          eff_por = max(0.01_r8, watsat(c,j) - col_h2osoi_ice(c,m) / (col_dz(c,m)*denice))
 
+          ! ELM does NOT cap the liquid volume at the effective porosity:
+          !   h2osoi_liqvol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o)
+          ! Capping it here silently limits s_node to 1 and so understates the
+          ! matric potential of a near-saturated layer.
           liqvol = col_h2osoi_liq(c,m) / (col_dz(c,m)*denh2o)
-          liqvol = min(liqvol, eff_por)
 
           if (liqvol <= 0.0_r8 .or. col_t_soisno(c,m) <= tcold) cycle
 
