@@ -16,6 +16,7 @@ module lnd_comp_mct
   use seq_cdata_mod   , only : seq_cdata, seq_cdata_setptrs
   use seq_infodata_mod, only : seq_infodata_type, seq_infodata_PutData, seq_infodata_GetData
   use seq_comm_mct    , only : seq_comm_inst, seq_comm_name, seq_comm_suffix
+  use seq_timemgr_mod , only : seq_timemgr_EClockDateInSync
   use shr_kind_mod    , only : IN=>SHR_KIND_IN, R8=>SHR_KIND_R8, CS=>SHR_KIND_CS, CL=>SHR_KIND_CL
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_file_mod    , only : shr_file_getunit, shr_file_getlogunit, shr_file_getloglevel
@@ -23,6 +24,7 @@ module lnd_comp_mct
   use shr_file_mod    , only : shr_file_freeunit
   use elmxxSpmdMod    , only : masterproc, mpicom_lnd, iam, npes, LNDID, elmxxSpmdInit
   use elmxxMod        , only : elmxx_read_namelist, elmxx_init, elmxx_run, elmxx_final
+  use elmxxMod        , only : elmxx_init_albedo
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
@@ -43,7 +45,13 @@ module lnd_comp_mct
   public :: lnd_init_mct
   public :: lnd_run_mct
 
-  logical, private :: first_run_call = .true.
+  ! ELMxx's own model clock. ELM keeps one (elm_time_manager) and its
+  ! lnd_run_mct loops until that clock catches up with the coupler's, which is
+  ! why the first coupling call runs the driver twice. ELMxx had no clock and
+  ! ran exactly once per call, leaving it a physics pass behind.
+  type(ESMF_Time), private :: elmxx_clock_time
+  logical, private :: elmxx_clock_started = .false.
+  integer, private :: elmxx_nstep = 0
   public :: lnd_final_mct
 
   !--------------------------------------------------------------------------
@@ -182,6 +190,24 @@ CONTAINS
     !----------------------------------------------------------------------------
 
     if (masterproc) write(logunit_lnd,F00) 'lnd_init_mct done'
+    ! Initial albedo pass, as ELM does in initialize2. SurfaceRadiation reads
+    ! the PREVIOUS step's albedo, and doalb is false on the first two driver
+    ! passes, so without this step 0 would run on cold-start constants and
+    ! photosynthesis would have no vcmaxcint until step 2.
+    block
+      type(seq_infodata_type), pointer :: infodata_i
+      real(r8) :: nextsw_cday_i, declin_i, eccen_i, obliqr_i, lambm0_i, mvelpp_i, eccf_i
+      call seq_cdata_setptrs(cdata, infodata=infodata_i)
+      call seq_infodata_GetData(infodata_i, nextsw_cday=nextsw_cday_i, &
+           orb_eccen=eccen_i, orb_mvelpp=mvelpp_i, &
+           orb_lambm0=lambm0_i, orb_obliqr=obliqr_i)
+      if (nextsw_cday_i > 0._r8) then
+         call shr_orb_decl(nextsw_cday_i, eccen_i, mvelpp_i, lambm0_i, obliqr_i, &
+              declin_i, eccf_i)
+         call elmxx_init_albedo(logunit_lnd, nextsw_cday_i, declin_i)
+      end if
+    end block
+
     call shr_sys_flush(logunit_lnd)
 
     call shr_file_setLogUnit (shrlogunit)
@@ -215,6 +241,9 @@ CONTAINS
     real(r8) :: nextsw_cday      ! calendar day of the NEXT radiation step
     real(r8) :: declinp1         ! solar declination for that step, radians
     real(r8) :: eccen, obliqr, lambm0, mvelpp, eccf
+    type(ESMF_TimeInterval) :: elmxx_step
+    logical  :: dosend, doalb_step
+    integer  :: rc, cyr, cmon, cday, ctod, cymd
     !-------------------------------------------------------------------------------
 
     if (.not. do_elmxx) return
@@ -235,26 +264,45 @@ CONTAINS
 
     call elmxx_import(logunit_lnd, x2l_l)
 
-    ! ELM's lnd_run_mct loops `do while (.not. dosend)` over model steps inside
-    ! one coupling interval. On the first coupling call its clock is not yet in
-    ! sync, so it runs TWICE -- nstep 0 with doalb=.false., then nstep 1. Every
-    ! later call runs once, because here the coupling interval equals the model
-    ! timestep. ELMxx ran once always, so it was permanently one physics pass
-    ! behind ELM: its step-1 state was still the raw cold start where ELM's had
-    ! already been advanced.
-    !
-    ! NOTE: this reproduces ELM's behaviour for the case where the coupling
-    ! interval equals the model timestep, which is the only case ELMxx supports
-    ! today. ELMxx has no model clock of its own to loop against; if l_ncpl ever
-    ! stops matching the timestep, this needs a real dosend loop.
-    if (first_run_call) then
-       call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
-                      nextsw_cday, declinp1, doalb=.false.)
-       first_run_call = .false.
+    ! Advance over model steps until ELMxx's clock catches the coupler's, the
+    ! way ELM's lnd_run_mct does. On the first coupling call the clock starts
+    ! at the run start while EClock is already at the end of the interval, so
+    ! this runs twice -- nstep 0 then nstep 1 -- and once per call thereafter.
+    ! Running once unconditionally left ELMxx a physics pass behind ELM and
+    ! also broke as soon as l_ncpl stopped matching the model timestep.
+    if (.not. elmxx_clock_started) then
+       call ESMF_ClockGet(EClock, startTime=elmxx_clock_time, rc=rc)
+       call chkrc(rc, 'lnd::lnd_run_mct: ESMF_ClockGet startTime')
+       elmxx_clock_started = .true.
     end if
+    call ESMF_ClockGet(EClock, timeStep=elmxx_step, rc=rc)
+    call chkrc(rc, 'lnd::lnd_run_mct: ESMF_ClockGet timeStep')
 
-    call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
-                   nextsw_cday, declinp1)
+    dosend = .false.
+    do while (.not. dosend)
+
+       call ESMF_TimeGet(elmxx_clock_time, yy=cyr, mm=cmon, dd=cday, s=ctod, rc=rc)
+       call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet model clock')
+       cymd = cyr*10000 + cmon*100 + cday
+       dosend = seq_timemgr_EClockDateInSync(EClock, cymd, ctod)
+
+       ! ELM's doalb, exactly: no albedo on the nstep-0 pass; at nstep 1 only
+       ! if the atmosphere's next radiation day is this step's next day; after
+       ! that whenever the coupler supplies a valid nextsw_cday.
+       if (elmxx_nstep == 0) then
+          doalb_step = .false.
+       else if (elmxx_nstep == 1) then
+          doalb_step = (abs(nextsw_cday - elmxx_caldayp1(elmxx_clock_time, elmxx_step)) < 1.e-10_r8)
+       else
+          doalb_step = (nextsw_cday >= -0.5_r8)
+       end if
+
+       call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
+                      nextsw_cday, declinp1, doalb=doalb_step)
+
+       elmxx_nstep = elmxx_nstep + 1
+       elmxx_clock_time = elmxx_clock_time + elmxx_step
+    end do
 
   end subroutine lnd_run_mct
 
@@ -407,6 +455,29 @@ CONTAINS
     deallocate(idata)
 
   end subroutine lnd_domain_mct
+
+  !===============================================================================
+
+  real(r8) function elmxx_caldayp1(now, step)
+
+    ! Calendar day of the NEXT model step, i.e. ELM's
+    ! get_curr_calday(offset=dtime). Day-of-year plus the fraction of the day
+    ! elapsed, 1-based, matching the convention nextsw_cday uses.
+
+    type(ESMF_Time)        , intent(in) :: now
+    type(ESMF_TimeInterval), intent(in) :: step
+
+    type(ESMF_Time) :: nxt
+    integer :: rc, doy, hh, mm, ss
+
+    ! ESMF_TimeGet's h/m/s are COMPONENTS, not seconds-of-day: asking for s
+    ! alone on 00:30:00 returns 0, not 1800.
+    nxt = now + step
+    call ESMF_TimeGet(nxt, dayOfYear=doy, h=hh, m=mm, s=ss, rc=rc)
+    call chkrc(rc, 'lnd::elmxx_caldayp1: ESMF_TimeGet')
+    elmxx_caldayp1 = real(doy, r8) + real(hh*3600 + mm*60 + ss, r8)/86400._r8
+
+  end function elmxx_caldayp1
 
   !===============================================================================
 
