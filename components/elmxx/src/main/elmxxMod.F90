@@ -175,6 +175,7 @@ module elmxxMod
   public :: elmxx_read_namelist
   public :: elmxx_init
   public :: elmxx_run
+  public :: elmxx_init_albedo
   public :: elmxx_final
 
 contains
@@ -838,6 +839,31 @@ contains
     end if
 
   end subroutine elmxx_run
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_init_albedo(logunit, nextsw_cday, declinp1)
+    !
+    ! One SurfaceAlbedo pass at the end of initialisation, mirroring ELM's
+    ! initialize2. Without it ELMxx enters step 0 with no albedo and no
+    ! vcmaxcint, while ELM enters with both -- and because doalb is false on
+    ! ELM's own nstep 0 and 1 passes, nothing would fill them in until step 2.
+    !
+    implicit none
+    integer , intent(in) :: logunit
+    real(r8), intent(in) :: nextsw_cday, declinp1
+
+    if (.not. kokkos_state_built) return
+    if (.not. elmxx_do_albedo) return
+
+    call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
+         cell_lat, cell_lon, logunit)
+    if (masterproc) then
+       write(logunit,*) 'ELMxx: initial SurfaceAlbedo pass complete'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_init_albedo
+
 
   !-----------------------------------------------------------------------
   subroutine elmxx_verify_kokkos_boundary(logunit)
