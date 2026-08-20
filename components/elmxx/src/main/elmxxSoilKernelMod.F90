@@ -414,10 +414,8 @@ contains
     !-----------------------------------------------------------------
     ! Hydrology statics and cold-start water table.
     !
-    ! ELM's cold start (SoilHydrologyType InitCold / ColumnDataType): the
-    ! water table starts at zwt = 4.8 m below the surface with wa = 4800 mm in
-    ! the unconfined aquifer, the perched table and frost table start at the
-    ! column bottom, and fmax comes from surfdata (FMAX), defaulting to 0.38
+    ! ELM's cold start (SoilHydrologyType InitCold): see the block below for
+    ! the water table. fmax comes from surfdata (FMAX), defaulting to 0.38
     ! where the field is absent.
     !-----------------------------------------------------------------
     do kc = 1, n_kokkos_col
@@ -430,13 +428,25 @@ contains
     end do
     call ELMxxSetTopoSlope(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'TopoSlope')
 
-    rcol = 4.8_r8
+    ! ELM, SoilHydrologyType InitCold, non-urban branch with
+    ! use_var_soil_thick = .false. (the default):
+    !     wa   = 4000
+    !     zwt  = (25 + zi(nlevsoi)) - wa/0.2/1000  =  5 + zi(nlevsoi)
+    !     zwt_perched = frost_table = zi(nlevsoi)
+    !
+    ! These were previously 4.8 / 4800 / zi(nlevbed), which mixes two branches
+    ! ELM does not take here: wa = 4800 is the urban icol_road_perv value, and
+    ! nlevbed belongs to the use_var_soil_thick branch. The zwt error is not
+    ! cosmetic -- fsat = wtfact*exp(-0.5*fover*zwt), so a water table 4 m too
+    ! shallow inflates the saturated fraction by e^(0.5*0.5*4) ~ 2.7 and sends
+    ! that much extra water to surface runoff instead of into the soil.
+    rcol = 4000.0_r8
+    call ELMxxSetWa(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'Wa')
+    rcol = (25.0_r8 + zisoi(nlevsoi)) - 4000.0_r8 / 0.2_r8 / 1000.0_r8
     call ELMxxSetZwt(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'Zwt')
-    rcol = zisoi(nlevbed)
+    rcol = zisoi(nlevsoi)
     call ELMxxSetZwtPerched(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ZwtPerched')
     call ELMxxSetFrostTable(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FrostTable')
-    rcol = 4800.0_r8
-    call ELMxxSetWa(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'Wa')
 
     ! Surface-water depth threshold: ELM's micro-topography relation, with the
     ! standard 1e-3 m minimum.
