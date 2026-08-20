@@ -272,11 +272,14 @@ contains
        call shr_sys_flush(iulog)
     endif
 
-    ! Initialize ELMPy diagnostics on first timestep
-    if (.not. diag_enabled .and. get_nstep() == 1) then
+    ! Initialize ELMPy diagnostics on the FIRST driver pass, whatever nstep it
+    ! carries. This used to wait for nstep == 1, which silently skipped the
+    ! initialization pass -- so the earliest recorded state already had a step
+    ! of physics on it and could not be compared against a cold start.
+    if (.not. diag_enabled .and. get_nstep() <= 1) then
        call diag_init('elm_diagnostics.bin', .true.)
     end if
-    call diag_new_timestep()
+    call diag_new_timestep(get_nstep())
 
     ! Determine processor bounds and clumps for this processor
 
