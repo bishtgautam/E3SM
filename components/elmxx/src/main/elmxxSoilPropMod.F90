@@ -21,7 +21,7 @@ module elmxxSoilPropMod
   !                       Table 5 is what get_ipedof(0) selects via ipedof0 --
   !                       NOT Table 4, which the same module also implements
   !                       with different coefficients.
-  !   organic blending    ELM SoilStateType, with om_frac = organic/organic_max
+  !   organic blending    ELM SoilStateType, with om_frac = (organic/organic_max)**2
   !                       and organic_max = 130 kg/m3 from clm_params.
   !   field capacity      ELM SoilStateType: watfc defined where hk = 0.1 mm/day
   !
@@ -182,7 +182,12 @@ contains
           jsrc = min(j, nlevsoi)
           sand = col_pct_sand(c, jsrc)
           clay = col_pct_clay(c, jsrc)
-          om_frac = min(col_organic(c, jsrc) / organic_max, 1.0_r8)
+          ! ELM squares this. The unsquared form is real but belongs to the
+          ! more_vertlayers branch, which is off by default -- and since
+          ! organic/organic_max < 1, dropping the square inflates the organic
+          ! influence on every hydraulic property in the top layers.
+          ! (SoilStateType.F90, "om_frac = (organic3d/organic_max)**2").
+          om_frac = min(col_organic(c, jsrc) / organic_max, 1.0_r8)**2.0_r8
 
           ! --- mineral soil, Cosby 1984 Table 5 (ipedof0) ---
           wsat_min = 0.489_r8 - 0.00126_r8*sand

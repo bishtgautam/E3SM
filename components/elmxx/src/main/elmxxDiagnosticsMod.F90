@@ -34,7 +34,9 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxEvapTot, ELMxxGetFsa, ELMxxGetFsr,   &
                            ELMxxGetTRef2m
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
-                                  col_of_kcol, patch_of_kpatch
+                                  col_of_kcol, patch_of_kpatch,            &
+                                  kcol_of_col
+  use elmxxSoilPropMod   , only : watsat, bsw, sucsat, hksat, nlevgrnd
   implicit none
   private
 
@@ -142,11 +144,43 @@ contains
   ! ELMxx's columns and patches back where ELM has them.
   !-----------------------------------------------------------------------
   subroutine elmxx_diag_write_maps()
+    integer :: kc, c, j
+    real(r8), allocatable :: tmp(:,:)
     if (.not. elmxx_diag_enabled) return
     if (associated(col_of_kcol)) &
          call elmxx_diag_int_1d('elmxxmap:col_of_kcol', col_of_kcol, n_kokkos_col)
     if (associated(patch_of_kpatch)) &
          call elmxx_diag_int_1d('elmxxmap:patch_of_kpatch', patch_of_kpatch, n_kokkos_patch)
+
+    ! Soil hydraulic properties, once. Static, but they set the matric
+    ! potential that drives btran and root extraction, so a wrong value here
+    ! shows up as a moisture drift and nowhere else.
+    if (associated(watsat) .and. n_kokkos_col > 0) then
+       allocate(tmp(n_kokkos_col, nlevgrnd))
+       do kc = 1, n_kokkos_col
+          c = col_of_kcol(kc)
+          do j = 1, nlevgrnd
+             tmp(kc,j) = watsat(c,j)
+          end do
+       end do
+       call elmxx_diag_2d('elmxxsoil:watsat', tmp, n_kokkos_col, nlevgrnd)
+       do kc = 1, n_kokkos_col
+          c = col_of_kcol(kc)
+          tmp(kc,1:nlevgrnd) = bsw(c,1:nlevgrnd)
+       end do
+       call elmxx_diag_2d('elmxxsoil:bsw', tmp, n_kokkos_col, nlevgrnd)
+       do kc = 1, n_kokkos_col
+          c = col_of_kcol(kc)
+          tmp(kc,1:nlevgrnd) = sucsat(c,1:nlevgrnd)
+       end do
+       call elmxx_diag_2d('elmxxsoil:sucsat', tmp, n_kokkos_col, nlevgrnd)
+       do kc = 1, n_kokkos_col
+          c = col_of_kcol(kc)
+          tmp(kc,1:nlevgrnd) = hksat(c,1:nlevgrnd)
+       end do
+       call elmxx_diag_2d('elmxxsoil:hksat', tmp, n_kokkos_col, nlevgrnd)
+       deallocate(tmp)
+    end if
   end subroutine elmxx_diag_write_maps
 
   !-----------------------------------------------------------------------
