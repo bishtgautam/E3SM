@@ -143,6 +143,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_stomata_closed
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_btran
+  public :: elmxx_kokkos_push_phenology
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -848,6 +849,64 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_canopy_hydrology
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_phenology(elm, logunit)
+    !
+    ! Push leaf area and canopy height to the device after a phenology update.
+    !
+    ! seed_state runs once, at init. Leaf area is not static -- ELM recomputes
+    ! it every doalb step -- so without this the device keeps whatever was
+    ! seeded. That was survivable while init computed the phenology; once init
+    ! correctly starts at zero (ELM does not run SatellitePhenology during
+    ! initialisation for this configuration) the device would stay bare ground
+    ! for the whole run.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+
+    real(r8), allocatable :: rpatch(:)
+    integer , allocatable :: ipatch(:)
+    integer :: kp, ierr
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_phenology) '
+
+    if (.not. kokkos_state_built .or. n_kokkos_patch <= 0) return
+
+    allocate(rpatch(n_kokkos_patch), ipatch(n_kokkos_patch))
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = elai_seeded(kp)
+    end do
+    call ELMxxSetElai(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'Elai')
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = esai_seeded(kp)
+    end do
+    call ELMxxSetEsai(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'Esai')
+
+    do kp = 1, n_kokkos_patch
+       rpatch(kp) = patch_height_top(patch_of_kpatch(kp))
+    end do
+    call ELMxxSetHtop(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'Htop')
+
+    ! frac_veg_nosno is derived from the exposed area, so it moves with it.
+    ! It is seeded in elmxx_kokkos_seed_canopy_hydrology, which also only runs
+    ! at init -- leaving every patch bare ground for the whole run once init
+    ! correctly starts from zero leaf area.
+    do kp = 1, n_kokkos_patch
+       if (elai_seeded(kp) + esai_seeded(kp) >= 0.05_r8) then
+          ipatch(kp) = 1
+       else
+          ipatch(kp) = 0
+       end if
+    end do
+    call ELMxxSetFracVegNosno(elm, ipatch, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'FracVegNosno')
+
+    deallocate(rpatch, ipatch)
+
+  end subroutine elmxx_kokkos_push_phenology
 
   !-----------------------------------------------------------------------
   ! Exposed LAI/SAI as seeded, matching what elmxx_kokkos_seed_state pushed.
