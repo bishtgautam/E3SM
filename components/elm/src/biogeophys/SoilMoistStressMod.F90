@@ -14,6 +14,7 @@ module SoilMoistStressMod
   ! Created by Jinyun Tang, Feb., 2014
   !
   use ColumnDataType   , only : col_es, col_ws
+  use ElmDiagnostics   , only : diag_enabled, diag_snapshot_1d, diag_snapshot_2d
   !
   implicit none
   save
@@ -416,6 +417,32 @@ contains
             end if
          end do
       end do
+
+      ! Root water stress contract. rootr is the per-layer sink SoilWater uses
+      ! (qflx_rootsoi = rootr*qflx_tran_veg), so it has to be replayable
+      ! independently of the btran scalar it is normalised by.
+      if (diag_enabled) then
+         call diag_snapshot_1d('rootstress_out:btran', &
+              btran(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         call diag_snapshot_2d('rootstress_out:rootr', &
+              rootr(bounds%begp:bounds%endp, 1:nlevgrnd), &
+              bounds%endp-bounds%begp+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_out:rresis', &
+              rresis(bounds%begp:bounds%endp, 1:nlevgrnd), &
+              bounds%endp-bounds%begp+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:rootfr', &
+              rootfr(bounds%begp:bounds%endp, 1:nlevgrnd), &
+              bounds%endp-bounds%begp+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:h2osoi_liqvol', &
+              h2osoi_liqvol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:eff_porosity', &
+              eff_porosity(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:t_soisno', &
+              t_soisno(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+      end if
     end associate
 
   end subroutine calc_root_moist_stress_clm45default
