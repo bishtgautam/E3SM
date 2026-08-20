@@ -42,6 +42,8 @@ module lnd_comp_mct
 
   public :: lnd_init_mct
   public :: lnd_run_mct
+
+  logical, private :: first_run_call = .true.
   public :: lnd_final_mct
 
   !--------------------------------------------------------------------------
@@ -232,6 +234,24 @@ CONTAINS
     call shr_orb_decl(nextsw_cday, eccen, mvelpp, lambm0, obliqr, declinp1, eccf)
 
     call elmxx_import(logunit_lnd, x2l_l)
+
+    ! ELM's lnd_run_mct loops `do while (.not. dosend)` over model steps inside
+    ! one coupling interval. On the first coupling call its clock is not yet in
+    ! sync, so it runs TWICE -- nstep 0 with doalb=.false., then nstep 1. Every
+    ! later call runs once, because here the coupling interval equals the model
+    ! timestep. ELMxx ran once always, so it was permanently one physics pass
+    ! behind ELM: its step-1 state was still the raw cold start where ELM's had
+    ! already been advanced.
+    !
+    ! NOTE: this reproduces ELM's behaviour for the case where the coupling
+    ! interval equals the model timestep, which is the only case ELMxx supports
+    ! today. ELMxx has no model clock of its own to loop against; if l_ncpl ever
+    ! stops matching the timestep, this needs a real dosend loop.
+    if (first_run_call) then
+       call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
+                      nextsw_cday, declinp1, doalb=.false.)
+       first_run_call = .false.
+    end if
 
     call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
                    nextsw_cday, declinp1)
