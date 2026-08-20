@@ -80,7 +80,19 @@ contains
     end do
 
     surface_state_built = .true.
-    call elmxx_update_phenology(logunit, month, day)
+
+    ! Leaf area starts at zero, NOT at the interpolated phenology. ELM gates
+    ! SatellitePhenology on doalb (elm_driver.F90, non-CN non-FATES branch) and
+    ! does not call it during initialisation for this configuration -- the
+    ! initialize2 call is behind use_fates .and. use_fates_sp. So ELM carries
+    ! elai = esai = 0, and hence frac_veg_nosno = 0, until the first doalb
+    ! step, treating every patch as bare ground until then. Computing phenology
+    ! here gave ELMxx a full canopy from step 0 and routed patches through
+    ! CanopyFluxes while ELM was still running BareGroundFluxes.
+    patch_lai        = 0.0_r8
+    patch_sai        = 0.0_r8
+    patch_height_top = 0.0_r8
+    patch_height_bot = 0.0_r8
 
     if (masterproc) then
        write(logunit,*) '(elmxx_surface_state_init) mapped soil properties to ', &

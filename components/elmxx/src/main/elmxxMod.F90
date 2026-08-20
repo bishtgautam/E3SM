@@ -71,6 +71,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_btran, &
+                                      elmxx_kokkos_push_phenology, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -679,15 +680,24 @@ contains
     logical, intent(in), optional :: doalb  ! .false. on ELM's nstep-0 pass
 
     logical :: do_albedo_this_step
+    logical :: doalb_in            ! the driver's doalb, independent of config
 
-    do_albedo_this_step = elmxx_do_albedo
-    if (present(doalb)) do_albedo_this_step = elmxx_do_albedo .and. doalb
+    doalb_in = .true.
+    if (present(doalb)) doalb_in = doalb
+    do_albedo_this_step = elmxx_do_albedo .and. doalb_in
 
     nstep = nstep + 1
     call elmxx_diag_new_timestep(nstep)
 
+    ! ELM gates SatellitePhenology on doalb (elm_driver.F90, the non-CN,
+    ! non-FATES branch), and does NOT call it during initialisation for this
+    ! configuration -- the initialize2 call is behind use_fates .and.
+    ! use_fates_sp. So ELM carries elai = esai = frac_veg_nosno = 0 until the
+    ! first doalb step, which is nstep 2 here, and treats every patch as bare
+    ! ground until then. ELMxx updated phenology unconditionally and so entered
+    ! step 0 with a full canopy, routing patches through CanopyFluxes where ELM
+    ! was still running BareGroundFluxes.
     if (subgrid_built) then
-       call elmxx_update_phenology(logunit, month, day)
        call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     end if
 
@@ -802,6 +812,18 @@ contains
        ! elmxx_kokkos_seed_albedo supplied. Moving this to the top of the step
        ! would also change which state the two-stream sees: t_veg, fwet and
        ! h2osoi_vol have all been updated by now.
+       ! Phenology updates HERE, at the end of the step just before
+       ! SurfaceAlbedo, because that is where ELM does it (elm_driver.F90, the
+       ! non-CN non-FATES branch, gated on doalb -- immediately ahead of its
+       ! own SurfaceAlbedo call). Updating at the top of the step instead let
+       ! CanopyHydrology see leaf area a step before ELM's did, which showed up
+       ! as canopy water running one timestep ahead all run.
+       if (subgrid_built .and. doalb_in) then
+          call elmxx_update_phenology(logunit, month, day)
+          ! Leaf area must reach the device too -- seed_state only runs at init.
+          call elmxx_kokkos_push_phenology(elmxx_state, logunit)
+       end if
+
        if (do_albedo_this_step) then
           call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
                cell_lat, cell_lon, logunit)

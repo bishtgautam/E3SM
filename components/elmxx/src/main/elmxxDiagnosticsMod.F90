@@ -43,6 +43,7 @@ module elmxxDiagnosticsMod
                                   kcol_of_col
   use elmxxSoilPropMod   , only : watsat, bsw, sucsat, hksat, nlevgrnd
   use elmxxRootMod       , only : rootr, btran_root => btran
+  use elmxxSurfaceStateMod, only : patch_lai, patch_sai
   implicit none
   private
 
@@ -323,6 +324,25 @@ contains
          deallocate(p1b)
       end if
     end block
+
+    ! Phenology, so leaf area can be compared directly rather than inferred
+    ! from whether the canopy intercepted anything.
+    if (associated(patch_lai) .and. n_kokkos_patch > 0) then
+       block
+         real(r8), allocatable :: pl(:)
+         integer :: kp
+         allocate(pl(n_kokkos_patch))
+         do kp = 1, n_kokkos_patch
+            pl(kp) = patch_lai(patch_of_kpatch(kp))
+         end do
+         call elmxx_diag_1d(tag//':elai', pl, n_kokkos_patch)
+         do kp = 1, n_kokkos_patch
+            pl(kp) = patch_sai(patch_of_kpatch(kp))
+         end do
+         call elmxx_diag_1d(tag//':esai', pl, n_kokkos_patch)
+         deallocate(pl)
+       end block
+    end if
 
     ! Root water uptake partition. rootr is SoilWater's per-layer sink, so it
     ! needs to be gradeable on its own rather than through btran.
