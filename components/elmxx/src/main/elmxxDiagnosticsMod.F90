@@ -32,7 +32,9 @@ module elmxxDiagnosticsMod
                            ELMxxGetTVeg, ELMxxGetBtran, ELMxxGetH2ocan,     &
                            ELMxxGetEflxShTot, ELMxxGetEflxLhTot,            &
                            ELMxxGetQflxEvapTot, ELMxxGetFsa, ELMxxGetFsr,   &
-                           ELMxxGetTRef2m
+                           ELMxxGetTRef2m, ELMxxGetQflxTranVeg,             &
+                           ELMxxGetQflxInflCol, ELMxxGetQflxSurfCol,        &
+                           ELMxxGetQflxDrainCol, ELMxxGetQflxEvapSoi
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
@@ -54,6 +56,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_2d
   public :: elmxx_diag_int_1d
   public :: elmxx_diag_snapshot_state
+  public :: elmxx_diag_snapshot_fluxes
   public :: elmxx_diag_write_maps
 
 contains
@@ -238,6 +241,10 @@ contains
        call get_p('qflx_evap_tot', ELMxxGetQflxEvapTot)
        call get_p('fsa',           ELMxxGetFsa)
        call get_p('fsr',           ELMxxGetFsr)
+       ! Water budget terms. Recorded so a moisture drift can be attributed to
+       ! a flux rather than inferred from the storage profile.
+       call get_p('qflx_tran_veg', ELMxxGetQflxTranVeg)
+       call get_p('qflx_evap_soi', ELMxxGetQflxEvapSoi)
     end if
 
     deallocate(c1, ci, c2, cg, p1)
@@ -275,5 +282,31 @@ contains
     end subroutine get_c2
 
   end subroutine elmxx_diag_snapshot_state
+
+  !-----------------------------------------------------------------------
+  ! Water fluxes, sampled at the END of the step. The HydrologyDrainage
+  ! getters read elm->hydrologyDrainage, which is a separate structure from
+  ! the natural column and holds nothing at the top of a step -- sampling
+  ! there returns zeros and reads as "no infiltration ever happened".
+  !-----------------------------------------------------------------------
+  subroutine elmxx_diag_snapshot_fluxes(elm, tag)
+    type(ELMxxType) , intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    integer :: ierr
+    real(r8), allocatable :: c1(:)
+
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(c1(n_kokkos_col))
+
+    call ELMxxGetQflxInflCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_infl', c1, n_kokkos_col)
+    call ELMxxGetQflxSurfCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_surf', c1, n_kokkos_col)
+    call ELMxxGetQflxDrainCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_drain', c1, n_kokkos_col)
+
+    deallocate(c1)
+  end subroutine elmxx_diag_snapshot_fluxes
 
 end module elmxxDiagnosticsMod
