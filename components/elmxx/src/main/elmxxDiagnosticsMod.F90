@@ -80,9 +80,16 @@ contains
     elmxx_diag_enabled = .false.
   end subroutine elmxx_diag_finalize
 
-  subroutine elmxx_diag_new_timestep()
+  subroutine elmxx_diag_new_timestep(nstep)
+    ! Label records by the driver's nstep, matching what ElmDiagnostics now
+    ! does, so ELMxx step N and ELM step N are the same instant.
+    integer, intent(in), optional :: nstep
     if (.not. elmxx_diag_enabled) return
-    elmxx_diag_timestep = elmxx_diag_timestep + 1
+    if (present(nstep)) then
+       elmxx_diag_timestep = nstep
+    else
+       elmxx_diag_timestep = elmxx_diag_timestep + 1
+    end if
   end subroutine elmxx_diag_new_timestep
 
   subroutine elmxx_diag_1d(label, array, n)

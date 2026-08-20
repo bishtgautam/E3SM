@@ -133,8 +133,12 @@ module elmxxMod
   ! co2_type = 'constant'; the I1850 twin uses 284.7.
   real(r8), public :: elmxx_co2_ppmv = 284.7_r8
   character(len=256), public :: fsurdat    = ' '
-  ! Stage 3 boundary check. Fatal by default -- see the namelist definition.
-  logical           , public :: elmxx_check_boundary  = .true.
+  ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
+  ! state fields with fingerprints and restores them from the Fortran-side
+  ! seed, which silently discards a step of physics. That was harmless while
+  ! every kernel was a no-op; it is not harmless now. Set it in the namelist
+  ! only for a run whose results you intend to throw away.
+  logical           , public :: elmxx_check_boundary  = .false.
   logical           , public :: elmxx_check_soft_fail = .false.
   ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
   character(len=256), public :: elmxx_kernels = ' '
@@ -150,7 +154,10 @@ module elmxxMod
 
   integer, public :: iulog = 6
 
-  integer, private :: nstep = 0
+  ! Starts at -1 so the first driver pass is nstep 0, matching ELM: its
+  ! lnd_run_mct loops until the clock syncs and so runs nstep 0 AND 1 on
+  ! the first coupling call.
+  integer, private :: nstep = -1
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -196,7 +203,7 @@ contains
     do_elmxx   = .true.
     fatmlndfrc = ' '
     fsurdat    = ' '
-    elmxx_check_boundary  = .true.
+    elmxx_check_boundary  = .false.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
     fparamfile            = ' '
@@ -344,7 +351,7 @@ contains
                      ' of ',num_cells_global,' active land cells'
     call shr_sys_flush(logunit)
 
-    nstep = 0
+    nstep = -1
 
     ! Per-timestep atmospheric forcing lives at gridcell level, so it is sized
     ! from the decomposition and does not depend on the surface dataset.
@@ -652,7 +659,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine elmxx_run(logunit, coupling_dt_in_sec, month, day, &
-                       nextsw_cday, declinp1)
+                       nextsw_cday, declinp1, doalb)
     !
     ! !DESCRIPTION:
     ! Advance ELMxx one coupling interval.
@@ -667,9 +674,15 @@ contains
     real(r8), intent(in) :: nextsw_cday   ! calendar day of the next radiation step
     real(r8), intent(in) :: declinp1      ! solar declination for it, radians
     integer, intent(in) :: month, day
+    logical, intent(in), optional :: doalb  ! .false. on ELM's nstep-0 pass
+
+    logical :: do_albedo_this_step
+
+    do_albedo_this_step = elmxx_do_albedo
+    if (present(doalb)) do_albedo_this_step = elmxx_do_albedo .and. doalb
 
     nstep = nstep + 1
-    call elmxx_diag_new_timestep()
+    call elmxx_diag_new_timestep(nstep)
 
     if (subgrid_built) then
        call elmxx_update_phenology(logunit, month, day)
@@ -785,7 +798,7 @@ contains
        ! elmxx_kokkos_seed_albedo supplied. Moving this to the top of the step
        ! would also change which state the two-stream sees: t_veg, fwet and
        ! h2osoi_vol have all been updated by now.
-       if (elmxx_do_albedo) then
+       if (do_albedo_this_step) then
           call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
                cell_lat, cell_lon, logunit)
           if (nstep == 1 .or. mod(nstep, 24) == 0) then
@@ -807,7 +820,12 @@ contains
        end if
     end if
 
-    if (kokkos_state_built .and. nstep == 1 .and. elmxx_check_boundary) then
+    ! Gated on the FIRST pass, not nstep == 1. The probe overwrites state with
+    ! fingerprints and restores from the Fortran-side seed, so it is only
+    ! harmless while the state still IS that seed. Once ELMxx started running
+    ! ELM's extra nstep-0 pass, nstep == 1 became the second pass and this
+    ! silently threw away a step of physics.
+    if (kokkos_state_built .and. nstep == 0 .and. elmxx_check_boundary) then
        call elmxx_verify_kokkos_boundary(logunit)
     end if
 
