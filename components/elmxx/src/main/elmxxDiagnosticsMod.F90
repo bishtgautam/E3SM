@@ -242,8 +242,6 @@ contains
        call get_p('eflx_sh_tot',   ELMxxGetEflxShTot)
        call get_p('eflx_lh_tot',   ELMxxGetEflxLhTot)
        call get_p('qflx_evap_tot', ELMxxGetQflxEvapTot)
-       call get_p('fsa',           ELMxxGetFsa)
-       call get_p('fsr',           ELMxxGetFsr)
        ! Water budget terms. Recorded so a moisture drift can be attributed to
        ! a flux rather than inferred from the storage profile.
        call get_p('qflx_tran_veg', ELMxxGetQflxTranVeg)
@@ -308,6 +306,21 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_surf', c1, n_kokkos_col)
     call ELMxxGetQflxDrainCol(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_drain', c1, n_kokkos_col)
+
+    ! Absorbed/reflected shortwave, sampled here rather than at the top of the
+    ! step: ELM records surfrad_out: DURING the step, so a top-of-step ELMxx
+    ! value is one timestep stale and reads as a whole-diurnal-cycle shift.
+    block
+      real(r8), allocatable :: p1b(:)
+      if (n_kokkos_patch > 0) then
+         allocate(p1b(n_kokkos_patch))
+         call ELMxxGetFsa(elm, p1b, n_kokkos_patch, ierr)
+         if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':fsa', p1b, n_kokkos_patch)
+         call ELMxxGetFsr(elm, p1b, n_kokkos_patch, ierr)
+         if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':fsr', p1b, n_kokkos_patch)
+         deallocate(p1b)
+      end if
+    end block
 
     ! The quantities that set the infiltration/runoff split.
     call ELMxxGetQflxTopSoilCol(elm, c1, n_kokkos_col, ierr)

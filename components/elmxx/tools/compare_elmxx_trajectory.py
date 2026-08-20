@@ -42,9 +42,14 @@ ANCHOR = {
     "t_veg":          "canflx_in:t_veg",
     "btran":          "canflx_in:btran",
     "h2ocan":         "canhydro_in:h2ocan",
-    "fsa":            "surfrad_out:fsa",
-    "fsr":            "surfrad_out:fsr",
 }
+
+# Sampled at the END of the step (elmxx_out:), because ELM records these
+# during the step. Comparing a top-of-step value against them shifts the whole
+# diurnal cycle by one timestep and looks like a large error.
+END_OF_STEP = {"fsa", "fsr"}
+ANCHOR["fsa"] = "surfrad_out:fsa"
+ANCHOR["fsr"] = "surfrad_out:fsr"
 
 COLUMN_VARS = {"t_grnd", "t_h2osfc", "h2osfc", "h2osno", "snow_depth",
                "frac_sno", "frac_h2osfc", "int_snow", "snl",
@@ -150,7 +155,8 @@ def main():
         first_bad, worst, worst_ts = None, 0.0, None
         seen = 0
         for ts in shared:
-            a = xx[ts].get(f"elmxx_in:{var}")
+            prefix = "elmxx_out" if var in END_OF_STEP else "elmxx_in"
+            a = xx[ts].get(f"{prefix}:{var}")
             b = em[ts].get(anchor)
             if a is None or b is None:
                 continue
