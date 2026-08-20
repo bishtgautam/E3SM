@@ -34,7 +34,10 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxEvapTot, ELMxxGetFsa, ELMxxGetFsr,   &
                            ELMxxGetTRef2m, ELMxxGetQflxTranVeg,             &
                            ELMxxGetQflxInflCol, ELMxxGetQflxSurfCol,        &
-                           ELMxxGetQflxDrainCol, ELMxxGetQflxEvapSoi
+                           ELMxxGetQflxDrainCol, ELMxxGetQflxEvapSoi,       &
+                           ELMxxGetQflxTopSoilCol, ELMxxGetFsat,            &
+                           ELMxxGetFcov, ELMxxGetZwt, ELMxxGetWtfact,       &
+                           ELMxxGetEffPorosity
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
@@ -305,6 +308,29 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_surf', c1, n_kokkos_col)
     call ELMxxGetQflxDrainCol(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_drain', c1, n_kokkos_col)
+
+    ! The quantities that set the infiltration/runoff split.
+    call ELMxxGetQflxTopSoilCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_top_soil', c1, n_kokkos_col)
+    call ELMxxGetFsat(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':fsat', c1, n_kokkos_col)
+    call ELMxxGetFcov(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':fcov', c1, n_kokkos_col)
+    call ELMxxGetZwt(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':zwt', c1, n_kokkos_col)
+    call ELMxxGetWtfact(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':wtfact', c1, n_kokkos_col)
+
+    block
+      real(r8), allocatable :: cg(:,:)
+      integer :: szg(2)
+      allocate(cg(n_kokkos_col, nlevgrnd))
+      szg(1) = n_kokkos_col; szg(2) = nlevgrnd
+      call ELMxxGetEffPorosity(elm, cg, szg, ierr)
+      if (ierr == ELMXX_SUCCESS) &
+           call elmxx_diag_2d(tag//':eff_porosity', cg, n_kokkos_col, nlevgrnd)
+      deallocate(cg)
+    end block
 
     deallocate(c1)
   end subroutine elmxx_diag_snapshot_fluxes
