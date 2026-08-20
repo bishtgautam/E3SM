@@ -26,6 +26,8 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
+  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_soilwater
+  use elmxxSoilPropMod   , only : nlevgrnd
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
                                ELMxxComputeCanopyHydrology, &
@@ -513,6 +515,9 @@ contains
        call ELMxxComputeSoilWaterNatural(elm, dtime, ierr)
        call check(ierr, logunit, K_SOILWATER)
     end if
+
+    ! Straight after the Richards solve, before HydrologyDrainage moves water.
+    call elmxx_diag_snapshot_soilwater(elm, nlevgrnd, 'elmxx_sw')
 
     if (kernel_active(K_LAKEHYDRO)) then
        call ELMxxComputeLakeHydrology(elm, ierr)

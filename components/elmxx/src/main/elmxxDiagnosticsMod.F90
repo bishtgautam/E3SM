@@ -61,6 +61,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_int_1d
   public :: elmxx_diag_snapshot_state
   public :: elmxx_diag_snapshot_fluxes
+  public :: elmxx_diag_snapshot_soilwater
   public :: elmxx_diag_write_maps
 
 contains
@@ -364,5 +365,25 @@ contains
 
     deallocate(c1)
   end subroutine elmxx_diag_snapshot_fluxes
+
+  !-----------------------------------------------------------------------
+  ! Soil liquid immediately after the Richards solve, before HydrologyDrainage
+  ! touches it. ELM's matching record is soilwater_out:h2osoi_liq.
+  !-----------------------------------------------------------------------
+  subroutine elmxx_diag_snapshot_soilwater(elm, nlevgrnd_in, tag)
+    type(ELMxxType) , intent(in) :: elm
+    integer         , intent(in) :: nlevgrnd_in
+    character(len=*), intent(in) :: tag
+    integer :: ierr, szg(2)
+    real(r8), allocatable :: cg(:,:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(cg(n_kokkos_col, nlevgrnd_in))
+    szg(1) = n_kokkos_col; szg(2) = nlevgrnd_in
+    call ELMxxGetH2osoiLiqSoi(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) &
+         call elmxx_diag_2d(tag//':h2osoi_liq', cg, n_kokkos_col, nlevgrnd_in)
+    deallocate(cg)
+  end subroutine elmxx_diag_snapshot_soilwater
 
 end module elmxxDiagnosticsMod
