@@ -42,6 +42,7 @@ module elmxxDiagnosticsMod
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
   use elmxxSoilPropMod   , only : watsat, bsw, sucsat, hksat, nlevgrnd
+  use elmxxRootMod       , only : rootr, btran_root => btran
   implicit none
   private
 
@@ -321,6 +322,22 @@ contains
          deallocate(p1b)
       end if
     end block
+
+    ! Root water uptake partition. rootr is SoilWater's per-layer sink, so it
+    ! needs to be gradeable on its own rather than through btran.
+    if (associated(rootr) .and. n_kokkos_patch > 0) then
+       block
+         real(r8), allocatable :: pg(:,:)
+         integer :: kp, szp(2)
+         allocate(pg(n_kokkos_patch, nlevgrnd))
+         do kp = 1, n_kokkos_patch
+            pg(kp,1:nlevgrnd) = rootr(patch_of_kpatch(kp), 1:nlevgrnd)
+         end do
+         szp(1) = n_kokkos_patch; szp(2) = nlevgrnd
+         call elmxx_diag_2d(tag//':rootr', pg, n_kokkos_patch, nlevgrnd)
+         deallocate(pg)
+       end block
+    end if
 
     ! The quantities that set the infiltration/runoff split.
     call ELMxxGetQflxTopSoilCol(elm, c1, n_kokkos_col, ierr)
