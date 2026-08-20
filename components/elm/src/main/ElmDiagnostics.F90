@@ -90,14 +90,27 @@ contains
   end subroutine diag_finalize
 
   !-----------------------------------------------------------------------
-  subroutine diag_new_timestep()
+  subroutine diag_new_timestep(nstep)
     !
     ! !DESCRIPTION:
-    ! Increment the timestep counter. Call at the beginning of each driver timestep.
+    ! Start a new timestep. Call at the beginning of each driver timestep.
+    !
+    ! Pass the driver's nstep so records are LABELLED BY nstep rather than by
+    ! an internal counter. The two agreed as long as recording began at
+    ! nstep == 1, but they diverge the moment an earlier pass is captured, and
+    ! the replay tests reference specific timestep numbers. Labelling by nstep
+    ! keeps those numbers stable no matter when recording starts.
+    !
+    ! !ARGUMENTS:
+    integer, intent(in), optional :: nstep
     !-----------------------------------------------------------------------
 
     if (.not. diag_enabled) return
-    diag_timestep = diag_timestep + 1
+    if (present(nstep)) then
+       diag_timestep = nstep
+    else
+       diag_timestep = diag_timestep + 1
+    end if
 
   end subroutine diag_new_timestep
 
