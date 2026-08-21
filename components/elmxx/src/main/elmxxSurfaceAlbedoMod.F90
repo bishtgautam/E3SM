@@ -41,6 +41,7 @@ module elmxxSurfaceAlbedoMod
                                    patch_of_kpatch, kokkos_state_built
   use elmxxSurfaceAlbedoKernelMod, only : numrad, elmxx_surface_albedo_kernel
   use elmxx_mod           , only : ELMxxType, ELMXX_SUCCESS, &
+                                   ELMxxSetCoszen, &
                                    ELMxxSetAlbgrd, ELMxxSetAlbgri, &
                                    ELMxxSetAlbsod, ELMxxSetAlbsoi, &
                                    ELMxxSetAlbd, ELMxxSetAlbi, &
@@ -65,6 +66,7 @@ module elmxxSurfaceAlbedoMod
   real(r8), public, allocatable :: patch_vcmaxcintsha(:)
 
   public :: elmxx_surface_albedo
+  public :: elmxx_push_coszen
   public :: elmxx_surface_albedo_report
 
   real(r8), allocatable :: last_albd(:,:), last_albgrd(:,:), last_fsun(:)
@@ -73,6 +75,39 @@ module elmxxSurfaceAlbedoMod
 contains
 
   !-----------------------------------------------------------------------
+  subroutine elmxx_push_coszen(elm, nextsw_cday, declin, lat, lon, logunit)
+    !
+    ! Cosine of the solar zenith angle, pushed with the forcing.
+    !
+    ! It is derived from nextsw_cday and declin, which the COUPLER supplies, so
+    ! it belongs with the atmospheric forcing rather than being a separate
+    ! crossing. Computing it on the device instead would mean porting
+    ! shr_orb_cosz faithfully, branches included (constant_zenith_angle_deg,
+    ! uniform_angle, dt_avg) -- worth doing, but not worth guessing at.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    real(r8), intent(in) :: nextsw_cday, declin
+    real(r8), intent(in) :: lat(:), lon(:)
+    integer , intent(in) :: logunit
+
+    real(r8), allocatable :: cz(:)
+    integer :: kc, c, g, ierr
+    character(len=*), parameter :: subname = '(elmxx_push_coszen) '
+
+    allocate(cz(n_kokkos_col))
+    do kc = 1, n_kokkos_col
+       c = col_of_kcol(kc)
+       g = lun_gridcell(col_landunit(c))
+       cz(kc) = shr_orb_cosz(nextsw_cday, lat(g)*SHR_CONST_PI/180.0_r8, &
+                             lon(g)*SHR_CONST_PI/180.0_r8, declin)
+    end do
+    call ELMxxSetCoszen(elm, cz, n_kokkos_col, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: SetCoszen')
+    deallocate(cz)
+
+  end subroutine elmxx_push_coszen
+
   subroutine elmxx_surface_albedo(elm, nextsw_cday, declin, lat, lon, logunit)
     !
     ! One full SurfaceAlbedo pass, end of timestep.
