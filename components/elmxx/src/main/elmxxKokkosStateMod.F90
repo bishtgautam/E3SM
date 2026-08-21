@@ -43,7 +43,7 @@ module elmxxKokkosStateMod
 
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
-  use shr_const_mod   , only : SHR_CONST_RDAIR
+  use shr_const_mod   , only : SHR_CONST_PI
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, col_landunit, &
@@ -78,6 +78,8 @@ module elmxxKokkosStateMod
                                ELMxxSetRootStressTcStress, &
                                ELMxxSetSoilColor, ELMxxSetRhol, ELMxxSetRhos, &
                                ELMxxSetCoszen, &
+                               ELMxxSetColLatRad, ELMxxSetColLonRad, &
+                               ELMxxComputeForcingDerivedNatural, &
                                ELMxxSetTaul, ELMxxSetTaus, ELMxxSetXl, &
                                ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
                                ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
@@ -95,7 +97,7 @@ module elmxxKokkosStateMod
                                ELMxxSetSmpmin, ELMxxSetTH2osfc, &
                                ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
                                ELMxxSetForcSolad, ELMxxSetForcSolai, &
-                               ELMxxSetForcRhoCol, ELMxxSetBtran, &
+                               ELMxxSetBtran, &
                                ELMxxSetAlbgrd, ELMxxSetAlbgri, &
                                ELMxxSetAlbsod, ELMxxSetAlbsoi, &
                                ELMxxSetAlbsndHst, ELMxxSetAlbsniHst, &
@@ -143,6 +145,7 @@ module elmxxKokkosStateMod
   integer, public :: n_kokkos_urb   = 0
 
   logical, public :: kokkos_state_built = .false.
+  logical, private :: latlon_pushed = .false.
 
   public :: elmxx_kokkos_state_init
   public :: elmxx_kokkos_check_map_invariants
@@ -153,6 +156,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_albedo
   public :: elmxx_kokkos_seed_pftpar
   public :: elmxx_kokkos_seed_stomata_closed
+  public :: elmxx_kokkos_push_latlon
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_verify_maps
@@ -1107,7 +1111,44 @@ contains
   end subroutine elmxx_kokkos_seed_stomata_closed
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_kokkos_push_forcing(elm, logunit)
+  subroutine elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
+    !
+    ! Column latitude and longitude in radians, pushed once. They never
+    ! change, and with them on the device the cosine of the solar zenith
+    ! angle can be derived there instead of crossing every step.
+    !
+    ! Both elmxx_kokkos_push_forcing and elmxx_init_albedo call this; the
+    ! module-level guard makes the second call a no-op, whichever runs first.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    real(r8), intent(in) :: lat(:), lon(:)   ! per gridcell [degrees]
+    integer, intent(in) :: logunit
+    integer :: kc, ierr
+    real(r8), allocatable :: rcol(:)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_latlon) '
+
+    if (latlon_pushed) return
+    call require_built(subname)
+    if (n_kokkos_col <= 0) return
+
+    allocate(rcol(n_kokkos_col))
+    do kc = 1, n_kokkos_col
+       rcol(kc) = lat(cell_of_kcol(kc)) * SHR_CONST_PI / 180.0_r8
+    end do
+    call ELMxxSetColLatRad(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ColLatRad')
+    do kc = 1, n_kokkos_col
+       rcol(kc) = lon(cell_of_kcol(kc)) * SHR_CONST_PI / 180.0_r8
+    end do
+    call ELMxxSetColLonRad(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ColLonRad')
+    deallocate(rcol)
+
+    latlon_pushed = .true.
+
+  end subroutine elmxx_kokkos_push_latlon
+
+
+  subroutine elmxx_kokkos_push_forcing(elm, nextsw_cday, declin, lat, lon, logunit)
     !
     ! The per-timestep "atmospheric forcing in" crossing -- one of the two the
     ! plan allows. Everything here genuinely changes every coupling interval;
@@ -1126,19 +1167,16 @@ contains
     !
     implicit none
     type(ELMxxType), intent(in) :: elm
+    real(r8), intent(in) :: nextsw_cday   ! Julian cal day of next radiation step
+    real(r8), intent(in) :: declin        ! solar declination [radians]
+    real(r8), intent(in) :: lat(:), lon(:) ! per gridcell [degrees]
     integer, intent(in) :: logunit
     integer :: kc, kp, g, ierr
     integer :: szp(2)
-    real(r8) :: vp
     real(r8), allocatable :: rcol(:), rpatch(:)
     real(r8), allocatable :: rsol(:,:)
     logical, save :: reported = .false.
     integer, parameter :: numrad = 2   ! 1 = visible, 2 = near-IR
-    ! ELM's rair is elm_varcon's, which is SHR_CONST_RDAIR. Taken from the
-    ! same shared constant rather than transcribed: it is derived
-    ! (RGAS/MWDAIR), not a literal, so a hand-copied value would differ in the
-    ! last digits and quietly bound how close a future ELM comparison can get.
-    real(r8), parameter :: rair = SHR_CONST_RDAIR
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
 
     call require_built(subname)
@@ -1187,12 +1225,11 @@ contains
     ! the 0.378 moist-air correction. Writing it as one expression would
     ! change the rounding and make a future comparison against ELM harder to
     ! read than it needs to be.
-    do kc = 1, n_kokkos_col
-       g  = cell_of_kcol(kc)
-       vp = forc_shum(g) * forc_pbot(g) / (0.622_r8 + 0.378_r8 * forc_shum(g))
-       rcol(kc) = (forc_pbot(g) - 0.378_r8 * vp) / (rair * forc_tbot(g))
-    end do
-    call ELMxxSetForcRhoCol(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ForcRhoCol')
+    ! Air density and cosine solar zenith are DERIVED ON THE DEVICE now, by
+    ! ELMxxComputeForcingDerivedNatural at the end of this routine. Both used
+    ! to cross: air density as a fifteenth forcing field, zenith as a whole
+    ! second per-step crossing (elmxx_push_coszen). Neither depends on
+    ! anything the host owns beyond the scalars in this call.
 
     ! ---- patch-level ----
     do kp = 1, n_kokkos_patch
@@ -1251,6 +1288,13 @@ contains
        rsol(kp,2) = forc_swndf(g)
     end do
     call ELMxxSetForcSolai(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolai')
+
+    ! ---- static geometry, once ----
+    call elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
+
+    ! ---- device-side derivation ----
+    call ELMxxComputeForcingDerivedNatural(elm, nextsw_cday, declin, 1, ierr)
+    call check(ierr, subname, 'ComputeForcingDerivedNatural')
 
     if (.not. reported) then
        write(logunit,*) subname,'rank ',iam,' forc_z range ', &
