@@ -105,6 +105,7 @@ module elmxxSoilKernelMod
                                    ELMxxSetHsSoil, ELMxxSetHsTopSnow, &
                                    ELMxxSetHsH2osfc, ELMxxSetDhsdT, &
                                    ELMxxSetSabgLyrCol, ELMxxSetTssbef, &
+                                   ELMxxGetQflxTranVeg, ELMxxSetQflxTranVegCol, &
                                    ELMxxSetWtcol, ELMxxSetPatchActive, &
                                    ELMxxSetPatchLandunit, &
                                    ELMxxSetIsOnSoilCol, ELMxxSetIsOnCropCol, &
@@ -633,6 +634,34 @@ contains
        write(logunit,*) subname,'    qflx_top_soil [kg/m2/s] ', &
             minval(qtop),' .. ',maxval(qtop)
     end if
+
+    ! Column transpiration, patch-to-column weighted. RootWaterUpdate needs it:
+    !   qflx_rootsoi(c,j) = rootr_col(c,j) * qflx_tran_veg_col(c)
+    ! Nothing in the library computes it and the driver never pushed it, so it
+    ! sat at zero and the root sink came out zero with it -- ELMxx transpired
+    ! to the atmosphere every step without ever taking the water out of the
+    ! soil. Over five days that is 0.2 kg/m2 and invisible; over a month it is
+    ! 17, and it is a conservation violation at any length.
+    block
+      real(r8), allocatable :: tranp(:), tranc(:)
+      integer :: kp2, kc2
+      allocate(tranp(n_kokkos_patch), tranc(n_kokkos_col))
+      call ELMxxGetQflxTranVeg(elm, tranp, n_kokkos_patch, ierr)
+      call check(ierr, subname, 'QflxTranVeg')
+      tranc = 0.0_r8
+      do kp2 = 1, n_kokkos_patch
+         kc2 = patch_col(kp2)
+         if (kc2 >= 1 .and. kc2 <= n_kokkos_col) &
+              tranc(kc2) = tranc(kc2) + tranp(kp2) * patch_wt(kp2)
+      end do
+      call ELMxxSetQflxTranVegCol(elm, tranc, n_kokkos_col, ierr)
+      call check(ierr, subname, 'QflxTranVegCol')
+      if (report) then
+         write(logunit,*) subname,'    qflx_tran_veg_col [kg/m2/s] ', &
+              minval(tranc),' .. ',maxval(tranc)
+      end if
+      deallocate(tranp, tranc)
+    end block
 
     sz(1) = n_kokkos_col; sz(2) = nlevtot
     call ELMxxSetSabgLyrCol(elm, sabglyrc, sz, ierr);         call check(ierr, subname, 'SabgLyrCol')
