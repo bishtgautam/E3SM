@@ -40,14 +40,16 @@ module elmxxMod
                                       ELMxxComputeRootStressNatural, &
                                       ELMxxComputeGroundHeatFluxNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
-                                      ELMxxComputeSurfaceAlbedoNatural
+                                      ELMxxComputeSurfaceAlbedoNatural, &
+                                      ELMxxComputePhotosynForcingNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
-                                    elmxx_photosyn_update, photosyn_built
+                                    elmxx_photosyn_update, photosyn_built, &
+                                    elmxx_push_photosyn_statics, t10_period
   use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, elmxx_push_coszen, &
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
@@ -168,6 +170,7 @@ module elmxxMod
   integer, private :: nstep = -1
   logical, private :: root_statics_pushed = .false.
   logical, private :: ghf_sb_pushed = .false.
+  logical, private :: photosyn_statics_pushed = .false.
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -796,9 +799,18 @@ contains
              call elmxx_photosyn_init(cell_lat, real(coupling_dt_in_sec, r8), logunit)
              call elmxx_photosyn_seed(elmxx_state, logunit)
           end if
-          call elmxx_photosyn_update(elmxx_state, nstep, declinp1, &
-               elmxx_co2_ppmv, logunit, &
-               nstep == 1 .or. mod(nstep, 24) == 0)
+          ! Photosynthesis forcing runs on the device. Its statics -- gridcell
+          ! latitude and maximum daylength -- are pushed once. vcmaxcint used
+          ! to cross here too; SurfaceAlbedo now produces it on the device,
+          ! which is what let this move.
+          if (.not. photosyn_statics_pushed) then
+             call elmxx_push_photosyn_statics(elmxx_state, logunit)
+             photosyn_statics_pushed = .true.
+          end if
+          call ELMxxComputePhotosynForcingNatural(elmxx_state, nstep, t10_period, &
+               declinp1, elmxx_co2_ppmv, ierr_rs)
+          if (ierr_rs /= ELMXX_SUCCESS) &
+               call shr_sys_abort('(elmxx_run) ERROR: ComputePhotosynForcingNatural failed')
        end if
 
        ! State at the top of the step, before any kernel. ELM's matching
