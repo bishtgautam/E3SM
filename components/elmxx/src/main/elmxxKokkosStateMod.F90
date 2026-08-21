@@ -53,7 +53,7 @@ module elmxxKokkosStateMod
                                     patch_height_top
   use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
-  use elmxxRootMod    , only : rt_btran => btran
+  use elmxxRootMod    , only : rt_btran => btran, rt_rootr => rootr
   use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, nlevtot, &
                                sp_watsat => watsat, sp_bsw => bsw, &
                                sp_sucsat => sucsat, sp_watfc => watfc, &
@@ -67,6 +67,7 @@ module elmxxKokkosStateMod
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxSetPatchColumn, &
                                ELMxxSetElai, ELMxxSetEsai, ELMxxSetHtop, &
+                               ELMxxSetRootrPatch, &
                                ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
                                ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
                                ELMxxSetForcUCol, ELMxxSetForcVCol, &
@@ -1235,6 +1236,29 @@ contains
        buf(kp) = rt_btran(patch_of_kpatch(kp))
     end do
     call ELMxxSetBtran(elm, buf, n_kokkos_patch, ierr)
+    call check(ierr, subname, 'Btran')
+
+    ! rootr crosses with it. RootWaterUpdate computes
+    !   qflx_rootsoi(c,j) = rootr_col(c,j)*qflx_tran_veg_col(c)
+    ! and rootr_col is reduced from rootr_patch on the device. Pushing btran
+    ! alone left rootr_patch at whatever it was allocated with, so
+    ! qflx_rootsoi came out zero: ELMxx transpired to the atmosphere but never
+    ! took the water out of the soil column. Over five days that is 0.2 kg/m2
+    ! and invisible; over a month it is 17.
+    block
+      real(r8), allocatable :: b2(:,:)
+      integer :: jj, sz2(2)
+      allocate(b2(n_kokkos_patch, nlevgrnd))
+      do kp = 1, n_kokkos_patch
+         do jj = 1, nlevgrnd
+            b2(kp,jj) = rt_rootr(patch_of_kpatch(kp), jj)
+         end do
+      end do
+      sz2(1) = n_kokkos_patch; sz2(2) = nlevgrnd
+      call ELMxxSetRootrPatch(elm, b2, sz2, ierr)
+      call check(ierr, subname, 'RootrPatch')
+      deallocate(b2)
+    end block
     call check(ierr, subname, 'Btran')
     deallocate(buf)
 
