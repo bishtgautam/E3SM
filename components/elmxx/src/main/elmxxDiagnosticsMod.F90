@@ -37,7 +37,8 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxDrainCol, ELMxxGetQflxEvapSoi,       &
                            ELMxxGetQflxTopSoilCol, ELMxxGetFsat,            &
                            ELMxxGetFcov, ELMxxGetZwt, ELMxxGetWtfact,       &
-                           ELMxxGetEffPorosity
+                           ELMxxGetEffPorosity, ELMxxGetAlbgrd,             &
+                           ELMxxGetAlbgri, ELMxxGetAlbsod, ELMxxGetAlbd
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
@@ -359,6 +360,27 @@ contains
          deallocate(pg)
        end block
     end if
+
+    ! Albedo, so either path -- Fortran or C++ -- can be diffed against ELM's
+    ! surfrad_in records rather than against each other.
+    block
+      real(r8), allocatable :: c2(:,:), p2(:,:)
+      integer :: szc(2), szp(2)
+      allocate(c2(n_kokkos_col, 2), p2(max(n_kokkos_patch,1), 2))
+      szc(1) = n_kokkos_col; szc(2) = 2
+      call ELMxxGetAlbgrd(elm, c2, szc, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':albgrd', c2, n_kokkos_col, 2)
+      call ELMxxGetAlbgri(elm, c2, szc, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':albgri', c2, n_kokkos_col, 2)
+      call ELMxxGetAlbsod(elm, c2, szc, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':albsod', c2, n_kokkos_col, 2)
+      if (n_kokkos_patch > 0) then
+         szp(1) = n_kokkos_patch; szp(2) = 2
+         call ELMxxGetAlbd(elm, p2, szp, ierr)
+         if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':albd', p2, n_kokkos_patch, 2)
+      end if
+      deallocate(c2, p2)
+    end block
 
     ! The quantities that set the infiltration/runoff split.
     call ELMxxGetQflxTopSoilCol(elm, c1, n_kokkos_col, ierr)

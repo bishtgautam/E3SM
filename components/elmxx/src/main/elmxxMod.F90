@@ -853,10 +853,11 @@ contains
        end if
 
        if (do_albedo_this_step) then
-          ! NOTE: ComputeSurfaceAlbedoNatural (C++) exists and builds, but is
-          ! NOT wired in -- it does not yet reproduce this path. See H10.
-          call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
+          call elmxx_push_coszen(elmxx_state, nextsw_cday, declinp1, &
                cell_lat, cell_lon, logunit)
+          call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_rs)
+          if (ierr_rs /= ELMXX_SUCCESS) &
+               call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoNatural failed')
           if (nstep == 1 .or. mod(nstep, 24) == 0) then
              call elmxx_surface_albedo_report(logunit)
           end if
