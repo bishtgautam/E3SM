@@ -15,6 +15,8 @@ module SoilMoistStressMod
   !
   use ColumnDataType   , only : col_es, col_ws
   use ElmDiagnostics   , only : diag_enabled, diag_snapshot_1d, diag_snapshot_2d
+  use ElmDiagnostics   , only : diag_snapshot_int_1d, diag_snapshot_scalar
+  use ColumnType       , only : col_pp
   !
   implicit none
   save
@@ -442,6 +444,47 @@ contains
          call diag_snapshot_2d('rootstress_in:t_soisno', &
               t_soisno(bounds%begc:bounds%endc, 1:nlevgrnd), &
               bounds%endc-bounds%begc+1, nlevgrnd)
+         ! The rest of the contract, so a replay deck is self-contained: soil
+         ! state and properties as this routine sees them, the per-PFT closure
+         ! thresholds resolved per patch, and the patch topology.
+         call diag_snapshot_2d('rootstress_in:h2osoi_liq', &
+              col_ws%h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:h2osoi_ice', &
+              col_ws%h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:dz', &
+              col_pp%dz(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:watsat', &
+              soilstate_vars%watsat_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:bsw', &
+              soilstate_vars%bsw_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         call diag_snapshot_2d('rootstress_in:sucsat', &
+              soilstate_vars%sucsat_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+              bounds%endc-bounds%begc+1, nlevgrnd)
+         block
+           real(r8) :: smpsc_p(bounds%begp:bounds%endp)
+           real(r8) :: smpso_p(bounds%begp:bounds%endp)
+           integer  :: pp
+           do pp = bounds%begp, bounds%endp
+              smpsc_p(pp) = smpsc(veg_pp%itype(pp))
+              smpso_p(pp) = smpso(veg_pp%itype(pp))
+           end do
+           call diag_snapshot_1d('rootstress_in:smpsc', smpsc_p, &
+                bounds%endp-bounds%begp+1)
+           call diag_snapshot_1d('rootstress_in:smpso', smpso_p, &
+                bounds%endp-bounds%begp+1)
+         end block
+         call diag_snapshot_scalar('rootstress_in:tc_stress', tc_stress)
+         call diag_snapshot_int_1d('rootstress_in:patch_itype', &
+              veg_pp%itype(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         call diag_snapshot_int_1d('rootstress_in:patch_column', &
+              veg_pp%column(bounds%begp:bounds%endp), bounds%endp-bounds%begp+1)
+         call diag_snapshot_int_1d('rootstress_in:nlevbed', &
+              col_pp%nlevbed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
       end if
     end associate
 
