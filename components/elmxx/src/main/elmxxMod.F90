@@ -31,7 +31,8 @@ module elmxxMod
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
-                                   elmxx_update_phenology, elmxx_surface_state_clean
+                                   elmxx_update_phenology, elmxx_surface_state_clean, &
+                                   elmxx_push_monthly_phenology, elmxx_phenology_weights
   use elmxxFilterMod      , only : elmxx_build_filters, elmxx_filters_clean
   use elmxxInitCheckMod   , only : elmxx_write_init_snapshot
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
@@ -41,7 +42,8 @@ module elmxxMod
                                       ELMxxComputeGroundHeatFluxNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
-                                      ELMxxComputePhotosynForcingNatural
+                                      ELMxxComputePhotosynForcingNatural, &
+                                      ELMxxComputePhenologyNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
@@ -171,6 +173,7 @@ module elmxxMod
   logical, private :: root_statics_pushed = .false.
   logical, private :: ghf_sb_pushed = .false.
   logical, private :: photosyn_statics_pushed = .false.
+  logical, private :: monthly_phen_pushed = .false.
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -693,6 +696,8 @@ contains
     logical :: do_albedo_this_step
     logical :: doalb_in            ! the driver's doalb, independent of config
     integer :: ierr_rs
+    integer :: phm1, phm2
+    real(r8) :: phw1, phw2
 
     doalb_in = .true.
     if (present(doalb)) doalb_in = doalb
@@ -858,10 +863,19 @@ contains
        ! own SurfaceAlbedo call). Updating at the top of the step instead let
        ! CanopyHydrology see leaf area a step before ELM's did, which showed up
        ! as canopy water running one timestep ahead all run.
+       ! Phenology interpolates ON THE DEVICE. The twelve monthly fields are
+       ! pushed once from the surface dataset; per step only the two month
+       ! indices and their weights cross. This replaces push_phenology, which
+       ! shipped interpolated leaf area every doalb step.
        if (subgrid_built .and. doalb_in) then
-          call elmxx_update_phenology(logunit, month, day)
-          ! Leaf area must reach the device too -- seed_state only runs at init.
-          call elmxx_kokkos_push_phenology(elmxx_state, logunit)
+          if (.not. monthly_phen_pushed) then
+             call elmxx_push_monthly_phenology(elmxx_state, logunit)
+             monthly_phen_pushed = .true.
+          end if
+          call elmxx_phenology_weights(month, day, phm1, phm2, phw1, phw2)
+          call ELMxxComputePhenologyNatural(elmxx_state, phm1, phm2, phw1, phw2, ierr_rs)
+          if (ierr_rs /= ELMXX_SUCCESS) &
+               call shr_sys_abort('(elmxx_run) ERROR: ComputePhenologyNatural failed')
        end if
 
        if (do_albedo_this_step) then

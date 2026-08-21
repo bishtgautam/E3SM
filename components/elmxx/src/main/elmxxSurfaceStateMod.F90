@@ -19,6 +19,11 @@ module elmxxSurfaceStateMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
+  use elmxx_mod           , only : ELMxxType, ELMXX_SUCCESS, &
+                                   ELMxxSetPhenActive, ELMxxSetMonthlyLai, &
+                                   ELMxxSetMonthlySai, ELMxxSetMonthlyHtop, &
+                                   ELMxxSetMonthlyHbot
+  use elmxxKokkosStateMod , only : n_kokkos_patch, patch_of_kpatch
   use elmxxSurfdataMod, only : nlevsoi, lsmpft, nmonths, pct_sand, pct_clay, &
                                organic, soil_color, monthly_lai, monthly_sai, &
                                monthly_height_top, monthly_height_bot
@@ -48,9 +53,97 @@ module elmxxSurfaceStateMod
 
   public :: elmxx_surface_state_init
   public :: elmxx_update_phenology
+  public :: elmxx_push_monthly_phenology
+  public :: elmxx_phenology_weights
   public :: elmxx_surface_state_clean
 
 contains
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_phenology_weights(month, day, m1, m2, w1, w2)
+    !
+    ! ELM's monthly interpolation weights. Split out so the host computes only
+    ! these four scalars per step and the device does the interpolation.
+    !
+    implicit none
+    integer , intent(in)  :: month, day
+    integer , intent(out) :: m1, m2       ! 0-BASED, for the device
+    real(r8), intent(out) :: w1, w2
+
+    real(r8) :: t
+    integer  :: it1
+    integer, parameter :: ndaypm(12) = (/ 31, 28, 31, 30, 31, 30, &
+                                          31, 31, 30, 31, 30, 31 /)
+
+    t   = (real(day, r8) - 0.5_r8) / real(ndaypm(month), r8)
+    it1 = int(t + 0.5_r8)
+    m1  = month + it1 - 1
+    m2  = m1 + 1
+    if (m1 < 1)  m1 = 12
+    if (m2 > 12) m2 = 1
+    w1  = (real(it1, r8) + 0.5_r8) - t
+    w2  = 1.0_r8 - w1
+    m1  = m1 - 1
+    m2  = m2 - 1
+
+  end subroutine elmxx_phenology_weights
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_push_monthly_phenology(elm, logunit)
+    !
+    ! One-time push of the monthly LAI/SAI/height fields, resolved per patch
+    ! from (gridcell, PFT). After this the surface dataset never crosses again:
+    ! the device holds all twelve months and interpolates in time itself.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+
+    real(r8), allocatable :: b(:,:)
+    integer , allocatable :: act(:)
+    integer :: kp, p, c, g, pft, mm, ierr, sz(2)
+    character(len=*), parameter :: subname = '(elmxx_push_monthly_phenology) '
+
+    if (n_kokkos_patch <= 0) return
+    allocate(b(n_kokkos_patch, 12), act(n_kokkos_patch))
+    sz(1) = n_kokkos_patch; sz(2) = 12
+
+    ! Which patches phenology touches at all -- the host's skip conditions,
+    ! evaluated once and shipped as a mask rather than re-tested every step.
+    do kp = 1, n_kokkos_patch
+       p = patch_of_kpatch(kp); c = patch_column(p)
+       act(kp) = 1
+       if (lun_itype(col_landunit(c)) /= istsoil) act(kp) = 0
+       if (patch_wtcol(p) <= 0.0_r8)              act(kp) = 0
+       if (patch_itype(p) == 0)                   act(kp) = 0
+    end do
+    call ELMxxSetPhenActive(elm, act, n_kokkos_patch, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: SetPhenActive')
+
+    call fill(monthly_lai);  call ELMxxSetMonthlyLai (elm, b, sz, ierr)
+    call fill(monthly_sai);  call ELMxxSetMonthlySai (elm, b, sz, ierr)
+    call fill(monthly_height_top); call ELMxxSetMonthlyHtop(elm, b, sz, ierr)
+    call fill(monthly_height_bot); call ELMxxSetMonthlyHbot(elm, b, sz, ierr)
+
+    deallocate(b, act)
+
+  contains
+    subroutine fill(src)
+      real(r8), intent(in) :: src(:,:,:)
+      b = 0.0_r8
+      do kp = 1, n_kokkos_patch
+         if (act(kp) == 0) cycle
+         p = patch_of_kpatch(kp); c = patch_column(p)
+         g = lun_gridcell(col_landunit(c))
+         pft = patch_itype(p) + 1
+         do mm = 1, 12
+            b(kp,mm) = src(g,pft,mm)
+         end do
+      end do
+    end subroutine fill
+
+  end subroutine elmxx_push_monthly_phenology
+
 
   !-----------------------------------------------------------------------
   subroutine elmxx_surface_state_init(logunit, month, day)
