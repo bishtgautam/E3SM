@@ -27,7 +27,8 @@ module elmxxRootMod
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_const_mod   , only : SHR_CONST_TKFRZ
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxSubgridMod , only : num_patches, patch_column, patch_itype
+  use elmxxRootKernelMod, only : elmxx_root_stress_kernel
+  use elmxxSubgridMod , only : num_patches, num_columns, patch_column, patch_itype
   use elmxxPftconMod  , only : pftcon_read, npft_param, roota_par, rootb_par, &
                                smpso, smpsc, tc_stress
   use elmxxSoilPropMod, only : soil_prop_built, nlevsoi, nlevgrnd, nlevsno, &
@@ -145,66 +146,50 @@ contains
     implicit none
     integer, intent(in) :: logunit
     logical, intent(in) :: report
-    integer  :: p, c, j, ivt, m
-    real(r8) :: eff_por, liqvol, s_node, smp_node, rresis, tcold
+    integer  :: p, c, j
     real(r8) :: diag_s, diag_smp, diag_smpsc, diag_rresis
-    logical  :: diag_taken
+    real(r8), allocatable :: k_liq(:,:), k_ice(:,:), k_dz(:,:), k_tsoi(:,:)
+    real(r8), allocatable :: k_rresis(:,:)
+    integer , allocatable :: k_pcol(:)
     real(r8), parameter :: denh2o = 1000.0_r8
     real(r8), parameter :: denice =  917.0_r8
     character(len=*), parameter :: subname = '(elmxx_compute_btran) '
 
     if (.not. root_built) call shr_sys_abort(subname//'ERROR: rootfr not built')
 
-    tcold = SHR_CONST_TKFRZ + tc_stress
-    rootr = 0.0_r8
-    btran = 0.0_r8
-    diag_s = 0.0_r8; diag_smp = 0.0_r8; diag_smpsc = 0.0_r8; diag_rresis = 0.0_r8
-    diag_taken = .false.
-
-    do p = 1, num_patches
-       ivt = patch_itype(p)
-       if (ivt == 0) cycle            ! bare ground transpires nothing
-       c = patch_column(p)
-
-       do j = 1, nlevbed
-          m = j + nlevsno             ! packed slot for ELM layer j
-
-          ! ELM floors eff_porosity at 0.01 (HydrologyNoDrainageMod, where the
-          ! array the stress calc reads is actually set) rather than skipping
-          ! the layer. Neither binds without ice, but the floor is what ELM does.
-          eff_por = max(0.01_r8, watsat(c,j) - col_h2osoi_ice(c,m) / (col_dz(c,m)*denice))
-
-          ! ELM does NOT cap the liquid volume at the effective porosity:
-          !   h2osoi_liqvol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o)
-          ! Capping it here silently limits s_node to 1 and so understates the
-          ! matric potential of a near-saturated layer.
-          liqvol = col_h2osoi_liq(c,m) / (col_dz(c,m)*denh2o)
-
-          if (liqvol <= 0.0_r8 .or. col_t_soisno(c,m) <= tcold) cycle
-
-          s_node   = max(liqvol/eff_por, 0.01_r8)
-          smp_node = max(smpsc(ivt), -sucsat(c,j) * s_node**(-bsw(c,j)))
-
-          rresis = min( (eff_por/watsat(c,j)) * (smp_node - smpsc(ivt)) &
-                        / (smpso(ivt) - smpsc(ivt)), 1.0_r8 )
-
-          rootr(p,j) = rootfr(p,j) * rresis
-          btran(p)   = btran(p) + max(rootr(p,j), 0.0_r8)
-
-          if (.not. diag_taken .and. j == 1) then
-             diag_s = s_node; diag_smp = smp_node
-             diag_smpsc = smpsc(ivt); diag_rresis = rresis
-             diag_taken = .true.
-          end if
+    ! Gather into the shapes the kernel takes: ELM soil layers 1..nlevgrnd,
+    ! no snow slots. The packed column arrays carry snow in slots 1..nlevsno.
+    allocate(k_liq(num_columns, nlevgrnd), k_ice(num_columns, nlevgrnd), &
+             k_dz(num_columns, nlevgrnd),  k_tsoi(num_columns, nlevgrnd), &
+             k_rresis(num_patches, nlevgrnd), k_pcol(num_patches))
+    do c = 1, num_columns
+       do j = 1, nlevgrnd
+          k_liq (c,j) = col_h2osoi_liq(c, j + nlevsno)
+          k_ice (c,j) = col_h2osoi_ice(c, j + nlevsno)
+          k_dz  (c,j) = col_dz        (c, j + nlevsno)
+          k_tsoi(c,j) = col_t_soisno  (c, j + nlevsno)
        end do
+    end do
+    do p = 1, num_patches
+       k_pcol(p) = patch_column(p)
+    end do
 
-       ! Normalize so the layers partition the uptake rather than scale it.
-       if (btran(p) > btran0) then
-          rootr(p,1:nlevgrnd) = rootr(p,1:nlevgrnd) / btran(p)
-       else
-          rootr(p,1:nlevgrnd) = 0.0_r8
+    call elmxx_root_stress_kernel(num_patches, num_columns, nlevbed, nlevgrnd, &
+         patch_itype, k_pcol, rootfr, k_liq, k_ice, k_dz, k_tsoi,              &
+         watsat, bsw, sucsat, smpsc, smpso, tc_stress, btran0,                 &
+         denice, denh2o, rootr, btran, k_rresis)
+
+    diag_s = 0.0_r8; diag_smp = 0.0_r8; diag_smpsc = 0.0_r8
+    diag_rresis = 0.0_r8
+    do p = 1, num_patches
+       if (patch_itype(p) /= 0) then
+          diag_rresis = k_rresis(p,1)
+          diag_smpsc  = smpsc(patch_itype(p))
+          exit
        end if
     end do
+
+    deallocate(k_liq, k_ice, k_dz, k_tsoi, k_rresis, k_pcol)
 
     if (report) then
        write(logunit,*) subname,'rank ',iam,' btran over ',num_patches,' patches: ', &
