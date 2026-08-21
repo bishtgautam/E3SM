@@ -154,6 +154,11 @@ def main():
         anchor = ANCHOR[var]
         first_bad, worst, worst_ts = None, 0.0, None
         seen = 0
+        # A variable that is identically zero in BOTH models over every
+        # compared entity is not agreement, it is an empty comparison. On a
+        # tropical site every snow field is like this, and reporting them as
+        # "never diverges" overstates what the trace covers.
+        nonzero = False
         for ts in shared:
             prefix = "elmxx_out" if var in END_OF_STEP else "elmxx_in"
             a = xx[ts].get(f"{prefix}:{var}")
@@ -179,7 +184,11 @@ def main():
             else:
                 a2 = a
             seen += 1
-            e = relerr(np.asarray(a2, float), np.asarray(bb, float))
+            aa = np.asarray(a2, float)
+            bb = np.asarray(bb, float)
+            if np.nanmax(np.abs(aa)) > 0.0 or np.nanmax(np.abs(bb)) > 0.0:
+                nonzero = True
+            e = relerr(aa, bb)
             m = float(np.nanmax(e))
             if m > worst:
                 worst, worst_ts = m, ts
@@ -187,6 +196,8 @@ def main():
                 first_bad = ts
         if seen == 0:
             rows.append((var, anchor, "-", "no overlap", "-"))
+        elif not nonzero:
+            rows.append((var, anchor, "VACUOUS", "both all-zero", "-"))
         else:
             rows.append((var, anchor, str(first_bad) if first_bad else "never",
                          f"{worst:.3e}", str(worst_ts)))
@@ -197,7 +208,12 @@ def main():
     for var, anchor, fb, worst, wts in rows:
         print(f"{var:<{w}} {anchor:<26} {fb:>10} {worst:>12} {wts:>6}")
 
-    bad = [r for r in rows if r[2] not in ("never", "-")]
+    vac = [r for r in rows if r[2] == "VACUOUS"]
+    if vac:
+        print(f"\n{len(vac)} of {len(rows)} variables are VACUOUS on this case -- "
+              f"identically zero in both models, so they grade nothing:")
+        print("   " + ", ".join(r[0] for r in vac))
+    bad = [r for r in rows if r[2] not in ("never", "-", "VACUOUS")]
     print()
     if bad:
         earliest = min(int(r[2]) for r in bad)
