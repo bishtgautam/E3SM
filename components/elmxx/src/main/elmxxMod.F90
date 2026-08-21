@@ -826,8 +826,10 @@ contains
        ! Read the wetted soil column back, so next step's Fortran-side btran
        ! sees what the hydrology kernels just did rather than the cold start.
        if (soil_kernel_built) then
-          call elmxx_soil_kernel_pull(elmxx_state, logunit, &
-               nstep == 1 .or. mod(nstep, 24) == 0)
+          ! soil_kernel_pull is gone. Its only per-step consumer was the
+          ! Fortran btran, which now runs on the device; the host-side
+          ! col_h2osoi_* arrays are used at INIT for seeding and nowhere else,
+          ! so nothing needs the soil column brought back every step.
        end if
 
        ! SURFACE ALBEDO RUNS HERE, AT THE END OF THE STEP, BECAUSE ELM RUNS IT
