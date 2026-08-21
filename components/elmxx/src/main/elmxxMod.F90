@@ -42,6 +42,7 @@ module elmxxMod
                                       ELMxxComputeGroundHeatFluxNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
+                                      ELMxxComputeForcingDerivedNatural, &
                                       ELMxxComputePhotosynForcingNatural, &
                                       ELMxxComputePhenologyNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
@@ -52,7 +53,7 @@ module elmxxMod
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
                                     photosyn_built, &
                                     elmxx_push_photosyn_statics, t10_period
-  use elmxxSurfaceAlbedoMod, only : elmxx_push_coszen, &
+  use elmxxSurfaceAlbedoMod, only : &
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
                                       elmxx_soil_kernel_clean, soil_kernel_built
@@ -77,6 +78,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_stomata_closed, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
+                                      elmxx_kokkos_push_latlon, &
                                       elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
@@ -731,7 +733,8 @@ contains
     ! change while the kernels are off.
     !-----------------------------------------------------------------------
     if (kokkos_state_built) then
-       call elmxx_kokkos_push_forcing(elmxx_state, logunit)
+       call elmxx_kokkos_push_forcing(elmxx_state, nextsw_cday, declinp1, &
+            cell_lat, cell_lon, logunit)
     end if
 
     !-----------------------------------------------------------------------
@@ -875,8 +878,10 @@ contains
        end if
 
        if (do_albedo_this_step) then
-          call elmxx_push_coszen(elmxx_state, nextsw_cday, declinp1, &
-               cell_lat, cell_lon, logunit)
+          ! coszen already came from elmxx_kokkos_push_forcing, which derived
+          ! it on the device from these same two scalars at the top of the
+          ! step. SurfaceAlbedo is the only reader, so deriving it earlier in
+          ! the step changes no value.
           call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
                call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoNatural failed')
@@ -934,8 +939,12 @@ contains
     ! Uses the same device kernel as the run loop -- the Fortran path read a
     ! soil moisture that is never updated (H11), so it has no business
     ! setting the initial albedo either.
-    call elmxx_push_coszen(elmxx_state, nextsw_cday, declinp1, &
-         cell_lat, cell_lon, logunit)
+    ! Zenith only: this runs before the first forcing push, so air density
+    ! has nothing to be derived from yet and the flag skips it.
+    call elmxx_kokkos_push_latlon(elmxx_state, cell_lat, cell_lon, logunit)
+    call ELMxxComputeForcingDerivedNatural(elmxx_state, nextsw_cday, declinp1, 0, ierr_ia)
+    if (ierr_ia /= ELMXX_SUCCESS) &
+         call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeForcingDerivedNatural failed')
     call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_ia)
     if (ierr_ia /= ELMXX_SUCCESS) &
          call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoNatural failed')
