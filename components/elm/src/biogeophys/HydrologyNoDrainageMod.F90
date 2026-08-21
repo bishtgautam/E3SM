@@ -524,6 +524,23 @@ contains
            call diag_snapshot_1d('soilwater_in:zwt', &
                 soilhydrology_vars%zwt_col(bounds%begc:bounds%endc), &
                 bounds%endc-bounds%begc+1)
+           ! Vertical grid, soil-only. CLM's node depths are not the midpoints
+           ! of dz -- both come from the same exponential formula -- so a
+           ! replay cannot derive z from dz and needs it recorded.
+           call diag_snapshot_2d('soilwater_in:dz', &
+                col_pp%dz(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_2d('soilwater_in:zc', &
+                col_pp%z(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_2d('soilwater_in:zi', &
+                col_pp%zi(bounds%begc:bounds%endc, 0:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd+1)
+           call diag_snapshot_2d('soilwater_in:eff_porosity', &
+                soilstate_vars%eff_porosity_col(bounds%begc:bounds%endc, 1:nlevgrnd), &
+                bounds%endc-bounds%begc+1, nlevgrnd)
+           call diag_snapshot_int_1d('soilwater_in:nlevbed', &
+                col_pp%nlevbed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
         end if
 
         call SoilWater(bounds, num_hydrologyc, filter_hydrologyc, num_urbanc, filter_urbanc, &
