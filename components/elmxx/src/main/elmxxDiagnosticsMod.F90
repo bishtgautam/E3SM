@@ -38,7 +38,8 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxTopSoilCol, ELMxxGetFsat,            &
                            ELMxxGetFcov, ELMxxGetZwt, ELMxxGetWtfact,       &
                            ELMxxGetEffPorosity, ELMxxGetAlbgrd,             &
-                           ELMxxGetAlbgri, ELMxxGetAlbsod, ELMxxGetAlbd
+                           ELMxxGetAlbgri, ELMxxGetAlbsod, ELMxxGetAlbd,     &
+                           ELMxxGetElai
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
@@ -333,10 +334,10 @@ contains
          real(r8), allocatable :: pl(:)
          integer :: kp
          allocate(pl(n_kokkos_patch))
-         do kp = 1, n_kokkos_patch
-            pl(kp) = patch_lai(patch_of_kpatch(kp))
-         end do
-         call elmxx_diag_1d(tag//':elai', pl, n_kokkos_patch)
+         ! Read the DEVICE elai, not the Fortran patch_lai -- phenology now
+         ! interpolates on the device and patch_lai is no longer maintained.
+         call ELMxxGetElai(elm, pl, n_kokkos_patch, ierr)
+         if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':elai', pl, n_kokkos_patch)
          do kp = 1, n_kokkos_patch
             pl(kp) = patch_sai(patch_of_kpatch(kp))
          end do
