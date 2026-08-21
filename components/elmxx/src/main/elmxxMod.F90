@@ -16,6 +16,7 @@ module elmxxMod
   !-----------------------------------------------------------------------
 
   use shr_kind_mod , only : r8 => shr_kind_r8
+  use shr_const_mod          , only : SHR_CONST_STEBOL
   use shr_sys_mod  , only : shr_sys_abort, shr_sys_flush
   use shr_file_mod , only : shr_file_getunit, shr_file_freeunit
   use shr_nl_mod   , only : shr_nl_find_group_name
@@ -36,7 +37,9 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS, &
-                                      ELMxxComputeRootStressNatural
+                                      ELMxxComputeRootStressNatural, &
+                                      ELMxxComputeGroundHeatFluxNatural, &
+                                      ELMxxSetGroundHeatFluxSb
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
@@ -163,6 +166,7 @@ module elmxxMod
   ! the first coupling call.
   integer, private :: nstep = -1
   logical, private :: root_statics_pushed = .false.
+  logical, private :: ghf_sb_pushed = .false.
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -803,8 +807,16 @@ contains
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 1)
 
        if (soil_kernel_built) then
-          call elmxx_soil_kernel_push(elmxx_state, logunit, &
-               nstep == 1 .or. mod(nstep, 24) == 0)
+          ! Ground surface energy balance and the three quantities that used
+          ! to be pushed with it now run on the device. This deletes the
+          ! soil_kernel_push crossing.
+          if (.not. ghf_sb_pushed) then
+             call ELMxxSetGroundHeatFluxSb(elmxx_state, SHR_CONST_STEBOL, ierr_rs)
+             ghf_sb_pushed = .true.
+          end if
+          call ELMxxComputeGroundHeatFluxNatural(elmxx_state, ierr_rs)
+          if (ierr_rs /= ELMXX_SUCCESS) &
+               call shr_sys_abort('(elmxx_run) ERROR: ComputeGroundHeatFluxNatural failed')
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
