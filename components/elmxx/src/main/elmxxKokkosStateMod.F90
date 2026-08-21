@@ -50,7 +50,8 @@ module elmxxKokkosStateMod
                                col_itype, patch_column, patch_itype, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
-                                    patch_height_top
+                                    patch_height_top, &
+                               col_soil_color
   use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
   use elmxxRootMod    , only : rt_btran => btran, rt_rootr => rootr, &
@@ -62,7 +63,9 @@ module elmxxKokkosStateMod
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
   use elmxxPftconMod  , only : z0mr, displar, dleaf, npft_param, pftcon_read, &
                                pft_smpsc => smpsc, pft_smpso => smpso, &
-                               pft_tc_stress => tc_stress
+                               pft_tc_stress => tc_stress, &
+                               pft_rhol => rhol, pft_rhos => rhos, &
+                               pft_taul => taul, pft_taus => taus, pft_xl => xl
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl, &
@@ -73,6 +76,9 @@ module elmxxKokkosStateMod
                                ELMxxSetRootrPatch, ELMxxSetRootfr, &
                                ELMxxSetSmpsc, ELMxxSetSmpso, &
                                ELMxxSetRootStressTcStress, &
+                               ELMxxSetSoilColor, ELMxxSetRhol, ELMxxSetRhos, &
+                               ELMxxSetCoszen, &
+                               ELMxxSetTaul, ELMxxSetTaus, ELMxxSetXl, &
                                ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
                                ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
                                ELMxxSetForcUCol, ELMxxSetForcVCol, &
@@ -899,6 +905,54 @@ contains
 
     call ELMxxSetRootStressTcStress(elm, pft_tc_stress, ierr)
     call check(ierr, subname, 'TcStress')
+
+    ! SurfaceAlbedo statics: soil colour, and the leaf/stem optics resolved per
+    ! patch from the PFT so the device carries no PFT-indexed table.
+    block
+      real(r8), allocatable :: o2(:,:), o1(:)
+      integer , allocatable :: ic(:)
+      integer :: kc2, ib, szo(2)
+      allocate(o2(n_kokkos_patch, 2), o1(n_kokkos_patch), ic(n_kokkos_col))
+      do kc2 = 1, n_kokkos_col
+         ic(kc2) = col_soil_color(col_of_kcol(kc2))
+      end do
+      call ELMxxSetSoilColor(elm, ic, n_kokkos_col, ierr)
+      call check(ierr, subname, 'SoilColor')
+      szo(1) = n_kokkos_patch; szo(2) = 2
+      do kp = 1, n_kokkos_patch
+         ivt = patch_itype(patch_of_kpatch(kp))
+         do ib = 1, 2
+            o2(kp,ib) = pft_rhol(ivt,ib)
+         end do
+      end do
+      call ELMxxSetRhol(elm, o2, szo, ierr); call check(ierr, subname, 'Rhol')
+      do kp = 1, n_kokkos_patch
+         ivt = patch_itype(patch_of_kpatch(kp))
+         do ib = 1, 2
+            o2(kp,ib) = pft_rhos(ivt,ib)
+         end do
+      end do
+      call ELMxxSetRhos(elm, o2, szo, ierr); call check(ierr, subname, 'Rhos')
+      do kp = 1, n_kokkos_patch
+         ivt = patch_itype(patch_of_kpatch(kp))
+         do ib = 1, 2
+            o2(kp,ib) = pft_taul(ivt,ib)
+         end do
+      end do
+      call ELMxxSetTaul(elm, o2, szo, ierr); call check(ierr, subname, 'Taul')
+      do kp = 1, n_kokkos_patch
+         ivt = patch_itype(patch_of_kpatch(kp))
+         do ib = 1, 2
+            o2(kp,ib) = pft_taus(ivt,ib)
+         end do
+      end do
+      call ELMxxSetTaus(elm, o2, szo, ierr); call check(ierr, subname, 'Taus')
+      do kp = 1, n_kokkos_patch
+         o1(kp) = pft_xl(patch_itype(patch_of_kpatch(kp)))
+      end do
+      call ELMxxSetXl(elm, o1, n_kokkos_patch, ierr); call check(ierr, subname, 'Xl')
+      deallocate(o2, o1, ic)
+    end block
 
     deallocate(b2, b1)
 

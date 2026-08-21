@@ -39,7 +39,8 @@ module elmxxMod
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS, &
                                       ELMxxComputeRootStressNatural, &
                                       ELMxxComputeGroundHeatFluxNatural, &
-                                      ELMxxSetGroundHeatFluxSb
+                                      ELMxxSetGroundHeatFluxSb, &
+                                      ELMxxComputeSurfaceAlbedoNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
@@ -47,7 +48,7 @@ module elmxxMod
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
                                     elmxx_photosyn_update, photosyn_built
-  use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, &
+  use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, elmxx_push_coszen, &
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
                                       elmxx_soil_kernel_push, &
@@ -852,6 +853,8 @@ contains
        end if
 
        if (do_albedo_this_step) then
+          ! NOTE: ComputeSurfaceAlbedoNatural (C++) exists and builds, but is
+          ! NOT wired in -- it does not yet reproduce this path. See H10.
           call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
                cell_lat, cell_lon, logunit)
           if (nstep == 1 .or. mod(nstep, 24) == 0) then
