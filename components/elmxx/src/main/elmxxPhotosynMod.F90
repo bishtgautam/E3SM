@@ -40,6 +40,7 @@ module elmxxPhotosynMod
   use elmxxKokkosStateMod , only : n_kokkos_patch, patch_of_kpatch, &
                                    kokkos_state_built
   use elmxx_mod           , only : ELMxxType, ELMXX_SUCCESS, &
+                                   ELMxxSetLatRad, ELMxxSetMaxDayl, &
                                    ELMxxSetPhotoUniform, ELMxxSetPhotoPftParams, &
                                    ELMxxSetUsePhotosynthesis, &
                                    ELMxxSetDaylFactor, ELMxxSetT10, &
@@ -65,15 +66,51 @@ module elmxxPhotosynMod
   real(r8), allocatable :: lat_rad(:)    ! per gridcell [radians]
   real(r8), allocatable :: max_dayl(:)   ! per gridcell [s]
   real(r8), allocatable :: t10(:)        ! per packed patch [K]
-  integer               :: t10_period = 0 ! running-mean period [steps]
+  integer, public       :: t10_period = 0 ! running-mean period [steps]
 
   logical, public :: photosyn_built = .false.
 
+  public :: elmxx_push_photosyn_statics
   public :: elmxx_photosyn_init
   public :: elmxx_photosyn_seed
   public :: elmxx_photosyn_update
 
 contains
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_push_photosyn_statics(elm, logunit)
+    !
+    ! One-time push of the gridcell statics the device kernel needs: latitude
+    ! in radians and the maximum daylength, resolved per patch.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    real(r8), allocatable :: b(:)
+    integer :: kp, p, c, g, ierr
+    character(len=*), parameter :: subname = '(elmxx_push_photosyn_statics) '
+
+    if (.not. photosyn_built) return
+    if (n_kokkos_patch <= 0) return
+    allocate(b(n_kokkos_patch))
+    do kp = 1, n_kokkos_patch
+       p = patch_of_kpatch(kp); c = patch_column(p)
+       g = lun_gridcell(col_landunit(c))
+       b(kp) = lat_rad(g)
+    end do
+    call ELMxxSetLatRad(elm, b, n_kokkos_patch, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: SetLatRad')
+    do kp = 1, n_kokkos_patch
+       p = patch_of_kpatch(kp); c = patch_column(p)
+       g = lun_gridcell(col_landunit(c))
+       b(kp) = max_dayl(g)
+    end do
+    call ELMxxSetMaxDayl(elm, b, n_kokkos_patch, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: SetMaxDayl')
+    deallocate(b)
+
+  end subroutine elmxx_push_photosyn_statics
+
 
   !-----------------------------------------------------------------------
   pure function daylength(lat, decl) result(dayl)
