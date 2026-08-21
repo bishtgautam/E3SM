@@ -53,13 +53,16 @@ module elmxxKokkosStateMod
                                     patch_height_top
   use elmxxSurfdataMod, only : topo_std, topo_slope
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
-  use elmxxRootMod    , only : rt_btran => btran, rt_rootr => rootr
+  use elmxxRootMod    , only : rt_btran => btran, rt_rootr => rootr, &
+                               rt_rootfr => rootfr, root_built
   use elmxxSoilPropMod, only : soil_prop_built, nlevgrnd, nlevtot, &
                                sp_watsat => watsat, sp_bsw => bsw, &
                                sp_sucsat => sucsat, sp_watfc => watfc, &
                                sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
-  use elmxxPftconMod  , only : z0mr, displar, dleaf, npft_param, pftcon_read
+  use elmxxPftconMod  , only : z0mr, displar, dleaf, npft_param, pftcon_read, &
+                               pft_smpsc => smpsc, pft_smpso => smpso, &
+                               pft_tc_stress => tc_stress
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl, &
@@ -67,7 +70,9 @@ module elmxxKokkosStateMod
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxSetPatchColumn, &
                                ELMxxSetElai, ELMxxSetEsai, ELMxxSetHtop, &
-                               ELMxxSetRootrPatch, &
+                               ELMxxSetRootrPatch, ELMxxSetRootfr, &
+                               ELMxxSetSmpsc, ELMxxSetSmpso, &
+                               ELMxxSetRootStressTcStress, &
                                ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
                                ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
                                ELMxxSetForcUCol, ELMxxSetForcVCol, &
@@ -145,6 +150,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_btran
   public :: elmxx_kokkos_push_phenology
+  public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -850,6 +856,59 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine elmxx_kokkos_seed_canopy_hydrology
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_root_statics(elm, logunit)
+    !
+    ! One-time push of what the C++ root water stress kernel needs and cannot
+    ! derive: the root fraction profile, and the per-PFT closure and opening
+    ! thresholds resolved per patch so the device needs no PFT-indexed table.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+
+    real(r8), allocatable :: b2(:,:), b1(:)
+    integer :: kp, jj, ierr, sz2(2), ivt
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_root_statics) '
+
+    if (.not. kokkos_state_built .or. n_kokkos_patch <= 0) return
+    if (.not. root_built) return
+
+    allocate(b2(n_kokkos_patch, nlevgrnd), b1(n_kokkos_patch))
+
+    do kp = 1, n_kokkos_patch
+       do jj = 1, nlevgrnd
+          b2(kp,jj) = rt_rootfr(patch_of_kpatch(kp), jj)
+       end do
+    end do
+    sz2(1) = n_kokkos_patch; sz2(2) = nlevgrnd
+    call ELMxxSetRootfr(elm, b2, sz2, ierr); call check(ierr, subname, 'Rootfr')
+
+    do kp = 1, n_kokkos_patch
+       ivt = patch_itype(patch_of_kpatch(kp))
+       b1(kp) = pft_smpsc(ivt)
+    end do
+    call ELMxxSetSmpsc(elm, b1, n_kokkos_patch, ierr); call check(ierr, subname, 'Smpsc')
+
+    do kp = 1, n_kokkos_patch
+       ivt = patch_itype(patch_of_kpatch(kp))
+       b1(kp) = pft_smpso(ivt)
+    end do
+    call ELMxxSetSmpso(elm, b1, n_kokkos_patch, ierr); call check(ierr, subname, 'Smpso')
+
+    call ELMxxSetRootStressTcStress(elm, pft_tc_stress, ierr)
+    call check(ierr, subname, 'TcStress')
+
+    deallocate(b2, b1)
+
+    if (masterproc) then
+       write(logunit,*) subname,'pushed rootfr/smpsc/smpso/tc_stress for ', &
+                        n_kokkos_patch,' patches'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_kokkos_push_root_statics
 
   !-----------------------------------------------------------------------
   subroutine elmxx_kokkos_push_phenology(elm, logunit)

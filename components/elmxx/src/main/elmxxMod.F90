@@ -35,7 +35,8 @@ module elmxxMod
   use elmxxInitCheckMod   , only : elmxx_write_init_snapshot
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
-  use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS
+  use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS, &
+                                      ELMxxComputeRootStressNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
@@ -72,6 +73,7 @@ module elmxxMod
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_btran, &
                                       elmxx_kokkos_push_phenology, &
+                                      elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -160,6 +162,7 @@ module elmxxMod
   ! lnd_run_mct loops until the clock syncs and so runs nstep 0 AND 1 on
   ! the first coupling call.
   integer, private :: nstep = -1
+  logical, private :: root_statics_pushed = .false.
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -681,6 +684,7 @@ contains
 
     logical :: do_albedo_this_step
     logical :: doalb_in            ! the driver's doalb, independent of config
+    integer :: ierr_rs
 
     doalb_in = .true.
     if (present(doalb)) doalb_in = doalb
@@ -727,8 +731,17 @@ contains
     ! moment hydrology starts evolving the soil column.
     !-----------------------------------------------------------------------
     if (root_built) then
-       call elmxx_compute_btran(logunit, nstep == 1 .or. mod(nstep, 48) == 0)
-       call elmxx_kokkos_push_btran(elmxx_state, logunit)
+       ! Root water stress now runs on the device. The statics it needs are
+       ! pushed once; nothing crosses per step. This deletes the push_btran
+       ! crossing -- the one that silently dropped rootr and cost a month of
+       ! water.
+       if (.not. root_statics_pushed) then
+          call elmxx_kokkos_push_root_statics(elmxx_state, logunit)
+          root_statics_pushed = .true.
+       end if
+       call ELMxxComputeRootStressNatural(elmxx_state, ierr_rs)
+       if (ierr_rs /= ELMXX_SUCCESS) &
+            call shr_sys_abort('(elmxx_run) ERROR: ComputeRootStressNatural failed')
     end if
 
     !-----------------------------------------------------------------------
