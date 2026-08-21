@@ -31,7 +31,7 @@ module elmxxMod
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
-                                   elmxx_update_phenology, elmxx_surface_state_clean, &
+                                   elmxx_surface_state_clean, &
                                    elmxx_push_monthly_phenology, elmxx_phenology_weights
   use elmxxFilterMod      , only : elmxx_build_filters, elmxx_filters_clean
   use elmxxInitCheckMod   , only : elmxx_write_init_snapshot
@@ -47,17 +47,15 @@ module elmxxMod
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
-  use elmxxRootMod           , only : elmxx_root_init, elmxx_compute_btran, &
+  use elmxxRootMod           , only : elmxx_root_init, &
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
-                                    elmxx_photosyn_update, photosyn_built, &
+                                    photosyn_built, &
                                     elmxx_push_photosyn_statics, t10_period
-  use elmxxSurfaceAlbedoMod, only : elmxx_surface_albedo, elmxx_push_coszen, &
+  use elmxxSurfaceAlbedoMod, only : elmxx_push_coszen, &
                                       elmxx_surface_albedo_report
   use elmxxSoilKernelMod   , only : elmxx_soil_kernel_init, &
-                                      elmxx_soil_kernel_push, &
-                                      elmxx_soil_kernel_clean, soil_kernel_built, &
-                                      elmxx_soil_kernel_pull
+                                      elmxx_soil_kernel_clean, soil_kernel_built
   use elmxxDiagnosticsMod , only : elmxx_diag_init, elmxx_diag_finalize,   &
                                    elmxx_diag_new_timestep,                &
                                    elmxx_diag_snapshot_state,              &
@@ -79,8 +77,6 @@ module elmxxMod
                                       elmxx_kokkos_seed_stomata_closed, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
-                                      elmxx_kokkos_push_btran, &
-                                      elmxx_kokkos_push_phenology, &
                                       elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
@@ -930,12 +926,19 @@ contains
     implicit none
     integer , intent(in) :: logunit
     real(r8), intent(in) :: nextsw_cday, declinp1
+    integer :: ierr_ia
 
     if (.not. kokkos_state_built) return
     if (.not. elmxx_do_albedo) return
 
-    call elmxx_surface_albedo(elmxx_state, nextsw_cday, declinp1, &
+    ! Uses the same device kernel as the run loop -- the Fortran path read a
+    ! soil moisture that is never updated (H11), so it has no business
+    ! setting the initial albedo either.
+    call elmxx_push_coszen(elmxx_state, nextsw_cday, declinp1, &
          cell_lat, cell_lon, logunit)
+    call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_ia)
+    if (ierr_ia /= ELMXX_SUCCESS) &
+         call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoNatural failed')
     if (masterproc) then
        write(logunit,*) 'ELMxx: initial SurfaceAlbedo pass complete'
        call shr_sys_flush(logunit)
