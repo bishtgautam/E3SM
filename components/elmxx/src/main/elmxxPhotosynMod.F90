@@ -73,7 +73,6 @@ module elmxxPhotosynMod
   public :: elmxx_push_photosyn_statics
   public :: elmxx_photosyn_init
   public :: elmxx_photosyn_seed
-  public :: elmxx_photosyn_update
 
 contains
 
@@ -226,103 +225,6 @@ contains
     end if
   end subroutine elmxx_photosyn_seed
 
-  !-----------------------------------------------------------------------
-  subroutine elmxx_photosyn_update(elm, nstep, declin, co2_ppmv, logunit, report)
-    !
-    ! Per-step inputs. Call BEFORE the canopy kernels run.
-    !
-    implicit none
-    type(ELMxxType), intent(in) :: elm
-    integer , intent(in) :: nstep
-    real(r8), intent(in) :: declin        ! solar declination [radians]
-    real(r8), intent(in) :: co2_ppmv      ! atmospheric CO2 [ppmv]
-    integer , intent(in) :: logunit
-    logical , intent(in) :: report
-
-    integer  :: kp, p, c, g, ierr, accper
-    real(r8) :: dayl
-    real(r8), allocatable :: daylf(:), oair(:), cair(:), tref(:)
-    character(len=*), parameter :: subname = '(elmxx_photosyn_update) '
-
-    if (.not. photosyn_built) call shr_sys_abort(subname//'ERROR: not initialised')
-    ! vcmaxcint comes from SurfaceAlbedo, which runs at the END of the step,
-    ! so on step one it does not exist yet. Zero there is one step without
-    ! photosynthesis, not an error; after that it must be present, and its
-    ! absence then means elmxx_do_albedo is off, which is a misconfiguration.
-    if (nstep > 1 .and. .not. allocated(patch_vcmaxcintsun)) then
-       call shr_sys_abort(subname//'ERROR: vcmaxcint is not available; '// &
-            'elmxx_do_albedo must be on -- SurfaceAlbedo is what computes it')
-    end if
-
-    allocate(daylf(n_kokkos_patch), oair(n_kokkos_patch), &
-             cair(n_kokkos_patch), tref(n_kokkos_patch))
-
-    ! 2 m temperature back from the Kokkos side, for the running mean.
-    call ELMxxGetTRef2m(elm, tref, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'TRef2m')
-
-    ! ELM's accumulMod 'runmean', reproduced exactly:
-    !     accper = min(nstep, period)
-    !     val    = ((accper-1)*val + field) / accper
-    ! It is a spin-up mean, not an exponential filter: for the first period
-    ! steps it is the true running average of everything so far, and only
-    ! afterwards does it become a fixed-weight filter. Getting that wrong
-    ! would bias vcmax for the first ten model days.
-    !
-    ! NOTE, and it is a real limitation: ELMxx has no restart, so t10 restarts
-    ! from TKFRZ+20 every run and the first ten days are a spin-up. ELM carries
-    ! its accumulator through a restart.
-    accper = min(max(nstep, 1), t10_period)
-    do kp = 1, n_kokkos_patch
-       t10(kp) = ((real(accper,r8) - 1.0_r8) * t10(kp) + tref(kp)) / real(accper,r8)
-    end do
-
-    do kp = 1, n_kokkos_patch
-       p = patch_of_kpatch(kp)
-       c = patch_column(p)
-       g = lun_gridcell(col_landunit(c))
-
-       dayl = daylength(lat_rad(g), declin)
-       ! ELM CanopyFluxesMod:549
-       daylf(kp) = min(1.0_r8, max(0.01_r8, (dayl*dayl)/(max_dayl(g)*max_dayl(g))))
-
-       ! lnd_import_export.F90:1283 and :1360
-       oair(kp) = o2_molar_const * forc_pbot(g)
-       cair(kp) = co2_ppmv * 1.0e-6_r8 * forc_pbot(g)
-    end do
-
-    call ELMxxSetDaylFactor(elm, daylf, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'DaylFactor')
-    call ELMxxSetT10(elm, t10, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'T10')
-    call ELMxxSetOair(elm, oair, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'Oair')
-    call ELMxxSetCair(elm, cair, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'Cair')
-    if (allocated(patch_vcmaxcintsun)) then
-       call ELMxxSetVcmaxcintSun(elm, patch_vcmaxcintsun, n_kokkos_patch, ierr)
-       call check(ierr, subname, 'VcmaxcintSun')
-       call ELMxxSetVcmaxcintSha(elm, patch_vcmaxcintsha, n_kokkos_patch, ierr)
-       call check(ierr, subname, 'VcmaxcintSha')
-    end if
-
-    if (report) then
-       write(logunit,*) subname,'rank ',iam,' photosynthesis inputs:'
-       write(logunit,*) '    dayl_factor [-]   ',minval(daylf),' .. ',maxval(daylf)
-       write(logunit,*) '    t10         [K]   ',minval(t10)  ,' .. ',maxval(t10)
-       write(logunit,*) '    oair        [Pa]  ',minval(oair) ,' .. ',maxval(oair)
-       write(logunit,*) '    cair        [Pa]  ',minval(cair) ,' .. ',maxval(cair)
-       if (allocated(patch_vcmaxcintsun)) then
-          write(logunit,*) '    vcmaxcintsun[-]   ',minval(patch_vcmaxcintsun), &
-               ' .. ',maxval(patch_vcmaxcintsun)
-       else
-          write(logunit,*) '    vcmaxcintsun[-]   not yet available (step 1)'
-       end if
-       call shr_sys_flush(logunit)
-    end if
-
-    deallocate(daylf, oair, cair, tref)
-  end subroutine elmxx_photosyn_update
 
   !-----------------------------------------------------------------------
   subroutine check(ierr, subname, what)

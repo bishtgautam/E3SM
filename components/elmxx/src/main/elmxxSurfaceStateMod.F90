@@ -52,7 +52,6 @@ module elmxxSurfaceStateMod
   integer, private :: phenology_month = -1
 
   public :: elmxx_surface_state_init
-  public :: elmxx_update_phenology
   public :: elmxx_push_monthly_phenology
   public :: elmxx_phenology_weights
   public :: elmxx_surface_state_clean
@@ -195,87 +194,6 @@ contains
 
   end subroutine elmxx_surface_state_init
 
-  !-----------------------------------------------------------------------
-  subroutine elmxx_update_phenology(logunit, month, day)
-    !
-    ! Apply ELM's SatellitePhenologyMod monthly interpolation convention.
-    ! `day` is the date at the end of the coupling step, matching ELM's
-    ! get_curr_date(offset=dtime) call.  ELM deliberately uses a fixed
-    ! no-leap month-length table here, so this routine does too.
-    !
-    implicit none
-    integer, intent(in) :: logunit, month, day
-    integer :: p, c, g, pft, first_month, second_month, it1
-    integer, parameter :: ndaypm(12) = (/ 31, 28, 31, 30, 31, 30, &
-                                         31, 31, 30, 31, 30, 31 /)
-    real(r8) :: t, wt_first, wt_second
-
-    if (.not. surface_state_built) then
-       call shr_sys_abort('(elmxx_update_phenology) ERROR: surface state is not initialized')
-    end if
-    if (month < 1 .or. month > nmonths .or. day < 1 .or. day > ndaypm(month)) then
-       call shr_sys_abort('(elmxx_update_phenology) ERROR: invalid calendar date')
-    end if
-    if (nmonths /= 12) then
-       call shr_sys_abort('(elmxx_update_phenology) ERROR: satellite phenology requires 12 months')
-    end if
-
-    ! These statements mirror SatellitePhenologyMod::interpMonthlyVeg.
-    t = (real(day, r8) - 0.5_r8) / real(ndaypm(month), r8)
-    it1 = int(t + 0.5_r8)
-    first_month  = month + it1 - 1
-    second_month = first_month + 1
-    if (first_month < 1) first_month = 12
-    if (second_month > 12) second_month = 1
-    wt_first  = (real(it1, r8) + 0.5_r8) - t
-    wt_second = 1.0_r8 - wt_first
-
-    patch_lai        = 0.0_r8
-    patch_sai        = 0.0_r8
-    patch_height_top = 0.0_r8
-    patch_height_bot = 0.0_r8
-
-    do p = 1, num_patches
-       c = patch_column(p)
-       if (lun_itype(col_landunit(c)) /= istsoil) cycle
-
-       ! ELM's vegetation filter excludes zero-area natural PFTs.  Retain
-       ! their topology for structural parity, but leave their dynamic state
-       ! zero so the materialized state agrees with ELM's active patch set.
-       if (patch_wtcol(p) <= 0.0_r8) cycle
-
-       ! ELM's `noveg` PFT has index zero and receives zero values rather
-       ! than values from the monthly stream.  Its 1-based counterpart here
-       ! is therefore one.
-       if (patch_itype(p) == 0) cycle
-       pft = patch_itype(p) + 1
-       if (pft < 1 .or. pft > lsmpft) then
-          call shr_sys_abort('(elmxx_update_phenology) ERROR: natural PFT is outside MONTHLY_*')
-       end if
-
-       g = lun_gridcell(col_landunit(c))
-       patch_lai(p) = wt_first * monthly_lai(g,pft,first_month) + &
-                      wt_second * monthly_lai(g,pft,second_month)
-       patch_sai(p) = wt_first * monthly_sai(g,pft,first_month) + &
-                      wt_second * monthly_sai(g,pft,second_month)
-       patch_height_top(p) = wt_first * monthly_height_top(g,pft,first_month) + &
-                             wt_second * monthly_height_top(g,pft,second_month)
-       patch_height_bot(p) = wt_first * monthly_height_bot(g,pft,first_month) + &
-                             wt_second * monthly_height_bot(g,pft,second_month)
-    end do
-
-    ! Report only when a new monthly pair is selected.  The values are updated
-    ! every coupling step, but logging every 30-minute interpolation obscures
-    ! useful initialization diagnostics in multi-year runs.
-    if (masterproc .and. first_month /= phenology_month) then
-       write(logunit,*) '(elmxx_phenology) date month/day ',month,day, &
-                        ' interpolates months ',first_month,second_month, &
-                        ' weights ',wt_first,wt_second
-       call shr_sys_flush(logunit)
-    end if
-    phenology_month = first_month
-
-  end subroutine elmxx_update_phenology
 
   !-----------------------------------------------------------------------
   subroutine elmxx_surface_state_clean()

@@ -49,7 +49,6 @@ module elmxxRootMod
   real(r8), parameter, public :: btran0 = 0.0_r8
 
   public :: elmxx_root_init
-  public :: elmxx_compute_btran
   public :: elmxx_root_clean
 
 contains
@@ -126,89 +125,6 @@ contains
 
   end subroutine elmxx_root_init
 
-  !-----------------------------------------------------------------------
-  subroutine elmxx_compute_btran(logunit, report)
-    !
-    ! ELM SoilMoistStressMod calc_root_moist_stress_clm45default.
-    !
-    ! Per layer, where there is liquid water and the soil is not too cold:
-    !   eff_porosity = watsat - h2osoi_ice/(dz*denice)
-    !   liqvol       = h2osoi_liq/(dz*denh2o), capped at eff_porosity
-    !   s_node       = max(liqvol/eff_porosity, 0.01)
-    !   smp_node     = max(smpsc, -sucsat*s_node**(-bsw))
-    !   rresis       = min( (eff_porosity/watsat)*(smp_node-smpsc)/(smpso-smpsc), 1 )
-    !   rootr        = rootfr*rresis,  btran = sum(max(rootr,0))
-    ! then rootr is normalized by btran, so the layers partition the uptake.
-    !
-    ! The cold cutoff is tfrz + tc_stress with tc_stress negative, i.e. a
-    ! couple of degrees BELOW freezing, not at it.
-    !
-    implicit none
-    integer, intent(in) :: logunit
-    logical, intent(in) :: report
-    integer  :: p, c, j
-    real(r8) :: diag_s, diag_smp, diag_smpsc, diag_rresis
-    real(r8), allocatable :: k_liq(:,:), k_ice(:,:), k_dz(:,:), k_tsoi(:,:)
-    real(r8), allocatable :: k_rresis(:,:)
-    integer , allocatable :: k_pcol(:)
-    real(r8), parameter :: denh2o = 1000.0_r8
-    real(r8), parameter :: denice =  917.0_r8
-    character(len=*), parameter :: subname = '(elmxx_compute_btran) '
-
-    if (.not. root_built) call shr_sys_abort(subname//'ERROR: rootfr not built')
-
-    ! Gather into the shapes the kernel takes: ELM soil layers 1..nlevgrnd,
-    ! no snow slots. The packed column arrays carry snow in slots 1..nlevsno.
-    allocate(k_liq(num_columns, nlevgrnd), k_ice(num_columns, nlevgrnd), &
-             k_dz(num_columns, nlevgrnd),  k_tsoi(num_columns, nlevgrnd), &
-             k_rresis(num_patches, nlevgrnd), k_pcol(num_patches))
-    do c = 1, num_columns
-       do j = 1, nlevgrnd
-          k_liq (c,j) = col_h2osoi_liq(c, j + nlevsno)
-          k_ice (c,j) = col_h2osoi_ice(c, j + nlevsno)
-          k_dz  (c,j) = col_dz        (c, j + nlevsno)
-          k_tsoi(c,j) = col_t_soisno  (c, j + nlevsno)
-       end do
-    end do
-    do p = 1, num_patches
-       k_pcol(p) = patch_column(p)
-    end do
-
-    call elmxx_root_stress_kernel(num_patches, num_columns, nlevbed, nlevgrnd, &
-         patch_itype, k_pcol, rootfr, k_liq, k_ice, k_dz, k_tsoi,              &
-         watsat, bsw, sucsat, smpsc, smpso, tc_stress, btran0,                 &
-         denice, denh2o, rootr, btran, k_rresis)
-
-    diag_s = 0.0_r8; diag_smp = 0.0_r8; diag_smpsc = 0.0_r8
-    diag_rresis = 0.0_r8
-    do p = 1, num_patches
-       if (patch_itype(p) /= 0) then
-          diag_rresis = k_rresis(p,1)
-          diag_smpsc  = smpsc(patch_itype(p))
-          exit
-       end if
-    end do
-
-    deallocate(k_liq, k_ice, k_dz, k_tsoi, k_rresis, k_pcol)
-
-    if (report) then
-       write(logunit,*) subname,'rank ',iam,' btran over ',num_patches,' patches: ', &
-                        minval(btran),' .. ',maxval(btran)
-       ! When btran is zero everywhere the useful question is WHY -- a dry
-       ! soil and a broken formula look identical from btran alone. These are
-       ! the two quantities that decide it: the top-layer matric potential and
-       ! the PFT's closure threshold. If smp has been clamped up to smpsc, the
-       ! soil is simply drier than the plant can extract from, and zero is the
-       ! right answer rather than a bug.
-       write(logunit,*) '    diag: top-layer s_node ',diag_s,' smp_node ',diag_smp, &
-                        ' smpsc ',diag_smpsc,' rresis ',diag_rresis
-       call shr_sys_flush(logunit)
-       if (minval(btran) < 0.0_r8 .or. maxval(btran) > 1.0_r8) then
-          write(logunit,*) subname,'SUSPECT: btran outside [0,1]'
-       end if
-    end if
-
-  end subroutine elmxx_compute_btran
 
   !-----------------------------------------------------------------------
   subroutine elmxx_root_clean()
