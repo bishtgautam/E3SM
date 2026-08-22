@@ -36,6 +36,9 @@ module elmxxDiagnosticsMod
                            ELMxxGetQg, ELMxxGetHtvp, ELMxxGetSoilbeta,       &
                            ELMxxGetZ0mg, ELMxxGetThv,                        &
                            ELMxxGetQflxEvapGrndCol, ELMxxGetQflxEvapGrnd,    &
+                           ELMxxGetTSsbef, ELMxxGetCgrndl, ELMxxGetCgrnds,   &
+                           ELMxxGetQflxTopSoilCol, ELMxxGetFracH2osfc,       &
+                           ELMxxGetForcRhoCol, ELMxxGetDqgdT, ELMxxGetZii,   &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -76,6 +79,8 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_int_1d
   public :: elmxx_diag_snapshot_state
   public :: elmxx_diag_snapshot_fluxes
+  public :: elmxx_diag_snapshot_preinfil
+  public :: elmxx_diag_snapshot_presoilflux
   public :: elmxx_diag_snapshot_presoiltemp
   public :: elmxx_diag_snapshot_soilwater
   public :: elmxx_diag_write_maps
@@ -429,6 +434,66 @@ contains
   ! Temporary (G5): the state the SoilTemperature expand reads, captured
   ! immediately before the solve, so it can be diffed against ELM's
   ! soiltemp_in:* record for the same step.
+  ! Temporary (G6): the state SoilFluxes differences against, captured
+  ! between soiltemp and soilflux so it lines up with ELM's soilflx_in record.
+  ! Temporary (G6): the terms that build qflx_infl, captured after snowwater
+  ! and before surfrunoff.
+  subroutine elmxx_diag_snapshot_preinfil(elm, tag)
+    type(ELMxxType) , intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    integer :: ierr
+    real(r8), allocatable :: c1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(c1(n_kokkos_col))
+    call ELMxxGetQflxEvapGrndCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_grnd_col', c1, n_kokkos_col)
+    call ELMxxGetForcRhoCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':forc_rho', c1, n_kokkos_col)
+    call ELMxxGetDqgdT(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':dqgdT', c1, n_kokkos_col)
+    call ELMxxGetZii(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':zii', c1, n_kokkos_col)
+    call ELMxxGetQflxTopSoilCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_top_soil', c1, n_kokkos_col)
+    call ELMxxGetFracH2osfc(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_h2osfc', c1, n_kokkos_col)
+    call ELMxxGetFracSnoEff(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno_eff', c1, n_kokkos_col)
+    block
+      real(r8), allocatable :: p1(:)
+      allocate(p1(n_kokkos_patch))
+      call ELMxxGetQflxEvapGrnd(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_grnd', p1, n_kokkos_patch)
+      deallocate(p1)
+    end block
+    deallocate(c1)
+  end subroutine elmxx_diag_snapshot_preinfil
+
+  subroutine elmxx_diag_snapshot_presoilflux(elm, nlevtot_in, tag)
+    type(ELMxxType) , intent(in) :: elm
+    integer         , intent(in) :: nlevtot_in
+    character(len=*), intent(in) :: tag
+    integer :: ierr, szg(2)
+    real(r8), allocatable :: cg(:,:)
+    real(r8), allocatable :: c1(:), p1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(cg(n_kokkos_col, nlevtot_in), c1(n_kokkos_col), p1(n_kokkos_patch))
+    szg(1) = n_kokkos_col; szg(2) = nlevtot_in
+    call ELMxxGetTSsbef(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':tssbef', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetTSoisno(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':t_soisno', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetTGrnd(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':t_grnd', c1, n_kokkos_col)
+    call ELMxxGetCgrndl(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':cgrndl', p1, n_kokkos_patch)
+    call ELMxxGetCgrnds(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':cgrnds', p1, n_kokkos_patch)
+    deallocate(cg, c1, p1)
+  end subroutine elmxx_diag_snapshot_presoilflux
+
   subroutine elmxx_diag_snapshot_presoiltemp(elm, nlevtot_in, tag)
     type(ELMxxType) , intent(in) :: elm
     integer         , intent(in) :: nlevtot_in
