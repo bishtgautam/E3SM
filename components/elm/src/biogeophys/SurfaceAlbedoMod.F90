@@ -27,7 +27,7 @@ module SurfaceAlbedoMod
   use ColumnDataType    , only : col_es, col_ws
   use VegetationType    , only : veg_pp
   use VegetationDataType, only : veg_es, veg_ws
-  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_enabled
+  use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_snapshot_int_1d, diag_enabled
 
   use SurfaceAlbedoType , only : lake_melt_icealb, alblak, alblakwi
   use SurfaceAlbedoType , only : albice, albsat, albdry, isoicol
@@ -692,6 +692,13 @@ contains
             bounds%endc-bounds%begc+1, nlevsno)
        call diag_snapshot_2d('snicar_in:snw_rds', snw_rds(bounds%begc:bounds%endc, :), &
             bounds%endc-bounds%begc+1, nlevsno)
+       ! snl and h2osno complete the SNICAR input set: the RT solver needs to
+       ! know how many snow layers are real, and h2osno is what the min_snw
+       ! and no-layer branches key off.
+       call diag_snapshot_int_1d('snicar_in:snl', col_pp%snl(bounds%begc:bounds%endc), &
+            bounds%endc-bounds%begc+1)
+       call diag_snapshot_1d('snicar_in:h2osno', h2osno(bounds%begc:bounds%endc), &
+            bounds%endc-bounds%begc+1)
        call diag_snapshot_2d('snicar_out:albsnd', albsnd(bounds%begc:bounds%endc, :), &
             bounds%endc-bounds%begc+1, numrad)
        call diag_snapshot_2d('snicar_out:albsni', albsni(bounds%begc:bounds%endc, :), &
