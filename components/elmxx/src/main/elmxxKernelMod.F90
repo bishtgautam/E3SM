@@ -45,6 +45,9 @@ module elmxxKernelMod
                                ELMxxComputeRootWaterUpdateNatural, &
                                ELMxxComputeSoilWaterNatural, &
                                ELMxxComputeHydrologyDrainageNatural, &
+                               ELMxxComputeSnowWater, &
+                               ELMxxComputeSnowCompaction, &
+                               ELMxxComputeSnowLayers, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
                                ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
@@ -65,7 +68,7 @@ module elmxxKernelMod
 
   ! Driver order. This is the order the kernels run in, and the order they
   ! should be activated in. It is ELM's driver order, not alphabetical.
-  integer, parameter, public :: NKERNEL = 17
+  integer, parameter, public :: NKERNEL = 19
 
   !--------------------------------------------------------------------------
   ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
@@ -117,6 +120,10 @@ module elmxxKernelMod
   integer, parameter, public :: K_SOILWATER   = 15
   integer, parameter, public :: K_LAKEHYDRO   = 16
   integer, parameter, public :: K_HYDRODRAIN  = 17
+  ! ELM runs SnowWater at the top of HydrologyNoDrainage, before SurfaceRunoff,
+  ! and compaction/combine/divide at the very end, after drainage.
+  integer, parameter, public :: K_SNOWWATER   = 18
+  integer, parameter, public :: K_SNOWLAYERS  = 19
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
        'canhydro        ', 'cansunshade     ', 'surfrad         ', &
@@ -124,7 +131,8 @@ module elmxxKernelMod
        'canflux         ', 'urbanflux       ', 'lakeflux        ', &
        'laketemp        ', 'soiltemp        ', 'soilflux        ', &
        'surfrunoff      ', 'rootwater       ', 'soilwater       ', &
-       'lakehydro       ', 'hydrodrain      ' ]
+       'lakehydro       ', 'hydrodrain      ', &
+       'snowwater       ', 'snowlayers      ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -261,6 +269,17 @@ contains
        ! infiltration was computed and discarded: soil moisture held at its
        ! cold-start value through days of rain, so btran stayed pinned at zero
        ! and transpiration never switched on.
+       why = ' '
+
+    case (K_SNOWWATER, K_SNOWLAYERS)
+       ! Snow water/percolation, compaction, and combine/divide. All four
+       ! kernels were ported and validated against ELM by replay, but nothing
+       ! ever dispatched them in the coupled model -- there was no kernel slot
+       ! at all. 1x1_brazil never notices, having no snow; on 1x1_glc it meant
+       ! CanopyHydrology created a snow layer that then never compacted, never
+       ! melted, and above all was never PACKED AWAY by CombineSnowLayers when
+       ! its density fell below 50 kg/m3. ELM creates and removes that layer
+       ! within the same step; ELMxx created it and kept it forever.
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
@@ -501,6 +520,13 @@ contains
        call check(ierr, logunit, K_SOILFLUX)
     end if
 
+    ! ELM HydrologyNoDrainage calls SnowWater first, ahead of SurfaceRunoff:
+    ! meltwater leaving the snowpack is part of what reaches the soil surface.
+    if (kernel_active(K_SNOWWATER)) then
+       call ELMxxComputeSnowWater(elm, dtime, ierr)
+       call check(ierr, logunit, K_SNOWWATER)
+    end if
+
     if (kernel_active(K_SURFRUNOFF)) then
        call ELMxxComputeSurfRunInfilHydroActive(elm, ierr)
        call check(ierr, logunit, K_SURFRUNOFF)
@@ -527,6 +553,17 @@ contains
     if (kernel_active(K_HYDRODRAIN)) then
        call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
        call check(ierr, logunit, K_HYDRODRAIN)
+    end if
+
+    ! Compaction, then combine, then divide -- ELM's order at the end of
+    ! HydrologyNoDrainage. CombineSnowLayers is what packs away a layer too
+    ! thin or too light to keep (bulk density below 50 kg/m3); without it a
+    ! layer CanopyHydrology created never goes away again.
+    if (kernel_active(K_SNOWLAYERS)) then
+       call ELMxxComputeSnowCompaction(elm, dtime, ierr)
+       call check(ierr, logunit, K_SNOWLAYERS)
+       call ELMxxComputeSnowLayers(elm, dtime, ierr)
+       call check(ierr, logunit, K_SNOWLAYERS)
     end if
 
     end if
