@@ -26,8 +26,8 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_soilwater
-  use elmxxSoilPropMod   , only : nlevgrnd
+  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater
+  use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
                                ELMxxComputeCanopyHydrology, &
@@ -509,6 +509,8 @@ contains
     end if
 
     if (phase == 2) then
+
+    call elmxx_diag_snapshot_presoiltemp(elm, nlevsno + nlevgrnd, 'elmxx_st')
 
     if (kernel_active(K_SOILTEMP)) then
        call ELMxxComputeSoilTemperatureNatural(elm, ierr)
