@@ -696,6 +696,13 @@ contains
             bounds%endc-bounds%begc+1, numrad)
        call diag_snapshot_2d('snicar_out:albsni', albsni(bounds%begc:bounds%endc, :), &
             bounds%endc-bounds%begc+1, numrad)
+       ! Zero-aerosol ("pure snow") albedo, already computed for the
+       ! radiative-forcing diagnostic. Recorded so the aerosol contribution
+       ! can be measured directly as albsnd - albsnd_pur.
+       call diag_snapshot_2d('snicar_out:albsnd_pur', albsnd_pur(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, numrad)
+       call diag_snapshot_2d('snicar_out:albsni_pur', albsni_pur(bounds%begc:bounds%endc, :), &
+            bounds%endc-bounds%begc+1, numrad)
        call diag_snapshot_2d('snicar_out:flx_absd_vis', flx_absd_snw(bounds%begc:bounds%endc, :, 1), &
             bounds%endc-bounds%begc+1, nlevsno+1)
        call diag_snapshot_2d('snicar_out:flx_absd_nir', flx_absd_snw(bounds%begc:bounds%endc, :, 2), &
