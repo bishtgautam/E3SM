@@ -33,6 +33,8 @@ module elmxxDiagnosticsMod
                            ELMxxGetDlrad, ELMxxGetEflxShSoil,                &
                            ELMxxGetQflxEvSoil, ELMxxGetTVeg,                 &
                            ELMxxGetQgSnow, ELMxxGetQgSoil, ELMxxGetThm,      &
+                           ELMxxGetQg, ELMxxGetHtvp, ELMxxGetSoilbeta,       &
+                           ELMxxGetZ0mg, ELMxxGetThv,                        &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -462,8 +464,18 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qg_snow', c1, n_kokkos_col)
     call ELMxxGetQgSoil(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qg_soil', c1, n_kokkos_col)
-    call ELMxxGetThm(elm, c1, n_kokkos_col, ierr)
-    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thm', c1, n_kokkos_col)
+    call ELMxxGetTGrnd(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':t_grnd', c1, n_kokkos_col)
+    call ELMxxGetQg(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qg', c1, n_kokkos_col)
+    call ELMxxGetHtvp(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':htvp', c1, n_kokkos_col)
+    call ELMxxGetSoilbeta(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':soilbeta', c1, n_kokkos_col)
+    call ELMxxGetZ0mg(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':z0mg', c1, n_kokkos_col)
+    call ELMxxGetThv(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thv', c1, n_kokkos_col)
     block
       real(r8), allocatable :: p1(:)
       allocate(p1(n_kokkos_patch))
@@ -479,6 +491,8 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_ev_soil', p1, n_kokkos_patch)
       call ELMxxGetTVeg(elm, p1, n_kokkos_patch, ierr)
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':t_veg', p1, n_kokkos_patch)
+      call ELMxxGetThm(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thm', p1, n_kokkos_patch)
       deallocate(p1)
     end block
     deallocate(cg, c1, i1)

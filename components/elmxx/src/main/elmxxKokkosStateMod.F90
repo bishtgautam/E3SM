@@ -45,6 +45,7 @@ module elmxxKokkosStateMod
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_const_mod   , only : SHR_CONST_PI
   use elmxxSpmdMod    , only : masterproc, iam
+  use elmxxDiagnosticsMod, only : elmxx_diag_enabled, elmxx_diag_1d
   use elmxxSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, col_landunit, &
                                col_itype, patch_column, patch_itype, &
@@ -1359,6 +1360,30 @@ contains
 
     ! ---- static geometry, once ----
     call elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
+
+    ! ---- diagnostics: the forcing actually handed to the device (G6) ----
+    if (elmxx_diag_enabled) then
+       do kc = 1, n_kokkos_col
+          rcol(kc) = forc_tbot(cell_of_kcol(kc))
+       end do
+       call elmxx_diag_1d('elmxx_forc:forc_t', rcol, n_kokkos_col)
+       do kc = 1, n_kokkos_col
+          rcol(kc) = forc_shum(cell_of_kcol(kc))
+       end do
+       call elmxx_diag_1d('elmxx_forc:forc_q', rcol, n_kokkos_col)
+       do kc = 1, n_kokkos_col
+          rcol(kc) = forc_u(cell_of_kcol(kc))
+       end do
+       call elmxx_diag_1d('elmxx_forc:forc_u', rcol, n_kokkos_col)
+       do kc = 1, n_kokkos_col
+          rcol(kc) = forc_v(cell_of_kcol(kc))
+       end do
+       call elmxx_diag_1d('elmxx_forc:forc_v', rcol, n_kokkos_col)
+       do kc = 1, n_kokkos_col
+          rcol(kc) = forc_pbot(cell_of_kcol(kc))
+       end do
+       call elmxx_diag_1d('elmxx_forc:forc_pbot', rcol, n_kokkos_col)
+    end if
 
     ! ---- device-side derivation ----
     call ELMxxComputeForcingDerivedNatural(elm, nextsw_cday, declin, 1, ierr)
