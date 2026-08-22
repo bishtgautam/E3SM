@@ -24,6 +24,13 @@ module elmxxDiagnosticsMod
   use shr_sys_mod , only : shr_sys_abort
   use elmxx_mod   , only : ELMxxType, ELMXX_SUCCESS,                        &
                            ELMxxGetTSoisno, ELMxxGetH2osoiLiqSoi,           &
+                           ELMxxGetDz, ELMxxGetH2osoiIce,                   &
+                           ELMxxGetH2osoiLiq, ELMxxGetSnl,                  &
+                           ELMxxGetFracSnoEff,                              &
+                           ELMxxGetHsSoil, ELMxxGetHsTopSnow,               &
+                           ELMxxGetHsH2osfc, ELMxxGetDhsdT,                 &
+                           ELMxxGetEflxShSnow, ELMxxGetQflxEvSnow,          &
+                           ELMxxGetDlrad,                                   &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -64,6 +71,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_int_1d
   public :: elmxx_diag_snapshot_state
   public :: elmxx_diag_snapshot_fluxes
+  public :: elmxx_diag_snapshot_presoiltemp
   public :: elmxx_diag_snapshot_soilwater
   public :: elmxx_diag_write_maps
 
@@ -413,6 +421,55 @@ contains
   ! Soil liquid immediately after the Richards solve, before HydrologyDrainage
   ! touches it. ELM's matching record is soilwater_out:h2osoi_liq.
   !-----------------------------------------------------------------------
+  ! Temporary (G5): the state the SoilTemperature expand reads, captured
+  ! immediately before the solve, so it can be diffed against ELM's
+  ! soiltemp_in:* record for the same step.
+  subroutine elmxx_diag_snapshot_presoiltemp(elm, nlevtot_in, tag)
+    type(ELMxxType) , intent(in) :: elm
+    integer         , intent(in) :: nlevtot_in
+    character(len=*), intent(in) :: tag
+    integer :: ierr, szg(2)
+    real(r8), allocatable :: cg(:,:)
+    real(r8), allocatable :: c1(:)
+    integer , allocatable :: i1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(cg(n_kokkos_col, nlevtot_in), c1(n_kokkos_col), i1(n_kokkos_col))
+    szg(1) = n_kokkos_col; szg(2) = nlevtot_in
+    call ELMxxGetTSoisno(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':t_soisno', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetDz(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':dz', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetH2osoiIce(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':h2osoi_ice', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetH2osoiLiq(elm, cg, szg, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':h2osoi_liq', cg, n_kokkos_col, nlevtot_in)
+    call ELMxxGetSnl(elm, i1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_int_1d(tag//':snl', i1, n_kokkos_col)
+    call ELMxxGetFracSnoEff(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno_eff', c1, n_kokkos_col)
+    call ELMxxGetHsSoil(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':hs_soil', c1, n_kokkos_col)
+    call ELMxxGetHsTopSnow(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':hs_top_snow', c1, n_kokkos_col)
+    call ELMxxGetHsH2osfc(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':hs_h2osfc', c1, n_kokkos_col)
+    call ELMxxGetDhsdT(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':dhsdT', c1, n_kokkos_col)
+    block
+      real(r8), allocatable :: p1(:)
+      allocate(p1(n_kokkos_patch))
+      call ELMxxGetEflxShSnow(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':eflx_sh_snow', p1, n_kokkos_patch)
+      call ELMxxGetQflxEvSnow(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_ev_snow', p1, n_kokkos_patch)
+      call ELMxxGetDlrad(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':dlrad', p1, n_kokkos_patch)
+      deallocate(p1)
+    end block
+    deallocate(cg, c1, i1)
+  end subroutine elmxx_diag_snapshot_presoiltemp
+
   subroutine elmxx_diag_snapshot_soilwater(elm, nlevgrnd_in, tag)
     type(ELMxxType) , intent(in) :: elm
     integer         , intent(in) :: nlevgrnd_in
