@@ -35,6 +35,7 @@ module elmxxDiagnosticsMod
                            ELMxxGetQgSnow, ELMxxGetQgSoil, ELMxxGetThm,      &
                            ELMxxGetQg, ELMxxGetHtvp, ELMxxGetSoilbeta,       &
                            ELMxxGetZ0mg, ELMxxGetThv,                        &
+                           ELMxxGetQflxEvapGrndCol, ELMxxGetQflxEvapGrnd,    &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -476,6 +477,8 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':z0mg', c1, n_kokkos_col)
     call ELMxxGetThv(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thv', c1, n_kokkos_col)
+    call ELMxxGetQflxEvapGrndCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_grnd_col', c1, n_kokkos_col)
     block
       real(r8), allocatable :: p1(:)
       allocate(p1(n_kokkos_patch))
@@ -493,6 +496,8 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':t_veg', p1, n_kokkos_patch)
       call ELMxxGetThm(elm, p1, n_kokkos_patch, ierr)
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thm', p1, n_kokkos_patch)
+      call ELMxxGetQflxEvapGrnd(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_grnd', p1, n_kokkos_patch)
       deallocate(p1)
     end block
     deallocate(cg, c1, i1)
