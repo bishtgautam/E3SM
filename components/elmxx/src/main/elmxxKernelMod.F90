@@ -26,7 +26,7 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater
+  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
@@ -517,6 +517,8 @@ contains
        call check(ierr, logunit, K_SOILTEMP)
     end if
 
+    call elmxx_diag_snapshot_presoilflux(elm, nlevsno + nlevgrnd, 'elmxx_sf')
+
     if (kernel_active(K_SOILFLUX)) then
        call ELMxxComputeSoilFluxesNatural(elm, ierr)
        call check(ierr, logunit, K_SOILFLUX)
@@ -528,6 +530,8 @@ contains
        call ELMxxComputeSnowWater(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWWATER)
     end if
+
+    call elmxx_diag_snapshot_preinfil(elm, 'elmxx_ri')
 
     if (kernel_active(K_SURFRUNOFF)) then
        call ELMxxComputeSurfRunInfilHydroActive(elm, ierr)
