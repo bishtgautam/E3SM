@@ -39,6 +39,7 @@ module elmxxDiagnosticsMod
                            ELMxxGetTSsbef, ELMxxGetCgrndl, ELMxxGetCgrnds,   &
                            ELMxxGetQflxTopSoilCol, ELMxxGetFracH2osfc,       &
                            ELMxxGetForcRhoCol, ELMxxGetDqgdT, ELMxxGetZii,   &
+                           ELMxxGetSweOld, ELMxxGetImeltReal,                &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -58,7 +59,7 @@ module elmxxDiagnosticsMod
   use elmxxKokkosStateMod, only : n_kokkos_col, n_kokkos_patch,             &
                                   col_of_kcol, patch_of_kpatch,            &
                                   kcol_of_col
-  use elmxxSoilPropMod   , only : watsat, bsw, sucsat, hksat, nlevgrnd
+  use elmxxSoilPropMod   , only : watsat, bsw, sucsat, hksat, nlevgrnd, nlevsno
   use elmxxRootMod       , only : rootr, btran_root => btran
   use elmxxSurfaceStateMod, only : patch_lai, patch_sai
   implicit none
@@ -460,6 +461,17 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_h2osfc', c1, n_kokkos_col)
     call ELMxxGetFracSnoEff(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno_eff', c1, n_kokkos_col)
+    block
+      real(r8), allocatable :: cg(:,:)
+      integer :: szt(2)
+      allocate(cg(n_kokkos_col, nlevsno+nlevgrnd))
+      szt(1) = n_kokkos_col; szt(2) = nlevsno + nlevgrnd
+      call ELMxxGetSweOld(elm, cg, szt, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':swe_old', cg, n_kokkos_col, nlevsno+nlevgrnd)
+      call ELMxxGetImeltReal(elm, cg, szt, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':imelt', cg, n_kokkos_col, nlevsno+nlevgrnd)
+      deallocate(cg)
+    end block
     block
       real(r8), allocatable :: p1(:)
       allocate(p1(n_kokkos_patch))
