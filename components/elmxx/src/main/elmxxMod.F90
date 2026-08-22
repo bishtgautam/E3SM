@@ -32,7 +32,7 @@ module elmxxMod
                                istsoil, isturb_tbd, isturb_hd, isturb_md
   use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
                                    elmxx_surface_state_clean, &
-                                   elmxx_push_monthly_phenology, elmxx_phenology_weights
+                                   elmxx_phenology_weights
   use elmxxFilterMod      , only : elmxx_build_filters, elmxx_filters_clean
   use elmxxInitCheckMod   , only : elmxx_write_init_snapshot
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
@@ -79,6 +79,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
                                       elmxx_kokkos_push_latlon, &
+                                      elmxx_push_monthly_phenology, &
                                       elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &

@@ -48,11 +48,13 @@ module elmxxKokkosStateMod
   use elmxxSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, col_landunit, &
                                col_itype, patch_column, patch_itype, &
-                               istsoil, isturb_tbd, isturb_hd, isturb_md
+                               istsoil, isturb_tbd, isturb_hd, isturb_md, &
+                               patch_wtcol
   use elmxxSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
                                     patch_height_top, &
                                col_soil_color
-  use elmxxSurfdataMod, only : topo_std, topo_slope
+  use elmxxSurfdataMod, only : topo_std, topo_slope, monthly_lai, monthly_sai, &
+                               monthly_height_top, monthly_height_bot
   use elmxx_kokkos_interface, only : ELMxxKokkosIsLayoutRight
   use elmxxRootMod    , only : rt_btran => btran, rt_rootr => rootr, &
                                rt_rootfr => rootfr, root_built
@@ -78,6 +80,9 @@ module elmxxKokkosStateMod
                                ELMxxSetRootStressTcStress, &
                                ELMxxSetSoilColor, ELMxxSetRhol, ELMxxSetRhos, &
                                ELMxxSetCoszen, &
+                               ELMxxSetPhenActive, ELMxxSetMonthlyLai, &
+                               ELMxxSetMonthlySai, ELMxxSetMonthlyHtop, &
+                               ELMxxSetMonthlyHbot, &
                                ELMxxSetColLatRad, ELMxxSetColLonRad, &
                                ELMxxComputeForcingDerivedNatural, &
                                ELMxxSetTaul, ELMxxSetTaus, ELMxxSetXl, &
@@ -157,6 +162,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_seed_pftpar
   public :: elmxx_kokkos_seed_stomata_closed
   public :: elmxx_kokkos_push_latlon
+  public :: elmxx_push_monthly_phenology
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_verify_maps
@@ -1111,6 +1117,68 @@ contains
   end subroutine elmxx_kokkos_seed_stomata_closed
 
   !-----------------------------------------------------------------------
+  ! Moved here from elmxxSurfaceStateMod. Living there meant that module had
+  ! to use elmxxKokkosStateMod for n_kokkos_patch/patch_of_kpatch while this
+  ! one already used it for patch_lai/patch_sai -- a Fortran module cycle.
+  ! Incremental builds survived on stale .mod files; the first clean build
+  ! (1x1_glc) could not compile. It also simply belongs here, alongside the
+  ! other pushes.
+  subroutine elmxx_push_monthly_phenology(elm, logunit)
+    !
+    ! One-time push of the monthly LAI/SAI/height fields, resolved per patch
+    ! from (gridcell, PFT). After this the surface dataset never crosses again:
+    ! the device holds all twelve months and interpolates in time itself.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+
+    real(r8), allocatable :: b(:,:)
+    integer , allocatable :: act(:)
+    integer :: kp, p, c, g, pft, mm, ierr, sz(2)
+    character(len=*), parameter :: subname = '(elmxx_push_monthly_phenology) '
+
+    if (n_kokkos_patch <= 0) return
+    allocate(b(n_kokkos_patch, 12), act(n_kokkos_patch))
+    sz(1) = n_kokkos_patch; sz(2) = 12
+
+    ! Which patches phenology touches at all -- the host's skip conditions,
+    ! evaluated once and shipped as a mask rather than re-tested every step.
+    do kp = 1, n_kokkos_patch
+       p = patch_of_kpatch(kp); c = patch_column(p)
+       act(kp) = 1
+       if (lun_itype(col_landunit(c)) /= istsoil) act(kp) = 0
+       if (patch_wtcol(p) <= 0.0_r8)              act(kp) = 0
+       if (patch_itype(p) == 0)                   act(kp) = 0
+    end do
+    call ELMxxSetPhenActive(elm, act, n_kokkos_patch, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: SetPhenActive')
+
+    call fill(monthly_lai);  call ELMxxSetMonthlyLai (elm, b, sz, ierr)
+    call fill(monthly_sai);  call ELMxxSetMonthlySai (elm, b, sz, ierr)
+    call fill(monthly_height_top); call ELMxxSetMonthlyHtop(elm, b, sz, ierr)
+    call fill(monthly_height_bot); call ELMxxSetMonthlyHbot(elm, b, sz, ierr)
+
+    deallocate(b, act)
+
+  contains
+    subroutine fill(src)
+      real(r8), intent(in) :: src(:,:,:)
+      b = 0.0_r8
+      do kp = 1, n_kokkos_patch
+         if (act(kp) == 0) cycle
+         p = patch_of_kpatch(kp); c = patch_column(p)
+         g = lun_gridcell(col_landunit(c))
+         pft = patch_itype(p) + 1
+         do mm = 1, 12
+            b(kp,mm) = src(g,pft,mm)
+         end do
+      end do
+    end subroutine fill
+
+  end subroutine elmxx_push_monthly_phenology
+
+
   subroutine elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
     !
     ! Column latitude and longitude in radians, pushed once. They never
