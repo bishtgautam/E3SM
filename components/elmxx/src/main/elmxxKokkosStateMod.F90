@@ -110,6 +110,12 @@ module elmxxKokkosStateMod
                                ELMxxSetFabd, ELMxxSetFabi, &
                                ELMxxSetFtdd, ELMxxSetFtid, ELMxxSetFtii, &
                                ELMxxSetSnicarOptics, ELMxxSetSnowAgeTables, &
+                               ELMxxSetWa, ELMxxSetZwt, &
+                               ELMxxSetTSoisnoSoi, ELMxxSetH2osoiLiqSoi, &
+                               ELMxxSetH2osoiIceSoi, ELMxxSetSnwRds, &
+                               ELMxxSetTSoisnoSno, ELMxxSetH2osoiLiqSno, &
+                               ELMxxSetH2osoiIceSno, ELMxxSetDzSno, &
+                               ELMxxSetQflxSnofrzLyr, &
                                ELMxxSetFlxAbsdv, ELMxxSetFlxAbsdn, &
                                ELMxxSetFlxAbsiv, ELMxxSetFlxAbsin, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
@@ -167,6 +173,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_push_snicar_tables
+  public :: elmxx_kokkos_push_finidat
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -1739,5 +1746,177 @@ contains
     end if
 
   end subroutine elmxx_kokkos_push_snicar_tables
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_finidat(elm, logunit)
+    !
+    ! !DESCRIPTION:
+    ! Push ELM restart state into ELMxx, overwriting the cold start.
+    !
+    ! THE RESTART IS ON ELM'S FULL SUBGRID, ELMxx'S VIEWS ARE PACKED. The file
+    ! carries every column and patch of every landunit (16 and 32 here);
+    ! ELMxx's natural arrays carry only the natural subset (1 and 17). Every
+    ! field is therefore GATHERED through col_of_kcol / patch_of_kpatch rather
+    ! than copied wholesale -- a straight copy would silently seed natural
+    ! columns with urban and lake state.
+    !
+    ! ORDERING. Everything stays in the restart file's ELM snow ordering; the
+    ! `_sno` setters flip to H7 internally. Do not pre-flip.
+    !
+    ! WHAT IS DELIBERATELY NOT PUSHED. The soil GRID comes from
+    ! elmxx_soil_prop_init and is identical by construction. frac_iceold and
+    ! do_capsnow are absent from the restart because ELM recomputes both
+    ! before first use.
+    !
+    use elmxxFinidatMod, only : finidat_read, fi_ncol, fi_npft, &
+         fi_snl, fi_t_soisno, fi_h2osoi_liq, fi_h2osoi_ice, fi_dzsno, &
+         fi_snw_rds, fi_qflx_snofrz_lyr, fi_snow_depth, fi_h2osno, &
+         fi_int_snow, fi_frac_sno, fi_frac_sno_eff, fi_t_grnd, fi_t_h2osfc, &
+         fi_h2osfc, fi_frac_h2osfc, fi_coszen, fi_wa, fi_zwt, &
+         fi_albgrd, fi_albgri, fi_flx_absdv, fi_flx_absdn, &
+         fi_flx_absiv, fi_flx_absin, fi_t_veg, fi_h2ocan, fi_fwet, &
+         fi_elai, fi_esai, fi_htop, fi_albd, fi_albi
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr, nc, np, kc, kp, c, pp, j
+    integer :: sz_sno(2), sz_soi(2), sz_rad_c(2), sz_rad_p(2), sz_abs(2)
+    integer , allocatable :: ib(:)
+    ! One correctly-shaped buffer per array shape. These are passed WHOLE.
+    ! Passing a slice of an oversized buffer (b2(:,1:nlevsno)) makes gfortran
+    ! build a temporary, and c_loc() of that temporary dangles by the time the
+    ! C side reads it -- which showed up as h2osno = 1e75 and NaNs, not as a
+    ! crash. Do not "simplify" these back into one array.
+    real(r8), allocatable :: b1(:), bs(:,:), bg(:,:), br(:,:), ba(:,:)
+    real(r8), allocatable :: p1(:), p2(:,:)
+    integer , parameter :: nlevsno = 5, nlevgrnd = 15
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_finidat) '
+
+    if (.not. finidat_read) then
+       call shr_sys_abort(subname//'ERROR: finidat not read')
+    end if
+
+    nc = n_kokkos_col; np = n_kokkos_patch
+    sz_sno   = [nc, nlevsno]
+    sz_soi   = [nc, nlevgrnd]
+    sz_rad_c = [nc, 2]
+    sz_rad_p = [np, 2]
+    sz_abs   = [nc, nlevsno+1]
+
+    allocate(ib(nc), b1(nc))
+    allocate(bs(nc, nlevsno), bg(nc, nlevgrnd), br(nc, 2), ba(nc, nlevsno+1))
+    allocate(p1(np), p2(np, 2))
+
+    ! ---- column scalars ----
+    do kc = 1, nc; ib(kc) = fi_snl(col_of_kcol(kc)); end do
+    call ELMxxSetSnl(elm, ib, nc, ierr);                     call check(ierr, subname, 'Snl')
+
+    do kc = 1, nc; b1(kc) = fi_snow_depth(col_of_kcol(kc)); end do
+    call ELMxxSetSnowDepth(elm, b1, nc, ierr);               call check(ierr, subname, 'SnowDepth')
+    do kc = 1, nc; b1(kc) = fi_h2osno(col_of_kcol(kc)); end do
+    call ELMxxSetH2osno(elm, b1, nc, ierr);                  call check(ierr, subname, 'H2osno')
+    do kc = 1, nc; b1(kc) = fi_int_snow(col_of_kcol(kc)); end do
+    call ELMxxSetIntSnow(elm, b1, nc, ierr);                 call check(ierr, subname, 'IntSnow')
+    do kc = 1, nc; b1(kc) = fi_frac_sno(col_of_kcol(kc)); end do
+    call ELMxxSetFracSno(elm, b1, nc, ierr);                 call check(ierr, subname, 'FracSno')
+    do kc = 1, nc; b1(kc) = fi_frac_sno_eff(col_of_kcol(kc)); end do
+    call ELMxxSetFracSnoEff(elm, b1, nc, ierr);              call check(ierr, subname, 'FracSnoEff')
+    do kc = 1, nc; b1(kc) = fi_t_grnd(col_of_kcol(kc)); end do
+    call ELMxxSetTGrnd(elm, b1, nc, ierr);                   call check(ierr, subname, 'TGrnd')
+    do kc = 1, nc; b1(kc) = fi_t_h2osfc(col_of_kcol(kc)); end do
+    call ELMxxSetTH2osfc(elm, b1, nc, ierr);                 call check(ierr, subname, 'TH2osfc')
+    do kc = 1, nc; b1(kc) = fi_h2osfc(col_of_kcol(kc)); end do
+    call ELMxxSetH2osfc(elm, b1, nc, ierr);                  call check(ierr, subname, 'H2osfc')
+    do kc = 1, nc; b1(kc) = fi_frac_h2osfc(col_of_kcol(kc)); end do
+    call ELMxxSetFracH2osfc(elm, b1, nc, ierr);              call check(ierr, subname, 'FracH2osfc')
+    do kc = 1, nc; b1(kc) = fi_coszen(col_of_kcol(kc)); end do
+    call ELMxxSetCoszen(elm, b1, nc, ierr);                  call check(ierr, subname, 'Coszen')
+    do kc = 1, nc; b1(kc) = fi_wa(col_of_kcol(kc)); end do
+    call ELMxxSetWa(elm, b1, nc, ierr);                      call check(ierr, subname, 'Wa')
+    do kc = 1, nc; b1(kc) = fi_zwt(col_of_kcol(kc)); end do
+    call ELMxxSetZwt(elm, b1, nc, ierr);                     call check(ierr, subname, 'Zwt')
+
+    ! ---- snow half of the column arrays ----
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(c,j); end do; end do
+    call ELMxxSetTSoisnoSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'TSoisnoSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(c,j); end do; end do
+    call ELMxxSetH2osoiLiqSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiLiqSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(c,j); end do; end do
+    call ELMxxSetH2osoiIceSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiIceSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(c,j); end do; end do
+    call ELMxxSetDzSno(elm, bs, sz_sno, ierr);       call check(ierr, subname, 'DzSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(c,j); end do; end do
+    call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);      call check(ierr, subname, 'SnwRds')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_qflx_snofrz_lyr(c,j); end do; end do
+    call ELMxxSetQflxSnofrzLyr(elm, bs, sz_sno, ierr)
+    call check(ierr, subname, 'QflxSnofrzLyr')
+
+    ! ---- soil half ----
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevgrnd; bg(kc,j) = fi_t_soisno(c,nlevsno+j); end do; end do
+    call ELMxxSetTSoisnoSoi(elm, bg, sz_soi, ierr);  call check(ierr, subname, 'TSoisnoSoi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_liq(c,nlevsno+j); end do; end do
+    call ELMxxSetH2osoiLiqSoi(elm, bg, sz_soi, ierr); call check(ierr, subname, 'H2osoiLiqSoi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_ice(c,nlevsno+j); end do; end do
+    call ELMxxSetH2osoiIceSoi(elm, bg, sz_soi, ierr); call check(ierr, subname, 'H2osoiIceSoi')
+
+    ! ---- radiation ----
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, 2; br(kc,j) = fi_albgrd(c,j); end do; end do
+    call ELMxxSetAlbgrd(elm, br, sz_rad_c, ierr);      call check(ierr, subname, 'Albgrd')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, 2; br(kc,j) = fi_albgri(c,j); end do; end do
+    call ELMxxSetAlbgri(elm, br, sz_rad_c, ierr);      call check(ierr, subname, 'Albgri')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdv(c,j); end do; end do
+    call ELMxxSetFlxAbsdv(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsdv')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdn(c,j); end do; end do
+    call ELMxxSetFlxAbsdn(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsdn')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absiv(c,j); end do; end do
+    call ELMxxSetFlxAbsiv(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsiv')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absin(c,j); end do; end do
+    call ELMxxSetFlxAbsin(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsin')
+
+    ! ---- patch state ----
+    do kp = 1, np; p1(kp) = fi_t_veg(patch_of_kpatch(kp)); end do
+    call ELMxxSetTVeg(elm, p1, np, ierr);                    call check(ierr, subname, 'TVeg')
+    do kp = 1, np; p1(kp) = fi_h2ocan(patch_of_kpatch(kp)); end do
+    call ELMxxSetH2ocan(elm, p1, np, ierr);                  call check(ierr, subname, 'H2ocan')
+    do kp = 1, np; p1(kp) = fi_fwet(patch_of_kpatch(kp)); end do
+    call ELMxxSetFwet(elm, p1, np, ierr);                    call check(ierr, subname, 'Fwet')
+    do kp = 1, np; p1(kp) = fi_elai(patch_of_kpatch(kp)); end do
+    call ELMxxSetElai(elm, p1, np, ierr);                    call check(ierr, subname, 'Elai')
+    do kp = 1, np; p1(kp) = fi_esai(patch_of_kpatch(kp)); end do
+    call ELMxxSetEsai(elm, p1, np, ierr);                    call check(ierr, subname, 'Esai')
+    do kp = 1, np; p1(kp) = fi_htop(patch_of_kpatch(kp)); end do
+    call ELMxxSetHtop(elm, p1, np, ierr);                    call check(ierr, subname, 'Htop')
+    do kp = 1, np; pp = patch_of_kpatch(kp)
+       do j = 1, 2; p2(kp,j) = fi_albd(pp,j); end do; end do
+    call ELMxxSetAlbd(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albd')
+    do kp = 1, np; pp = patch_of_kpatch(kp)
+       do j = 1, 2; p2(kp,j) = fi_albi(pp,j); end do; end do
+    call ELMxxSetAlbi(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albi')
+
+    deallocate(ib, b1, bs, bg, br, ba, p1, p2)
+
+    if (masterproc) then
+       write(logunit,*) subname,'seeded ',nc,' columns and ',np, &
+            ' patches from finidat'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_kokkos_push_finidat
 
 end module elmxxKokkosStateMod
