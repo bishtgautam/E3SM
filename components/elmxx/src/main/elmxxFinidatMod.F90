@@ -68,6 +68,7 @@ module elmxxFinidatMod
   integer, public :: fi_ncol = 0, fi_npft = 0
 
   public :: elmxx_finidat_read
+  public :: elmxx_finidat_apply_soilprop
   public :: elmxx_finidat_clean
 
 contains
@@ -288,5 +289,61 @@ contains
     if (status /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot read '// &
          trim(varname)//' from '//trim(fname))
   end subroutine read_int1d
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_finidat_apply_soilprop(logunit)
+    !
+    ! !DESCRIPTION:
+    ! Overwrite elmxxSoilPropMod's column state with the restart's.
+    !
+    ! WHY THIS IS SEPARATE FROM THE KOKKOS PUSH, AND WHY IT IS NOT OPTIONAL.
+    ! elmxx_soil_kernel_init runs on the FIRST STEP, not at init, because it
+    ! needs the coupling timestep. It re-pushes t_soisno / h2osoi_liq /
+    ! h2osoi_ice to the device from THESE arrays. So seeding the device at
+    ! init and stopping there gets silently undone one step later: the
+    ! snowpack comes from ELM and the soil column reverts to cold start.
+    !
+    ! That is not a hypothetical. It is what happened: soil liquid held its
+    ! cold-start profile (2.63, 4.14, 6.82 ...) against ELM's (0.77, 2.07,
+    ! 3.45 ...) with all the ice missing, and the resulting inconsistent
+    ! column blew up in the snow-layer kernel.
+    !
+    ! These arrays are on the FULL column grid, the same shape as the restart,
+    ! so no gather is needed here -- unlike the Kokkos push, which packs.
+    !
+    use elmxxSoilPropMod, only : soil_prop_built, col_t_soisno, &
+                                 col_h2osoi_liq, col_h2osoi_ice
+    implicit none
+    integer, intent(in) :: logunit
+    integer :: c, j
+    character(len=*), parameter :: subname = '(elmxx_finidat_apply_soilprop) '
+
+    if (.not. finidat_read) then
+       call shr_sys_abort(subname//'ERROR: finidat not read')
+    end if
+    if (.not. soil_prop_built) then
+       call shr_sys_abort(subname//'ERROR: soil properties not built yet')
+    end if
+    if (size(col_t_soisno,1) /= fi_ncol .or. &
+        size(col_t_soisno,2) /= nlevtot_r) then
+       call shr_sys_abort(subname//'ERROR: soil-prop arrays are not the '// &
+            'shape of the restart')
+    end if
+
+    do c = 1, fi_ncol
+       do j = 1, nlevtot_r
+          col_t_soisno  (c,j) = fi_t_soisno  (c,j)
+          col_h2osoi_liq(c,j) = fi_h2osoi_liq(c,j)
+          col_h2osoi_ice(c,j) = fi_h2osoi_ice(c,j)
+       end do
+    end do
+
+    if (masterproc) then
+       write(logunit,*) subname,'overwrote soil-prop column state from finidat'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_finidat_apply_soilprop
 
 end module elmxxFinidatMod

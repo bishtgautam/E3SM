@@ -49,7 +49,8 @@ module elmxxMod
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxSnicarMod         , only : elmxx_snicar_read, elmxx_snicar_clean
-  use elmxxFinidatMod        , only : elmxx_finidat_read, elmxx_finidat_clean
+  use elmxxFinidatMod        , only : elmxx_finidat_read, elmxx_finidat_clean, &
+                                      elmxx_finidat_apply_soilprop
   use elmxxRootMod           , only : elmxx_root_init, &
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
@@ -554,6 +555,9 @@ contains
        ! pushing it again would only add a way to get it wrong.
        if (len_trim(finidat) > 0) then
           call elmxx_finidat_read(finidat, num_columns, num_patches, logunit)
+          ! Soil-prop arrays FIRST: the first-step soil kernel init re-pushes
+          ! from them, so seeding only the device would be undone one step in.
+          call elmxx_finidat_apply_soilprop(logunit)
           call elmxx_kokkos_push_finidat(elmxx_state, logunit)
        end if
 
