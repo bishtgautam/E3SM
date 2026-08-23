@@ -23,6 +23,8 @@ module SnowSnicarMod
   use ColumnDataType  , only : col_es, col_ws, col_wf
   !
   use timeinfoMod
+  use ElmDiagnostics  , only : diag_snapshot_1d, diag_snapshot_2d, &
+                               diag_snapshot_int_1d, diag_snapshot_logical_1d
 
   implicit none
   save
@@ -1286,6 +1288,7 @@ contains
     real(r8) :: rhos                        ! snow density [kg m-3]
     real(r8) :: h2osno_lyr                  ! liquid + solid H2O in snow layer [kg m-2]
     real(r8) :: cdz(-nlevsno+1:0)           ! column average layer thickness [m]
+    integer :: filt_flag(bounds%begc:bounds%endc)  ! diag: 1=snowc, 2=nosnowc, 0=neither
     !--------------------------------------------------------------------------!
 
     associate(                                                      &
@@ -1314,6 +1317,50 @@ contains
 
       ! set timestep and step interval
       dtime = dtime_mod
+
+      ! Publish filter membership rather than leaving it to be inferred.
+      ! snowc is NOT simply snl<0 -- columns outside both filters are never
+      ! touched here and keep whatever snw_rds and spval they came in with.
+      filt_flag(bounds%begc:bounds%endc) = 0
+      do fc = 1, num_snowc
+         filt_flag(filter_snowc(fc)) = 1
+      end do
+      do fc = 1, num_nosnowc
+         filt_flag(filter_nosnowc(fc)) = 2
+      end do
+      call diag_snapshot_int_1d('snowage_in:filt_flag', &
+           filt_flag(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+
+      ! ---- Diagnostic Capture: SnowAge_grain Inputs ----
+      ! Everything the grain-size update reads. snl doubles as the snow-column
+      ! filter: SnowAge_grain's snowc filter is exactly snl < 0.
+      call diag_snapshot_int_1d('snowage_in:snl', snl(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_logical_1d('snowage_in:do_capsnow', &
+           do_capsnow(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_in:frac_sno', frac_sno(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_in:h2osno', h2osno(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_in:qflx_snow_grnd', &
+           qflx_snow_grnd_col(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_in:qflx_snwcp_ice', &
+           qflx_snwcp_ice(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+      ! dz runs one slot past the snowpack: the bottom snow layer's temperature
+      ! gradient is interpolated against the first SOIL layer, so dz(i+1) there
+      ! is a soil thickness, not a snow one.
+      call diag_snapshot_2d('snowage_in:dz', &
+           dz(bounds%begc:bounds%endc,-nlevsno+1:1), bounds%endc-bounds%begc+1, nlevsno+1)
+      call diag_snapshot_2d('snowage_in:t_soisno', &
+           t_soisno(bounds%begc:bounds%endc,-nlevsno+1:1), bounds%endc-bounds%begc+1, nlevsno+1)
+      call diag_snapshot_2d('snowage_in:h2osoi_liq', &
+           h2osoi_liq(bounds%begc:bounds%endc,-nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
+      call diag_snapshot_2d('snowage_in:h2osoi_ice', &
+           h2osoi_ice(bounds%begc:bounds%endc,-nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
+      call diag_snapshot_2d('snowage_in:qflx_snofrz_lyr', &
+           qflx_snofrz_lyr(bounds%begc:bounds%endc,-nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
+      call diag_snapshot_2d('snowage_in:snw_rds', &
+           snw_rds(bounds%begc:bounds%endc,-nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
 
       ! loop over columns that have at least one snow layer
       do fc = 1, num_snowc
@@ -1501,6 +1548,18 @@ contains
             snw_rds(c_idx,0) = snw_rds_min
          endif
       enddo
+
+      ! ---- Diagnostic Capture: SnowAge_grain Outputs ----
+      call diag_snapshot_2d('snowage_out:snw_rds', &
+           snw_rds(bounds%begc:bounds%endc,-nlevsno+1:0), bounds%endc-bounds%begc+1, nlevsno)
+      call diag_snapshot_1d('snowage_out:snot_top', snot_top(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_out:dTdz_top', dTdz_top(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_out:snw_rds_top', snw_rds_top(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
+      call diag_snapshot_1d('snowage_out:sno_liq_top', sno_liq_top(bounds%begc:bounds%endc), &
+           bounds%endc-bounds%begc+1)
 
     end associate
 
