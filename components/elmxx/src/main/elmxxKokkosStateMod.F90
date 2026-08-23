@@ -1784,7 +1784,7 @@ contains
     integer, intent(in) :: logunit
     integer :: ierr, nc, np, kc, kp, c, pp, j
     integer :: sz_sno(2), sz_soi(2), sz_rad_c(2), sz_rad_p(2), sz_abs(2)
-    integer , allocatable :: ib(:)
+    integer , allocatable :: ib(:), ib_p(:)
     ! One correctly-shaped buffer per array shape. These are passed WHOLE.
     ! Passing a slice of an oversized buffer (b2(:,1:nlevsno)) makes gfortran
     ! build a temporary, and c_loc() of that temporary dangles by the time the
@@ -1806,7 +1806,7 @@ contains
     sz_rad_p = [np, 2]
     sz_abs   = [nc, nlevsno+1]
 
-    allocate(ib(nc), b1(nc))
+    allocate(ib(nc), b1(nc), ib_p(np))
     allocate(bs(nc, nlevsno), bg(nc, nlevgrnd), br(nc, 2), ba(nc, nlevsno+1))
     allocate(p1(np), p2(np, 2))
 
@@ -1904,6 +1904,33 @@ contains
     call ELMxxSetEsai(elm, p1, np, ierr);                    call check(ierr, subname, 'Esai')
     do kp = 1, np; p1(kp) = fi_htop(patch_of_kpatch(kp)); end do
     call ELMxxSetHtop(elm, p1, np, ierr);                    call check(ierr, subname, 'Htop')
+
+    ! frac_veg_nosno MUST be recomputed here, after elai/esai have been
+    ! replaced by the restart's.
+    !
+    ! It is derived in elmxx_kokkos_seed_canopy_hydrology from the COLD-START
+    ! phenology (elai_seeded + esai_seeded >= 0.05) and never revisited. Seed
+    ! the canopy from a restart and that flag still describes the phenology
+    ! ELMxx would have had, not the one it now has -- so patches ELM treats as
+    ! vegetated get BareGroundFluxes instead of CanopyFluxes, t_veg is left at
+    ! the bare-ground value on every patch, and the ground heat flux entering
+    ! SoilTemperature is wrong before a single line of snow physics runs.
+    !
+    ! Same rule as the init path, ELM SatellitePhenologyMod.
+    do kp = 1, np
+       if (fi_elai(patch_of_kpatch(kp)) + fi_esai(patch_of_kpatch(kp)) &
+           >= 0.05_r8) then
+          ib_p(kp) = 1
+       else
+          ib_p(kp) = 0
+       end if
+    end do
+    call ELMxxSetFracVegNosno(elm, ib_p, np, ierr)
+    call check(ierr, subname, 'FracVegNosno')
+    if (masterproc) then
+       write(logunit,*) subname,'frac_veg_nosno = 1 on ',count(ib_p == 1), &
+            ' of ',np,' patches (recomputed from finidat elai/esai)'
+    end if
     do kp = 1, np; pp = patch_of_kpatch(kp)
        do j = 1, 2; p2(kp,j) = fi_albd(j, pp); end do; end do
     call ELMxxSetAlbd(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albd')
@@ -1946,7 +1973,7 @@ contains
       deallocate(chk)
     end block
 
-    deallocate(ib, b1, bs, bg, br, ba, p1, p2)
+    deallocate(ib, ib_p, b1, bs, bg, br, ba, p1, p2)
 
     if (masterproc) then
        write(logunit,*) subname,'seeded ',nc,' columns and ',np, &
