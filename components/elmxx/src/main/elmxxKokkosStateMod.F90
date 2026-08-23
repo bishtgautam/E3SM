@@ -113,6 +113,7 @@ module elmxxKokkosStateMod
                                ELMxxSetWa, ELMxxSetZwt, &
                                ELMxxSetTSoisnoSoi, ELMxxSetH2osoiLiqSoi, &
                                ELMxxSetH2osoiIceSoi, ELMxxSetSnwRds, &
+                               ELMxxGetTSoisnoSno, ELMxxGetDzSno, &
                                ELMxxSetTSoisnoSno, ELMxxSetH2osoiLiqSno, &
                                ELMxxSetH2osoiIceSno, ELMxxSetDzSno, &
                                ELMxxSetQflxSnofrzLyr, &
@@ -174,6 +175,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_push_snicar_tables
   public :: elmxx_kokkos_push_finidat
+  public :: elmxx_kokkos_reseed_finidat_snow
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -1909,6 +1911,41 @@ contains
        do j = 1, 2; p2(kp,j) = fi_albi(pp,j); end do; end do
     call ELMxxSetAlbi(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albi')
 
+    ! ---- read back immediately, before anything else can touch it ----
+    !
+    ! The seeding reports success on every call and still did not land, so
+    ! "the setter returned ELMXX_SUCCESS" is not evidence. This reads the
+    ! state straight back through the getters and compares against what was
+    ! just pushed. If this passes and the step-0 snapshot still disagrees,
+    ! something between here and there is overwriting; if it fails, the
+    ! setters are.
+    block
+      real(r8), allocatable :: chk(:,:)
+      real(r8) :: worst_t, worst_d
+      integer  :: kc2, j2, c2i
+      allocate(chk(nc, nlevsno))
+      worst_t = 0.0_r8; worst_d = 0.0_r8
+      call ELMxxGetTSoisnoSno(elm, chk, sz_sno, ierr)
+      call check(ierr, subname, 'GetTSoisnoSno')
+      do kc2 = 1, nc; c2i = col_of_kcol(kc2)
+         do j2 = 1, nlevsno
+            worst_t = max(worst_t, abs(chk(kc2,j2) - fi_t_soisno(c2i,j2)))
+         end do
+      end do
+      call ELMxxGetDzSno(elm, chk, sz_sno, ierr)
+      call check(ierr, subname, 'GetDzSno')
+      do kc2 = 1, nc; c2i = col_of_kcol(kc2)
+         do j2 = 1, nlevsno
+            worst_d = max(worst_d, abs(chk(kc2,j2) - fi_dzsno(c2i,j2)))
+         end do
+      end do
+      if (masterproc) then
+         write(logunit,*) subname,'READBACK worst |diff| t_soisno_sno = ',worst_t
+         write(logunit,*) subname,'READBACK worst |diff| dz_sno       = ',worst_d
+      end if
+      deallocate(chk)
+    end block
+
     deallocate(ib, b1, bs, bg, br, ba, p1, p2)
 
     if (masterproc) then
@@ -1918,5 +1955,67 @@ contains
     end if
 
   end subroutine elmxx_kokkos_push_finidat
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_reseed_finidat_snow(elm, logunit)
+    !
+    ! !DESCRIPTION:
+    ! Re-push the snow half of the finidat state, once, after the first-step
+    ! soil kernel init.
+    !
+    ! WHY THIS IS NEEDED AND NOT REDUNDANT. elmxx_soil_kernel_init runs on the
+    ! FIRST STEP (it needs the coupling timestep) and pushes the _p1 arrays
+    ! filling only their SOIL half -- see elmxxSoilKernelMod, which writes
+    ! buf(kc, nlevsno+1+j) and leaves slots 1..nlevsno empty. That is harmless
+    ! in a cold start, because _p1's snow half is rebuilt from _sno by the
+    ! expand at the top of every SoilTemperature call. It is not harmless
+    ! here: the collapse that follows writes the empty snow half back into
+    ! _sno, destroying a snowpack that was seeded correctly at init.
+    !
+    ! Verified: an immediate read-back inside push_finidat shows worst |diff|
+    ! of exactly 0.0 for t_soisno_sno and dz_sno, and the step-0 snapshot then
+    ! shows cold-start values. So the seeding lands and is subsequently
+    ! overwritten; this puts it back after the overwriter has run.
+    !
+    use elmxxFinidatMod, only : finidat_read, fi_t_soisno, fi_h2osoi_liq, &
+                                fi_h2osoi_ice, fi_dzsno, fi_snw_rds
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr, nc, kc, j, c, sz_sno(2)
+    real(r8), allocatable :: bs(:,:)
+    integer, parameter :: nlevsno = 5
+    character(len=*), parameter :: subname = '(elmxx_kokkos_reseed_finidat_snow) '
+
+    if (.not. finidat_read) return
+
+    nc = n_kokkos_col
+    sz_sno = [nc, nlevsno]
+    allocate(bs(nc, nlevsno))
+
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(c,j); end do; end do
+    call ELMxxSetTSoisnoSno(elm, bs, sz_sno, ierr);   call check(ierr, subname, 'TSoisnoSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(c,j); end do; end do
+    call ELMxxSetH2osoiLiqSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiLiqSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(c,j); end do; end do
+    call ELMxxSetH2osoiIceSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiIceSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(c,j); end do; end do
+    call ELMxxSetDzSno(elm, bs, sz_sno, ierr);        call check(ierr, subname, 'DzSno')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(c,j); end do; end do
+    call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);       call check(ierr, subname, 'SnwRds')
+
+    deallocate(bs)
+    if (masterproc) then
+       write(logunit,*) subname,'re-seeded snow state after soil kernel init'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_kokkos_reseed_finidat_snow
 
 end module elmxxKokkosStateMod

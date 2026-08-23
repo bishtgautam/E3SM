@@ -86,6 +86,7 @@ module elmxxMod
                                       elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_push_snicar_tables, &
                                       elmxx_kokkos_push_finidat, &
+                                      elmxx_kokkos_reseed_finidat_snow, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -823,6 +824,11 @@ contains
            kernel_active(K_HYDRODRAIN)) then
           call elmxx_soil_kernel_init(elmxx_state, &
                real(coupling_dt_in_sec, r8), logunit)
+          ! soil_kernel_init pushes _p1 with an empty snow half; the collapse
+          ! that follows would write that back over the seeded snowpack.
+          if (len_trim(finidat) > 0) then
+             call elmxx_kokkos_reseed_finidat_snow(elmxx_state, logunit)
+          end if
        end if
     end if
 
