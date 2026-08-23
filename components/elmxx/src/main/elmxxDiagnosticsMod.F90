@@ -24,6 +24,9 @@ module elmxxDiagnosticsMod
   use shr_sys_mod , only : shr_sys_abort
   use elmxx_mod   , only : ELMxxType, ELMXX_SUCCESS,                        &
                            ELMxxGetTSoisno, ELMxxGetH2osoiLiqSoi,           &
+                           ELMxxGetTSoisnoSno, ELMxxGetH2osoiLiqSno,        &
+                           ELMxxGetH2osoiIceSno, ELMxxGetDzSno,             &
+                           ELMxxGetSnwRds,                                  &
                            ELMxxGetDz, ELMxxGetH2osoiIce,                   &
                            ELMxxGetH2osoiLiq, ELMxxGetSnl,                  &
                            ELMxxGetFracSnoEff,                              &
@@ -223,8 +226,8 @@ contains
     integer         , intent(in) :: nlevtot, nlevgrnd
     character(len=*), intent(in) :: tag
 
-    integer  :: ierr, sz(2), szg(2)
-    real(r8), allocatable :: c1(:), p1(:), c2(:,:), cg(:,:)
+    integer  :: ierr, sz(2), szg(2), szs(2)
+    real(r8), allocatable :: c1(:), p1(:), c2(:,:), cg(:,:), cs(:,:)
     integer , allocatable :: ci(:)
 
     if (.not. elmxx_diag_enabled) return
@@ -233,6 +236,7 @@ contains
     allocate(c1(n_kokkos_col), ci(n_kokkos_col))
     allocate(c2(n_kokkos_col, nlevtot))
     allocate(cg(n_kokkos_col, nlevgrnd))
+    allocate(cs(n_kokkos_col, nlevsno))
     allocate(p1(max(n_kokkos_patch,1)))
 
     ! ---- column scalars ----
@@ -251,11 +255,21 @@ contains
     ! ---- column profiles ----
     sz(1) = n_kokkos_col; sz(2) = nlevtot
     call get_c2('t_soisno',   ELMxxGetTSoisno)
-    ! Only the soil-only (NLEVGRND) water getters are exposed to Fortran.
-    ! 1x1_brazil never carries snow, so nothing is lost here.
     szg(1) = n_kokkos_col; szg(2) = nlevgrnd
     call get_cg('h2osoi_liq_soi', ELMxxGetH2osoiLiqSoi)
     call get_cg('h2osoi_ice_soi', ELMxxGetH2osoiIceSoi)
+
+    ! The snow half. This used to be omitted, on the reasoning that
+    ! "1x1_brazil never carries snow, so nothing is lost" -- which stopped
+    ! being true the moment 1x1_glc was used, and left the snowpack
+    ! unobservable exactly where the divergence lives. Reported in ELM order
+    ! so it lines up with the restart file and elm_diagnostics.bin.
+    szs(1) = n_kokkos_col; szs(2) = nlevsno
+    call get_cs('t_soisno_sno',   ELMxxGetTSoisnoSno)
+    call get_cs('h2osoi_liq_sno', ELMxxGetH2osoiLiqSno)
+    call get_cs('h2osoi_ice_sno', ELMxxGetH2osoiIceSno)
+    call get_cs('dz_sno',         ELMxxGetDzSno)
+    call get_cs('snw_rds',        ELMxxGetSnwRds)
 
     ! ---- patch scalars ----
     if (n_kokkos_patch > 0) then
@@ -297,6 +311,14 @@ contains
       if (ierr == ELMXX_SUCCESS) &
            call elmxx_diag_2d(tag//':'//name, cg, n_kokkos_col, nlevgrnd)
     end subroutine get_cg
+
+    subroutine get_cs(name, getter)
+      character(len=*), intent(in) :: name
+      external :: getter
+      call getter(elm, cs, szs, ierr)
+      if (ierr == ELMXX_SUCCESS) &
+           call elmxx_diag_2d(tag//':'//name, cs, n_kokkos_col, nlevsno)
+    end subroutine get_cs
 
     subroutine get_c2(name, getter)
       character(len=*), intent(in) :: name
