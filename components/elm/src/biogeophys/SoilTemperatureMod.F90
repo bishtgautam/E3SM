@@ -296,6 +296,7 @@ contains
          h2osoi_liq              => col_ws%h2osoi_liq                       , & ! Output: [real(r8) (:,:) ] liquid water (kg/m2) (C1 diag)
          h2osoi_ice              => col_ws%h2osoi_ice                       , & ! Output: [real(r8) (:,:) ] ice lens (kg/m2) (C1 diag)
          qflx_snomelt            => col_wf%qflx_snomelt                     , & ! Output: [real(r8) (:)   ] snow melt (mm H2O /s) (C1 diag)
+         qflx_snofrz_lyr         => col_wf%qflx_snofrz_lyr                  , & ! Output: [real(r8) (:,:) ] snow freezing rate (SnowAge diag)
 
          begc                    =>    bounds%begc                          , &
          endc                    =>    bounds%endc                            &
@@ -682,6 +683,10 @@ contains
       call diag_snapshot_2d('soiltemp_out:h2osoi_ice', h2osoi_ice(begc:endc,-nlevsno+1:nlevgrnd), endc-begc+1, nlevgrnd+nlevsno)
       call diag_snapshot_1d('soiltemp_out:h2osfc', h2osfc(begc:endc), endc-begc+1)
       call diag_snapshot_1d('soiltemp_out:qflx_snomelt', qflx_snomelt(begc:endc), endc-begc+1)
+      ! Per-layer snow freezing rate. SnowAge_grain's re-freezing term reads
+      ! this, and it is the one SnowAge input ELMxx does not otherwise have.
+      call diag_snapshot_2d('soiltemp_out:qflx_snofrz_lyr', &
+           qflx_snofrz_lyr(begc:endc,-nlevsno+1:0), endc-begc+1, nlevsno)
 
       do fc = 1,num_nolakec
          c = filter_nolakec(fc)
