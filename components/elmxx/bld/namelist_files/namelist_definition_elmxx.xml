@@ -68,6 +68,25 @@ SNICAR snow grain aging lookup table (best-fit tau, kappa, drdsdt0).
 Default: ' '
 </entry>
 
+<entry id="finidat"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+Full pathname of an ELM restart file to read as an initial condition.
+
+READ-ONLY. ELMxx never writes restart files. This exists to start ELMxx from
+ELM's exact state so the two can be stepped once from a bit-identical
+starting point, which is the only way to separate a coupling error from an
+arithmetic one -- the replay tests seed each kernel from ELM and so bypass
+the coupling by construction.
+
+The soil grid is not taken from this file; it comes from the surface dataset
+and is identical by construction.
+Default: ' '
+</entry>
+
 <entry id="elmxx_check_boundary"
        type="logical"
        category="elmxx"

@@ -49,6 +49,7 @@ module elmxxMod
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
   use elmxxSnicarMod         , only : elmxx_snicar_read, elmxx_snicar_clean
+  use elmxxFinidatMod        , only : elmxx_finidat_read, elmxx_finidat_clean
   use elmxxRootMod           , only : elmxx_root_init, &
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
@@ -83,6 +84,7 @@ module elmxxMod
                                       elmxx_push_monthly_phenology, &
                                       elmxx_kokkos_push_root_statics, &
                                       elmxx_kokkos_push_snicar_tables, &
+                                      elmxx_kokkos_push_finidat, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -151,6 +153,12 @@ module elmxxMod
   ! exactly how ELMxx behaved before SNICAR was ported.
   character(len=256), public :: fsnowoptics = ' '
   character(len=256), public :: fsnowaging  = ' '
+  ! ELM restart file read as an initial condition. READ-ONLY: ELMxx never
+  ! writes restarts. This exists so both models can be started from
+  ! bit-identical state and stepped once, which is the only way to separate a
+  ! coupling error from an arithmetic one -- the replay tests bypass the
+  ! coupling by construction and so cannot see it.
+  character(len=256), public :: finidat = ' '
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
   ! seed, which silently discards a step of physics. That was harmless while
@@ -220,7 +228,7 @@ contains
                             elmxx_check_boundary, elmxx_check_soft_fail, &
                             elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
-                            elmxx_co2_ppmv, fsnowoptics, fsnowaging
+                            elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat
 
     ! defaults
     do_elmxx   = .true.
@@ -228,6 +236,7 @@ contains
     fsurdat    = ' '
     fsnowoptics = ' '
     fsnowaging  = ' '
+    finidat     = ' '
     elmxx_check_boundary  = .false.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
@@ -270,6 +279,7 @@ contains
     call mpi_bcast (fsurdat   , len(fsurdat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fsnowoptics, len(fsnowoptics) , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fsnowaging , len(fsnowaging)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (finidat    , len(finidat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
@@ -536,6 +546,15 @@ contains
           ! dtime to size the 10-day running mean, and dtime is an argument to
           ! elmxx_run, not to init. Same reason the soil kernel surface is
           ! built on step one.
+       end if
+
+       ! finidat LAST among the seeding, so it overwrites every cold-start
+       ! value rather than racing them. The soil GRID is deliberately left to
+       ! elmxx_soil_prop_init above -- it is identical by construction and
+       ! pushing it again would only add a way to get it wrong.
+       if (len_trim(finidat) > 0) then
+          call elmxx_finidat_read(finidat, num_columns, num_patches, logunit)
+          call elmxx_kokkos_push_finidat(elmxx_state, logunit)
        end if
 
        ! Parse after seeding, so a blocked kernel's abort names a
