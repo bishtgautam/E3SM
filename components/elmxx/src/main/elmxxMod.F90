@@ -48,6 +48,7 @@ module elmxxMod
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
+  use elmxxSnicarMod         , only : elmxx_snicar_read, elmxx_snicar_clean
   use elmxxRootMod           , only : elmxx_root_init, &
                                       elmxx_root_clean, root_built
   use elmxxPhotosynMod     , only : elmxx_photosyn_init, elmxx_photosyn_seed, &
@@ -81,6 +82,7 @@ module elmxxMod
                                       elmxx_kokkos_push_latlon, &
                                       elmxx_push_monthly_phenology, &
                                       elmxx_kokkos_push_root_statics, &
+                                      elmxx_kokkos_push_snicar_tables, &
                                       elmxx_kokkos_verify_maps, &
                                       elmxx_kokkos_state_clean, &
                                       kokkos_state_built, n_kokkos_col, &
@@ -144,6 +146,11 @@ module elmxxMod
   ! co2_type = 'constant'; the I1850 twin uses 284.7.
   real(r8), public :: elmxx_co2_ppmv = 284.7_r8
   character(len=256), public :: fsurdat    = ' '
+  ! SNICAR lookup tables. Both must be set for SNICAR to run; leave either
+  ! blank and snow albedo stays at the cold-start 0.6 constant, which is
+  ! exactly how ELMxx behaved before SNICAR was ported.
+  character(len=256), public :: fsnowoptics = ' '
+  character(len=256), public :: fsnowaging  = ' '
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
   ! seed, which silently discards a step of physics. That was harmless while
@@ -213,12 +220,14 @@ contains
                             elmxx_check_boundary, elmxx_check_soft_fail, &
                             elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
-                            elmxx_co2_ppmv
+                            elmxx_co2_ppmv, fsnowoptics, fsnowaging
 
     ! defaults
     do_elmxx   = .true.
     fatmlndfrc = ' '
     fsurdat    = ' '
+    fsnowoptics = ' '
+    fsnowaging  = ' '
     elmxx_check_boundary  = .false.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
@@ -259,6 +268,8 @@ contains
     call mpi_bcast (do_elmxx  , 1                , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (fatmlndfrc, len(fatmlndfrc)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fsurdat   , len(fsurdat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (fsnowoptics, len(fsnowoptics) , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (fsnowaging , len(fsnowaging)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
@@ -485,6 +496,18 @@ contains
        ! they are real rather than zero.
        call elmxx_soil_prop_init(logunit)
        call elmxx_kokkos_seed_soil_properties(elmxx_state, logunit)
+
+       ! SNICAR lookup tables. Pushed once; nothing crosses per step. Both
+       ! files must be given -- with either blank, snow albedo stays at the
+       ! cold-start constant and SnowAge_grain is a no-op, which is how ELMxx
+       ! behaved before SNICAR was ported.
+       if (len_trim(fsnowoptics) > 0 .and. len_trim(fsnowaging) > 0) then
+          call elmxx_snicar_read(fsnowoptics, fsnowaging, logunit)
+          call elmxx_kokkos_push_snicar_tables(elmxx_state, logunit)
+       else if (masterproc) then
+          write(logunit,*) '(elmxx_init) SNICAR tables not given; snow albedo '// &
+               'held at the cold-start constant and grain aging disabled'
+       end if
 
        ! Root profile. Needs the PFT parameters and the soil grid, so it comes
        ! after both. btran itself is per-step and is computed in elmxx_run.
