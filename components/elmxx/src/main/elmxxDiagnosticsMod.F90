@@ -43,6 +43,9 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxTopSoilCol, ELMxxGetFracH2osfc,       &
                            ELMxxGetForcRhoCol, ELMxxGetDqgdT, ELMxxGetZii,   &
                            ELMxxGetSweOld, ELMxxGetImeltReal,                &
+                           ELMxxGetQflxDewSnowCol,                          &
+                           ELMxxGetSabgSoil, ELMxxGetSabgSnow,               &
+                           ELMxxGetSabgLyr,                                  &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -483,6 +486,8 @@ contains
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_h2osfc', c1, n_kokkos_col)
     call ELMxxGetFracSnoEff(elm, c1, n_kokkos_col, ierr)
     if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno_eff', c1, n_kokkos_col)
+    call ELMxxGetQflxDewSnowCol(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_dew_snow_col', c1, n_kokkos_col)
     block
       real(r8), allocatable :: cg(:,:)
       integer :: szt(2)
@@ -597,7 +602,20 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':thm', p1, n_kokkos_patch)
       call ELMxxGetQflxEvapGrnd(elm, p1, n_kokkos_patch, ierr)
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_grnd', p1, n_kokkos_patch)
+      call ELMxxGetSabgSoil(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg_soil', p1, n_kokkos_patch)
+      call ELMxxGetSabgSnow(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg_snow', p1, n_kokkos_patch)
       deallocate(p1)
+    end block
+    block
+      real(r8), allocatable :: plyr(:,:)
+      integer :: szp(2)
+      allocate(plyr(n_kokkos_patch, nlevsno+1))
+      szp(1) = n_kokkos_patch; szp(2) = nlevsno + 1
+      call ELMxxGetSabgLyr(elm, plyr, szp, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':sabg_lyr', plyr, n_kokkos_patch, nlevsno+1)
+      deallocate(plyr)
     end block
     deallocate(cg, c1, i1)
   end subroutine elmxx_diag_snapshot_presoiltemp
