@@ -152,6 +152,8 @@ contains
     write(logunit,*) subname,'  swvdr range ',minval(forc_swvdr),maxval(forc_swvdr)
     write(logunit,*) subname,'  rain  range ', &
          minval(forc_rainc+forc_rainl),maxval(forc_rainc+forc_rainl)
+    write(logunit,*) subname,'  snow  range ', &
+         minval(forc_snowc+forc_snowl),maxval(forc_snowc+forc_snowl)
 
     if (all(forc_tbot == 0.0_r8)) then
        write(logunit,*) subname,'WARNING: forc_tbot is all zero; ', &
