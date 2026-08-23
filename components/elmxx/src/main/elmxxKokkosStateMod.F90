@@ -1841,54 +1841,54 @@ contains
 
     ! ---- snow half of the column arrays ----
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(j, c); end do; end do
     call ELMxxSetTSoisnoSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'TSoisnoSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(j, c); end do; end do
     call ELMxxSetH2osoiLiqSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiLiqSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(j, c); end do; end do
     call ELMxxSetH2osoiIceSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiIceSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(j, c); end do; end do
     call ELMxxSetDzSno(elm, bs, sz_sno, ierr);       call check(ierr, subname, 'DzSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(j, c); end do; end do
     call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);      call check(ierr, subname, 'SnwRds')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_qflx_snofrz_lyr(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_qflx_snofrz_lyr(j, c); end do; end do
     call ELMxxSetQflxSnofrzLyr(elm, bs, sz_sno, ierr)
     call check(ierr, subname, 'QflxSnofrzLyr')
 
     ! ---- soil half ----
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevgrnd; bg(kc,j) = fi_t_soisno(c,nlevsno+j); end do; end do
+       do j = 1, nlevgrnd; bg(kc,j) = fi_t_soisno(nlevsno+j, c); end do; end do
     call ELMxxSetTSoisnoSoi(elm, bg, sz_soi, ierr);  call check(ierr, subname, 'TSoisnoSoi')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_liq(c,nlevsno+j); end do; end do
+       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_liq(nlevsno+j, c); end do; end do
     call ELMxxSetH2osoiLiqSoi(elm, bg, sz_soi, ierr); call check(ierr, subname, 'H2osoiLiqSoi')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_ice(c,nlevsno+j); end do; end do
+       do j = 1, nlevgrnd; bg(kc,j) = fi_h2osoi_ice(nlevsno+j, c); end do; end do
     call ELMxxSetH2osoiIceSoi(elm, bg, sz_soi, ierr); call check(ierr, subname, 'H2osoiIceSoi')
 
     ! ---- radiation ----
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, 2; br(kc,j) = fi_albgrd(c,j); end do; end do
+       do j = 1, 2; br(kc,j) = fi_albgrd(j, c); end do; end do
     call ELMxxSetAlbgrd(elm, br, sz_rad_c, ierr);      call check(ierr, subname, 'Albgrd')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, 2; br(kc,j) = fi_albgri(c,j); end do; end do
+       do j = 1, 2; br(kc,j) = fi_albgri(j, c); end do; end do
     call ELMxxSetAlbgri(elm, br, sz_rad_c, ierr);      call check(ierr, subname, 'Albgri')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdv(c,j); end do; end do
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdv(j, c); end do; end do
     call ELMxxSetFlxAbsdv(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsdv')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdn(c,j); end do; end do
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absdn(j, c); end do; end do
     call ELMxxSetFlxAbsdn(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsdn')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absiv(c,j); end do; end do
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absiv(j, c); end do; end do
     call ELMxxSetFlxAbsiv(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsiv')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absin(c,j); end do; end do
+       do j = 1, nlevsno+1; ba(kc,j) = fi_flx_absin(j, c); end do; end do
     call ELMxxSetFlxAbsin(elm, ba, sz_abs, ierr);  call check(ierr, subname, 'FlxAbsin')
 
     ! ---- patch state ----
@@ -1905,10 +1905,10 @@ contains
     do kp = 1, np; p1(kp) = fi_htop(patch_of_kpatch(kp)); end do
     call ELMxxSetHtop(elm, p1, np, ierr);                    call check(ierr, subname, 'Htop')
     do kp = 1, np; pp = patch_of_kpatch(kp)
-       do j = 1, 2; p2(kp,j) = fi_albd(pp,j); end do; end do
+       do j = 1, 2; p2(kp,j) = fi_albd(j, pp); end do; end do
     call ELMxxSetAlbd(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albd')
     do kp = 1, np; pp = patch_of_kpatch(kp)
-       do j = 1, 2; p2(kp,j) = fi_albi(pp,j); end do; end do
+       do j = 1, 2; p2(kp,j) = fi_albi(j, pp); end do; end do
     call ELMxxSetAlbi(elm, p2, sz_rad_p, ierr);              call check(ierr, subname, 'Albi')
 
     ! ---- read back immediately, before anything else can touch it ----
@@ -1929,14 +1929,14 @@ contains
       call check(ierr, subname, 'GetTSoisnoSno')
       do kc2 = 1, nc; c2i = col_of_kcol(kc2)
          do j2 = 1, nlevsno
-            worst_t = max(worst_t, abs(chk(kc2,j2) - fi_t_soisno(c2i,j2)))
+            worst_t = max(worst_t, abs(chk(kc2,j2) - fi_t_soisno(j2, c2i)))
          end do
       end do
       call ELMxxGetDzSno(elm, chk, sz_sno, ierr)
       call check(ierr, subname, 'GetDzSno')
       do kc2 = 1, nc; c2i = col_of_kcol(kc2)
          do j2 = 1, nlevsno
-            worst_d = max(worst_d, abs(chk(kc2,j2) - fi_dzsno(c2i,j2)))
+            worst_d = max(worst_d, abs(chk(kc2,j2) - fi_dzsno(j2, c2i)))
          end do
       end do
       if (masterproc) then
@@ -1995,19 +1995,19 @@ contains
     allocate(bs(nc, nlevsno))
 
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_t_soisno(j, c); end do; end do
     call ELMxxSetTSoisnoSno(elm, bs, sz_sno, ierr);   call check(ierr, subname, 'TSoisnoSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_liq(j, c); end do; end do
     call ELMxxSetH2osoiLiqSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiLiqSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_h2osoi_ice(j, c); end do; end do
     call ELMxxSetH2osoiIceSno(elm, bs, sz_sno, ierr); call check(ierr, subname, 'H2osoiIceSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_dzsno(j, c); end do; end do
     call ELMxxSetDzSno(elm, bs, sz_sno, ierr);        call check(ierr, subname, 'DzSno')
     do kc = 1, nc; c = col_of_kcol(kc)
-       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(c,j); end do; end do
+       do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(j, c); end do; end do
     call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);       call check(ierr, subname, 'SnwRds')
 
     deallocate(bs)

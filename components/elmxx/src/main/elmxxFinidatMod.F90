@@ -14,6 +14,12 @@ module elmxxFinidatMod
   ! READ-ONLY, DELIBERATELY. ELMxx does not write restarts. This is a
   ! debugging instrument, not restart capability; do not mistake it for one.
   !
+  ! NETCDF DIMENSION ORDER. A CDL declaration H2OSOI_LIQ(column, levtot) means
+  ! levtot varies FASTEST in memory, so the matching Fortran array is
+  ! (levtot, column) -- reversed. Declaring it (column, levtot) reads the file
+  ! transposed, which is silent: the shapes are both 2D and PIO does not
+  ! complain. It surfaced as spval appearing mid-array in the soil profile.
+  !
   ! ORDERING. The restart stores snow layers ELM-ordered: index NLEVSNO-1 is
   ! the soil-adjacent layer, and for snl = -n only the last n slots are live.
   ! ELMxx's `_sno` arrays are H7 (slot 0 soil-adjacent). The setters flip on
@@ -43,14 +49,14 @@ module elmxxFinidatMod
 
   ! ---- column state, ELM ordering ----
   integer , allocatable, public :: fi_snl(:)               ! (ncol)
-  real(r8), allocatable, public :: fi_t_soisno(:,:)        ! (ncol, nlevtot)
-  real(r8), allocatable, public :: fi_h2osoi_liq(:,:)      ! (ncol, nlevtot)
-  real(r8), allocatable, public :: fi_h2osoi_ice(:,:)      ! (ncol, nlevtot)
-  real(r8), allocatable, public :: fi_dzsno(:,:)           ! (ncol, nlevsno)
-  real(r8), allocatable, public :: fi_zsno(:,:)            ! (ncol, nlevsno)
-  real(r8), allocatable, public :: fi_zisno(:,:)           ! (ncol, nlevsno)
-  real(r8), allocatable, public :: fi_snw_rds(:,:)         ! (ncol, nlevsno)
-  real(r8), allocatable, public :: fi_qflx_snofrz_lyr(:,:) ! (ncol, nlevsno)
+  real(r8), allocatable, public :: fi_t_soisno(:,:)        ! (nlevtot, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_h2osoi_liq(:,:)      ! (nlevtot, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_h2osoi_ice(:,:)      ! (nlevtot, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_dzsno(:,:)           ! (nlevsno, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_zsno(:,:)            ! (nlevsno, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_zisno(:,:)           ! (nlevsno, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_snw_rds(:,:)         ! (nlevsno, ncol) -- see the ordering note
+  real(r8), allocatable, public :: fi_qflx_snofrz_lyr(:,:) ! (nlevsno, ncol) -- see the ordering note
   real(r8), allocatable, public :: fi_snow_depth(:), fi_h2osno(:), fi_int_snow(:)
   real(r8), allocatable, public :: fi_frac_sno(:), fi_frac_sno_eff(:)
   real(r8), allocatable, public :: fi_t_grnd(:), fi_t_h2osfc(:), fi_h2osfc(:)
@@ -104,23 +110,23 @@ contains
     call check_dim(ncid, fname, 'levtot',  nlevtot_r)
 
     allocate(fi_snl(fi_ncol))
-    allocate(fi_t_soisno  (fi_ncol, nlevtot_r), &
-             fi_h2osoi_liq(fi_ncol, nlevtot_r), &
-             fi_h2osoi_ice(fi_ncol, nlevtot_r))
-    allocate(fi_dzsno(fi_ncol, nlevsno_r), fi_zsno(fi_ncol, nlevsno_r), &
-             fi_zisno(fi_ncol, nlevsno_r), fi_snw_rds(fi_ncol, nlevsno_r), &
-             fi_qflx_snofrz_lyr(fi_ncol, nlevsno_r))
+    allocate(fi_t_soisno  (nlevtot_r, fi_ncol), &
+             fi_h2osoi_liq(nlevtot_r, fi_ncol), &
+             fi_h2osoi_ice(nlevtot_r, fi_ncol))
+    allocate(fi_dzsno(nlevsno_r, fi_ncol), fi_zsno(nlevsno_r, fi_ncol), &
+             fi_zisno(nlevsno_r, fi_ncol), fi_snw_rds(nlevsno_r, fi_ncol), &
+             fi_qflx_snofrz_lyr(nlevsno_r, fi_ncol))
     allocate(fi_snow_depth(fi_ncol), fi_h2osno(fi_ncol), fi_int_snow(fi_ncol), &
              fi_frac_sno(fi_ncol), fi_frac_sno_eff(fi_ncol), &
              fi_t_grnd(fi_ncol), fi_t_h2osfc(fi_ncol), fi_h2osfc(fi_ncol), &
              fi_frac_h2osfc(fi_ncol), fi_coszen(fi_ncol), &
              fi_wa(fi_ncol), fi_zwt(fi_ncol))
-    allocate(fi_albgrd(fi_ncol,2), fi_albgri(fi_ncol,2))
-    allocate(fi_flx_absdv(fi_ncol, nlevsno_r+1), fi_flx_absdn(fi_ncol, nlevsno_r+1), &
-             fi_flx_absiv(fi_ncol, nlevsno_r+1), fi_flx_absin(fi_ncol, nlevsno_r+1))
+    allocate(fi_albgrd(2, fi_ncol), fi_albgri(2, fi_ncol))
+    allocate(fi_flx_absdv(nlevsno_r+1, fi_ncol), fi_flx_absdn(nlevsno_r+1, fi_ncol), &
+             fi_flx_absiv(nlevsno_r+1, fi_ncol), fi_flx_absin(nlevsno_r+1, fi_ncol))
     allocate(fi_t_veg(fi_npft), fi_h2ocan(fi_npft), fi_fwet(fi_npft), &
              fi_elai(fi_npft), fi_esai(fi_npft), fi_htop(fi_npft))
-    allocate(fi_albd(fi_npft,2), fi_albi(fi_npft,2))
+    allocate(fi_albd(2, fi_npft), fi_albi(2, fi_npft))
 
     call read_int1d (ncid, fname, 'SNLSNO'      , fi_snl)
     call read_real2d(ncid, fname, 'T_SOISNO'    , fi_t_soisno)
@@ -326,16 +332,16 @@ contains
        call shr_sys_abort(subname//'ERROR: soil properties not built yet')
     end if
     if (size(col_t_soisno,1) /= fi_ncol .or. &
-        size(col_t_soisno,2) /= nlevtot_r) then
+        size(col_t_soisno,2) /= nlevtot_r) then   ! soil-prop side is (col, lev)
        call shr_sys_abort(subname//'ERROR: soil-prop arrays are not the '// &
             'shape of the restart')
     end if
 
     do c = 1, fi_ncol
        do j = 1, nlevtot_r
-          col_t_soisno  (c,j) = fi_t_soisno  (c,j)
-          col_h2osoi_liq(c,j) = fi_h2osoi_liq(c,j)
-          col_h2osoi_ice(c,j) = fi_h2osoi_ice(c,j)
+          col_t_soisno  (c,j) = fi_t_soisno  (j,c)
+          col_h2osoi_liq(c,j) = fi_h2osoi_liq(j,c)
+          col_h2osoi_ice(c,j) = fi_h2osoi_ice(j,c)
        end do
     end do
 
