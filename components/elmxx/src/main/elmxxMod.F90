@@ -41,6 +41,7 @@ module elmxxMod
                                       ELMxxComputeRootStressNatural, &
                                       ELMxxComputeGroundHeatFluxNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
+                                      ELMxxGetQflxSubSnow, ELMxxGetQflxDewSnow, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
                                       ELMxxComputeForcingDerivedNatural, &
                                       ELMxxComputePhotosynForcingNatural, &
@@ -188,6 +189,7 @@ module elmxxMod
   integer, private :: nstep = -1
   logical, private :: root_statics_pushed = .false.
   logical, private :: ghf_sb_pushed = .false.
+  logical, private :: ghf_flux_reported = .false.
   logical, private :: photosyn_statics_pushed = .false.
   logical, private :: monthly_phen_pushed = .false.
 
@@ -887,6 +889,35 @@ contains
           call ELMxxComputeGroundHeatFluxNatural(elmxx_state, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
                call shr_sys_abort('(elmxx_run) ERROR: ComputeGroundHeatFluxNatural failed')
+
+          ! One-time check: does anything partition qflx_ev_snow into
+          ! qflx_sub_snow / qflx_dew_snow? ELM's SoilFluxesMod does this right
+          ! after the heat solve (SoilFluxesMod.F90:445-461); nothing in
+          ! ELMxx's dispatch writes naturalPatch.qflx_sub_snow/qflx_dew_snow,
+          ! so SnowHydrologyImpl's dew/sublimation renewal of the top snow
+          ! layer -- which reads them via a patch-to-column reduction -- is
+          ! suspected to be a structural no-op. Reported once rather than
+          ! asserted: this is what the check is FOR, not a known-good bound.
+          if (.not. ghf_flux_reported .and. masterproc .and. num_patches > 0) then
+             block
+               real(r8), allocatable :: sub(:), dew(:)
+               integer :: ierr_g
+               allocate(sub(num_patches), dew(num_patches))
+               call ELMxxGetQflxSubSnow(elmxx_state, sub, num_patches, ierr_g)
+               call ELMxxGetQflxDewSnow(elmxx_state, dew, num_patches, ierr_g)
+               write(logunit,*) '(elmxx_run) qflx_sub_snow [kg/m2/s] range ', &
+                    minval(sub),' .. ',maxval(sub)
+               write(logunit,*) '(elmxx_run) qflx_dew_snow [kg/m2/s] range ', &
+                    minval(dew),' .. ',maxval(dew)
+               if (all(sub == 0.0_r8) .and. all(dew == 0.0_r8)) then
+                  write(logunit,*) '(elmxx_run) SUSPECT: qflx_sub_snow and '// &
+                       'qflx_dew_snow are both zero everywhere -- nothing in '// &
+                       'the dispatch appears to write them from qflx_ev_snow'
+               end if
+               deallocate(sub, dew)
+             end block
+             ghf_flux_reported = .true.
+          end if
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
