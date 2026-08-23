@@ -48,6 +48,7 @@ module elmxxKernelMod
                                ELMxxComputeSnowWater, &
                                ELMxxComputeSnowCompaction, &
                                ELMxxComputeSnowLayers, &
+                               ELMxxSnowAgeGrainNatural, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
                                ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
@@ -68,7 +69,7 @@ module elmxxKernelMod
 
   ! Driver order. This is the order the kernels run in, and the order they
   ! should be activated in. It is ELM's driver order, not alphabetical.
-  integer, parameter, public :: NKERNEL = 19
+  integer, parameter, public :: NKERNEL = 20
 
   !--------------------------------------------------------------------------
   ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
@@ -124,6 +125,10 @@ module elmxxKernelMod
   ! and compaction/combine/divide at the very end, after drainage.
   integer, parameter, public :: K_SNOWWATER   = 18
   integer, parameter, public :: K_SNOWLAYERS  = 19
+  ! ELM ages the grain near the end of the step, after hydrology has settled
+  ! the layers and before SurfaceAlbedo reads snw_rds. A no-op unless the
+  ! SNICAR tables were given.
+  integer, parameter, public :: K_SNOWAGE     = 20
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
        'canhydro        ', 'cansunshade     ', 'surfrad         ', &
@@ -132,7 +137,7 @@ module elmxxKernelMod
        'laketemp        ', 'soiltemp        ', 'soilflux        ', &
        'surfrunoff      ', 'rootwater       ', 'soilwater       ', &
        'lakehydro       ', 'hydrodrain      ', &
-       'snowwater       ', 'snowlayers      ' ]
+       'snowwater       ', 'snowlayers      ', 'snowage         ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -280,6 +285,15 @@ contains
        ! melted, and above all was never PACKED AWAY by CombineSnowLayers when
        ! its density fell below 50 kg/m3. ELM creates and removes that layer
        ! within the same step; ELMxx created it and kept it forever.
+       why = ' '
+
+    case (K_SNOWAGE)
+       ! Snow grain aging, which is half of SNICAR -- the other half is the
+       ! radiative transfer inside SurfaceAlbedo. Both are validated against
+       ! ELM (albedo to 6e-14, grain radius bit-exactly), but the kernel is
+       ! inert unless fsnowoptics and fsnowaging are both given in the
+       ! namelist. Without aging snw_rds never moves off the fresh-snow value
+       ! and the snowpack stays permanently bright.
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
@@ -570,6 +584,14 @@ contains
        call check(ierr, logunit, K_SNOWLAYERS)
        call ELMxxComputeSnowLayers(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWLAYERS)
+    end if
+
+    ! Grain aging LAST among the snow kernels: it must see the layers
+    ! hydrology finally settled on, and its result is read by SurfaceAlbedo
+    ! at the end of the step.
+    if (kernel_active(K_SNOWAGE)) then
+       call ELMxxSnowAgeGrainNatural(elm, ierr)
+       call check(ierr, logunit, K_SNOWAGE)
     end if
 
     end if

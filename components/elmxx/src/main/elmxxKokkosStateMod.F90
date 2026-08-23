@@ -109,6 +109,7 @@ module elmxxKokkosStateMod
                                ELMxxSetAlbd, ELMxxSetAlbi, &
                                ELMxxSetFabd, ELMxxSetFabi, &
                                ELMxxSetFtdd, ELMxxSetFtid, ELMxxSetFtii, &
+                               ELMxxSetSnicarOptics, ELMxxSetSnowAgeTables, &
                                ELMxxSetFlxAbsdv, ELMxxSetFlxAbsdn, &
                                ELMxxSetFlxAbsiv, ELMxxSetFlxAbsin, &
                                ELMxxSetSnl        , ELMxxGetSnl, &
@@ -165,6 +166,7 @@ module elmxxKokkosStateMod
   public :: elmxx_push_monthly_phenology
   public :: elmxx_kokkos_push_forcing
   public :: elmxx_kokkos_push_root_statics
+  public :: elmxx_kokkos_push_snicar_tables
   public :: elmxx_kokkos_verify_maps
   public :: elmxx_kokkos_state_clean
 
@@ -1694,5 +1696,48 @@ contains
     n_kokkos_col = 0; n_kokkos_patch = 0; n_kokkos_urb = 0
     kokkos_state_built = .false.
   end subroutine elmxx_kokkos_state_clean
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_snicar_tables(elm, logunit)
+    !
+    ! !DESCRIPTION:
+    ! Push both SNICAR lookup tables to the device. Once, at init.
+    !
+    ! The arrays are handed over as they sit in memory. elmxxSnicarMod declares
+    ! them (radius, band) and (density, dTdz, T) precisely so that their memory
+    ! is already the C ordering the device side expects -- (band, radius) and
+    ! (T, dTdz, density). Do not "fix" those declarations without transposing
+    ! here, or the tables will be read diagonally and produce albedos that look
+    ! plausible and are wrong.
+    !
+    use elmxxSnicarMod, only : snicar_tables_read, &
+                               ss_alb_drc, asm_prm_drc, ext_cff_drc, &
+                               ss_alb_dfs, asm_prm_dfs, ext_cff_dfs, &
+                               snowage_tau, snowage_kappa, snowage_drdt0
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_snicar_tables) '
+
+    if (.not. snicar_tables_read) then
+       call shr_sys_abort(subname//'ERROR: SNICAR tables not read')
+    end if
+
+    call ELMxxSetSnicarOptics(elm, ss_alb_drc, asm_prm_drc, ext_cff_drc, &
+                              ss_alb_dfs, asm_prm_dfs, ext_cff_dfs, ierr)
+    call check(ierr, subname, 'SnicarOptics')
+
+    call ELMxxSetSnowAgeTables(elm, snowage_tau, snowage_kappa, &
+                               snowage_drdt0, ierr)
+    call check(ierr, subname, 'SnowAgeTables')
+
+    if (masterproc) then
+       write(logunit,*) subname,'pushed SNICAR optics and aging tables'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine elmxx_kokkos_push_snicar_tables
 
 end module elmxxKokkosStateMod

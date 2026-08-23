@@ -46,6 +46,28 @@ Unlike ELM, ELMXX has no -clm_usr_name machinery to derive this from a naming
 convention, so it must be set explicitly -- normally in user_nl_elmxx.
 </entry>
 
+<entry id="fsnowoptics"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+SNICAR snow optics lookup table (Mie parameters for ice grains).
+Both this and fsnowaging must be set for SNICAR to run; with either blank
+snow albedo stays at the cold-start 0.6 constant and grain aging is a no-op.
+Default: ' '
+</entry>
+
+<entry id="fsnowaging"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+SNICAR snow grain aging lookup table (best-fit tau, kappa, drdsdt0).
+Default: ' '
+</entry>
+
 <entry id="elmxx_check_boundary"
        type="logical"
        category="elmxx"
