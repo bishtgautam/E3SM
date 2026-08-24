@@ -46,6 +46,8 @@ module elmxxDiagnosticsMod
                            ELMxxGetQflxDewSnowCol,                          &
                            ELMxxGetSabgSoil, ELMxxGetSabgSnow,               &
                            ELMxxGetSabgLyr,                                  &
+                           ELMxxGetQflxSnowGrnd, ELMxxGetQflxRainGrnd,       &
+                           ELMxxGetQflxPrecIntr,                             &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -90,6 +92,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_snapshot_presoilflux
   public :: elmxx_diag_snapshot_presoiltemp
   public :: elmxx_diag_snapshot_soilwater
+  public :: elmxx_diag_snapshot_postcanhydro
   public :: elmxx_diag_write_maps
 
 contains
@@ -635,5 +638,33 @@ contains
          call elmxx_diag_2d(tag//':h2osoi_liq', cg, n_kokkos_col, nlevgrnd_in)
     deallocate(cg)
   end subroutine elmxx_diag_snapshot_soilwater
+
+  subroutine elmxx_diag_snapshot_postcanhydro(elm, tag)
+    ! CanopyHydrology's own outputs, right after it runs. No existing
+    ! snapshot point captures this -- the earliest is 'elmxx_st', which
+    ! runs just before SoilTemperature, several kernels later. Added to
+    ! trace whether canopy interception delivers the same snowfall to the
+    ! ground as ELM (G11, STATUS.md): a per-event bias here, unlike the
+    ! melt-diversion path checked and ruled out already, would fire on
+    ! every snowfall step and so could plausibly compound over a month.
+    type(ELMxxType) , intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    integer :: ierr
+    real(r8), allocatable :: c1(:), p1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(c1(n_kokkos_col))
+    call ELMxxGetQflxSnowGrnd(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_snow_grnd', c1, n_kokkos_col)
+    call ELMxxGetQflxRainGrnd(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_rain_grnd', c1, n_kokkos_col)
+    deallocate(c1)
+    if (n_kokkos_patch > 0) then
+       allocate(p1(n_kokkos_patch))
+       call ELMxxGetQflxPrecIntr(elm, p1, n_kokkos_patch, ierr)
+       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_prec_intr', p1, n_kokkos_patch)
+       deallocate(p1)
+    end if
+  end subroutine elmxx_diag_snapshot_postcanhydro
 
 end module elmxxDiagnosticsMod
