@@ -26,7 +26,7 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro
+  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
@@ -504,6 +504,7 @@ contains
     if (kernel_active(K_CANFLUX)) then
        call ELMxxComputeCanopyFluxes(elm, dtime, ierr)
        call check(ierr, logunit, K_CANFLUX)
+       call elmxx_diag_snapshot_postcanflux(elm, 'elmxx_cf')
     end if
 
     if (kernel_active(K_URBANFLUX)) then

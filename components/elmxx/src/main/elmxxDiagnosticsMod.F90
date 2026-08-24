@@ -47,7 +47,7 @@ module elmxxDiagnosticsMod
                            ELMxxGetSabgSoil, ELMxxGetSabgSnow,               &
                            ELMxxGetSabgLyr,                                  &
                            ELMxxGetQflxSnowGrnd, ELMxxGetQflxRainGrnd,       &
-                           ELMxxGetQflxPrecIntr,                             &
+                           ELMxxGetQflxPrecIntr, ELMxxGetQflxEvapVeg,        &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
                            ELMxxGetTH2osfc, ELMxxGetH2osfc,                 &
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
@@ -93,6 +93,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_snapshot_presoiltemp
   public :: elmxx_diag_snapshot_soilwater
   public :: elmxx_diag_snapshot_postcanhydro
+  public :: elmxx_diag_snapshot_postcanflux
   public :: elmxx_diag_write_maps
 
 contains
@@ -666,5 +667,29 @@ contains
        deallocate(p1)
     end if
   end subroutine elmxx_diag_snapshot_postcanhydro
+
+  subroutine elmxx_diag_snapshot_postcanflux(elm, tag)
+    ! CanopyFluxes' own outputs, right after it runs -- the dew/evaporation
+    ! term (h2ocan += (qflx_tran_veg - qflx_evap_veg)*dtime) is where G11's
+    ! h2ocan divergence was traced to (STATUS.md): the formula is validated
+    ! identical to ELM's, so if h2ocan still diverges here, the cause is
+    ! qflx_evap_veg/qflx_tran_veg themselves differing, not this update.
+    type(ELMxxType) , intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    integer :: ierr
+    real(r8), allocatable :: p1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_patch <= 0) return
+    allocate(p1(n_kokkos_patch))
+    call ELMxxGetQflxEvapVeg(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_evap_veg', p1, n_kokkos_patch)
+    call ELMxxGetQflxTranVeg(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_tran_veg', p1, n_kokkos_patch)
+    call ELMxxGetH2ocan(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':h2ocan', p1, n_kokkos_patch)
+    call ELMxxGetTVeg(elm, p1, n_kokkos_patch, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':t_veg', p1, n_kokkos_patch)
+    deallocate(p1)
+  end subroutine elmxx_diag_snapshot_postcanflux
 
 end module elmxxDiagnosticsMod
