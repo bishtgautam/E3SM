@@ -65,3 +65,6 @@ components/eamxx/src/python/dist
 components/emulators/build
 **/Testing/**
 **/.cache/**
+
+# ELMxx planning docs -- intentionally untracked (local working notes)
+components/elmxx/plans/
