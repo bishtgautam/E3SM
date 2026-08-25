@@ -27,6 +27,7 @@ module lnd_comp_mct
   use elmxxMod        , only : elmxx_init_albedo
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
+  use elmxxMod        , only : elmxx_caseid
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
   use elmxx_cpl_indices, only : elmxx_cpl_indices_set
@@ -99,7 +100,7 @@ CONTAINS
     integer :: shrlogunit                     ! original log unit
     integer :: shrloglev                      ! original log level
     integer :: mpicom_loc                     ! local mpi communicator
-    integer :: month, day
+    integer :: month, day, year
     logical :: exists                         ! true if file exists
 
     character(*), parameter :: subName = "(lnd_init_mct) "
@@ -156,8 +157,14 @@ CONTAINS
        return
     end if
 
-    call get_clock_date(EClock, month, day)
-    call elmxx_init(logunit_lnd, month, day)
+    call get_clock_date(EClock, month, day, year)
+
+    ! History output filenames are casename-derived (casename.elmxx.h0.*.nc),
+    ! same as ELM's own h0 convention -- caseid was not read anywhere in
+    ! ELMxx before history needed it.
+    call seq_infodata_GetData(infodata, case_name=elmxx_caseid)
+
+    call elmxx_init(logunit_lnd, year, month, day)
 
     !----------------------------------------------------------------------------
     ! Register the ELMxx decomposition and domain with the coupler
@@ -242,8 +249,10 @@ CONTAINS
     real(r8) :: declinp1         ! solar declination for that step, radians
     real(r8) :: eccen, obliqr, lambm0, mvelpp, eccf
     type(ESMF_TimeInterval) :: elmxx_step
+    type(ESMF_Time) :: hist_time
     logical  :: dosend, doalb_step
     integer  :: rc, cyr, cmon, cday, ctod, cymd
+    integer  :: hist_year, hist_month, hist_day, hist_tod
     !-------------------------------------------------------------------------------
 
     if (.not. do_elmxx) return
@@ -297,8 +306,21 @@ CONTAINS
           doalb_step = (nextsw_cday >= -0.5_r8)
        end if
 
+       ! History's month-end trigger needs the per-substep END time -- a
+       ! separate clock read from elmxx_clock_time (this substep's START),
+       ! not the once-per-coupling-interval month/day above. Deliberately a
+       ! new argument rather than repurposing month/day: those already drive
+       ! phenology, and changing what they carry as a side effect of adding
+       ! history would risk a silent phenology behavior change.
+       hist_time = elmxx_clock_time + elmxx_step
+       call ESMF_TimeGet(hist_time, yy=hist_year, mm=hist_month, dd=hist_day, &
+                         s=hist_tod, rc=rc)
+       call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet hist_time')
+
        call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
-                      nextsw_cday, declinp1, doalb=doalb_step)
+                      nextsw_cday, declinp1, doalb=doalb_step, &
+                      hist_year=hist_year, hist_month=hist_month, &
+                      hist_day=hist_day, hist_tod=hist_tod)
 
        elmxx_nstep = elmxx_nstep + 1
        elmxx_clock_time = elmxx_clock_time + elmxx_step
@@ -323,10 +345,20 @@ CONTAINS
     type(seq_cdata)             ,intent(inout) :: cdata
     type(mct_aVect)             ,intent(inout) :: x2l_l, l2x_l
     !-------------------------------------------------------------------------------
+    type(ESMF_Time) :: current_time
+    integer :: rc, year, month, day, tod
 
     if (.not. do_elmxx) return
 
-    call elmxx_final()
+    ! EClock is received but was otherwise unused here; history's partial-
+    ! month flush needs an end time for the trailing (possibly incomplete)
+    ! interval, so extract it the same way get_clock_date does.
+    call ESMF_ClockGet(EClock, currTime=current_time, rc=rc)
+    call chkrc(rc, 'lnd::lnd_final_mct: error return from ESMF_ClockGet')
+    call ESMF_TimeGet(current_time, yy=year, mm=month, dd=day, s=tod, rc=rc)
+    call chkrc(rc, 'lnd::lnd_final_mct: error return from ESMF_TimeGet')
+
+    call elmxx_final(year, month, day, tod)
 
     if (masterproc .and. logunit_lnd /= 6) close (logunit_lnd)
 
@@ -501,21 +533,26 @@ CONTAINS
 
   !===============================================================================
 
-  subroutine get_clock_date(EClock, month, day)
+  subroutine get_clock_date(EClock, month, day, year)
 
     ! Extract the component clock date used by satellite phenology.  The
     ! EClock passed into the run phase is already at the end of this coupling
     ! interval, matching ELM's get_curr_date(offset=dtime) convention.
+    !
+    ! year is optional and, until history needed it, was computed here and
+    ! discarded -- elmxx_init's hist_year argument now uses it.
 
     type(ESMF_Clock), intent(inout) :: EClock
     integer, intent(out) :: month, day
+    integer, intent(out), optional :: year
     type(ESMF_Time) :: current_time
-    integer :: rc, year, seconds
+    integer :: rc, yy, seconds
 
     call ESMF_ClockGet(EClock, currTime=current_time, rc=rc)
     call chkrc(rc, 'lnd::get_clock_date: error return from ESMF_ClockGet')
-    call ESMF_TimeGet(current_time, yy=year, mm=month, dd=day, s=seconds, rc=rc)
+    call ESMF_TimeGet(current_time, yy=yy, mm=month, dd=day, s=seconds, rc=rc)
     call chkrc(rc, 'lnd::get_clock_date: error return from ESMF_TimeGet')
+    if (present(year)) year = yy
 
   end subroutine get_clock_date
 

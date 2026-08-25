@@ -228,4 +228,20 @@ every canopy flux, so they are checked at read time. Use the same
 file as the ELM twin, or the two models are not comparable.
 </entry>
 
+<entry id="elmxx_hist_fincl"
+       type="char*256"
+       category="elmxx"
+       group="elmxx_inparm"
+       valid_values="" >
+Default: '' (just the C++-side default field list)
+Comma-separated list of ADDITIONAL history fields to activate, beyond the
+default set RegisterHistoryField marks default_active in History.cpp (TG,
+TV, H2OSNO, FSA, EFLX_LH_TOT, FSH, QOVER, QDRAI today). Not a full
+restatement of the field list, unlike elmxx_kernels above -- an empty string
+means exactly the C++-side defaults, not "no history."
+
+An unknown name, or a name already active by default, aborts at
+elmxx_hist_init -- same enforced-rather-than-silent policy as elmxx_kernels.
+</entry>
+
 </namelist_definition>
