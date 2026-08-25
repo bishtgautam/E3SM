@@ -313,6 +313,11 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'elmxx_do_photosynthesis');
     add_default($nl, 'elmxx_co2_ppmv');
 
+    # History output. Empty by default -- additions/overrides beyond the
+    # C++-side default field list (RegisterHistoryField's default_active),
+    # not a full restatement of it.
+    add_default($nl, 'elmxx_hist_fincl', 'nofail'=>1);
+
     # PFT parameter file. No default and no naming convention to derive one,
     # same as fsurdat; needed once root water stress is in play.
     if (defined $nl->get_value('fparamfile')) {

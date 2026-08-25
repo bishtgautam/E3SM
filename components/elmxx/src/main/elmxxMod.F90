@@ -65,6 +65,9 @@ module elmxxMod
                                    elmxx_diag_snapshot_state,              &
                                    elmxx_diag_snapshot_fluxes,             &
                                    elmxx_diag_write_maps
+  use elmxxHistMod           , only : elmxx_hist_init, elmxx_hist_step, &
+                                      elmxx_hist_write_if_month_end, &
+                                      elmxx_hist_final
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
@@ -172,6 +175,13 @@ module elmxxMod
   character(len=256), public :: elmxx_kernels = ' '
   ! PFT parameter file (ELM's clm_params). Needed once root water stress runs.
   character(len=256), public :: fparamfile = ' '
+  ! History output. Additions/overrides BEYOND the C++-side default field
+  ! list (RegisterHistoryField's default_active) -- empty means just the
+  ! defaults. See elmxxHistMod.
+  character(len=256), public :: elmxx_hist_fincl = ' '
+  ! Case name, read from infodata in lnd_init_mct (not read anywhere in
+  ! ELMxx before history needed it for the output filename).
+  character(len=256), public :: elmxx_caseid = ' '
 
   !--------------------------------------------------------------------------
   ! Instance information
@@ -190,6 +200,13 @@ module elmxxMod
   logical, private :: ghf_sb_pushed = .false.
   logical, private :: photosyn_statics_pushed = .false.
   logical, private :: monthly_phen_pushed = .false.
+  ! History's activation is deferred to elmxx_run (see the comment at its
+  ! call site there): it needs col_npfts/col_pfti/wtcol, which
+  ! elmxx_soil_kernel_init pushes on the first step, not elmxx_init.
+  logical, private :: hist_state_init_done = .false.
+  integer, private :: elmxx_hist_start_year = 0
+  integer, private :: elmxx_hist_start_month = 0
+  integer, private :: elmxx_hist_start_day = 0
 
   !--------------------------------------------------------------------------
   ! ELMxx Kokkos/C++ model object
@@ -230,7 +247,8 @@ contains
                             elmxx_check_boundary, elmxx_check_soft_fail, &
                             elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
-                            elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat
+                            elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
+                            elmxx_hist_fincl
 
     ! defaults
     do_elmxx   = .true.
@@ -247,6 +265,7 @@ contains
     elmxx_stomata_closed  = .false.
     elmxx_do_photosynthesis = .false.
     elmxx_co2_ppmv        = 284.7_r8
+    elmxx_hist_fincl      = ' '
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -286,6 +305,7 @@ contains
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fparamfile   , len(fparamfile)   , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_hist_fincl, len(elmxx_hist_fincl), MPI_CHARACTER, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -297,13 +317,14 @@ contains
        write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
        write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
+       write(logunit,*) '   elmxx_hist_fincl      = ', trim(elmxx_hist_fincl)
        call shr_sys_flush(logunit)
     end if
 
   end subroutine elmxx_read_namelist
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_init(logunit, month, day)
+  subroutine elmxx_init(logunit, hist_year, month, day)
     !
     ! !DESCRIPTION:
     ! Initialize ELMxx: read the land domain and build the round-robin
@@ -311,7 +332,7 @@ contains
     !
     implicit none
     !
-    integer, intent(in) :: logunit, month, day
+    integer, intent(in) :: logunit, hist_year, month, day
     !
     integer :: i, n, k
     integer :: num_cells_grid                  ! ni*nj, including non-land cells
@@ -492,6 +513,17 @@ contains
        if (nfail_maps /= 0) then
           call shr_sys_abort(subname//' ERROR: packed map invariants violated')
        end if
+
+       ! History's activation (elmxx_hist_init) needs col_npfts/col_pfti/wtcol
+       ! for its PATCH_TO_COL sum(wtcol)==1 check -- those are NOT seeded here
+       ! (checked directly: elmxxSoilKernelMod.F90 is the only place
+       ! ELMxxSetColNpfts/ColPfti/Wtcol are ever called, from
+       ! elmxx_soil_kernel_init, which elmxx_run's first step calls). So
+       ! elmxx_hist_init itself is deferred to there -- see elmxx_run, right
+       ! after the soil-kernel bring-up block. Interval start is recorded now.
+       elmxx_hist_start_year  = hist_year
+       elmxx_hist_start_month = month
+       elmxx_hist_start_day   = day
 
        call elmxx_kokkos_seed_topology(elmxx_state, logunit)
        call elmxx_kokkos_seed_state(elmxx_state, logunit)
@@ -722,7 +754,8 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine elmxx_run(logunit, coupling_dt_in_sec, month, day, &
-                       nextsw_cday, declinp1, doalb)
+                       nextsw_cday, declinp1, doalb, &
+                       hist_year, hist_month, hist_day, hist_tod)
     !
     ! !DESCRIPTION:
     ! Advance ELMxx one coupling interval.
@@ -738,6 +771,11 @@ contains
     real(r8), intent(in) :: declinp1      ! solar declination for it, radians
     integer, intent(in) :: month, day
     logical, intent(in), optional :: doalb  ! .false. on ELM's nstep-0 pass
+    ! History month-end trigger needs the per-substep END time, which is a
+    ! different clock read from month,day above (that pair drives phenology
+    ! and must not change meaning as a side effect of adding history --
+    ! see the plan's "Two small changes outside the new module").
+    integer, intent(in), optional :: hist_year, hist_month, hist_day, hist_tod
 
     logical :: do_albedo_this_step
     logical :: doalb_in            ! the driver's doalb, independent of config
@@ -830,6 +868,22 @@ contains
              call elmxx_kokkos_reseed_finidat_snow(elmxx_state, logunit)
           end if
        end if
+    end if
+
+    ! History's PATCH_TO_COL activation needs col_npfts/col_pfti/wtcol, which
+    ! the block just above is what actually pushes (elmxx_soil_kernel_init ->
+    ! ELMxxSetColNpfts/ColPfti/Wtcol in elmxxSoilKernelMod.F90) -- checked
+    ! directly after this call failed with the invariant check seeing an
+    ! all-zero wtcol when history was still being activated from elmxx_init.
+    ! If no soil/hydrology kernel is ever active, soil_kernel_built never
+    ! becomes true and history is never activated either -- no crash, just no
+    ! output, which is the same prerequisite the soil kernels themselves have.
+    if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done) then
+       call elmxx_hist_init(elmxx_state, logunit, elmxx_caseid, elmxx_hist_fincl, &
+                            elmxx_hist_start_year, elmxx_hist_start_month, &
+                            elmxx_hist_start_day, n_kokkos_col, num_cells_global, &
+                            natural_id_cells_owned, lonc_g, latc_g, areac_g)
+       hist_state_init_done = .true.
     end if
 
     if (kokkos_state_built .and. any_kernel_active) then
@@ -966,6 +1020,23 @@ contains
        call elmxx_verify_kokkos_boundary(logunit)
     end if
 
+    !-----------------------------------------------------------------------
+    ! History: accumulate every step, write at month-end. AFTER the
+    ! phenology/SurfaceAlbedo block above (not at elmxx_diag_snapshot_fluxes,
+    ! which runs before it) -- see the plan's "Corrections from review" for
+    ! why placing this earlier would accumulate the previous step's
+    ! ELAI/ESAI/LAISUN/LAISHA. Not gated on any_kernel_active: history should
+    ! track whatever state exists, cold-start or not.
+    !-----------------------------------------------------------------------
+    if (kokkos_state_built .and. subgrid_built) then
+       call elmxx_hist_step(elmxx_state, logunit)
+       if (present(hist_year) .and. present(hist_month) .and. &
+           present(hist_day) .and. present(hist_tod)) then
+          call elmxx_hist_write_if_month_end(elmxx_state, hist_year, hist_month, &
+                                             hist_day, hist_tod, logunit)
+       end if
+    end if
+
     if (masterproc) then
        write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
        call shr_sys_flush(logunit)
@@ -1048,12 +1119,13 @@ contains
   end subroutine elmxx_verify_kokkos_boundary
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_final()
+  subroutine elmxx_final(hist_year, hist_month, hist_day, hist_tod)
     !
     ! !DESCRIPTION:
     ! Finalize ELMxx.
     !
     implicit none
+    integer, intent(in) :: hist_year, hist_month, hist_day, hist_tod
 
     integer :: ierr_elmxx
 
@@ -1063,6 +1135,12 @@ contains
     ! Kokkos views, and destroying them after the runtime is gone is undefined.
     !-----------------------------------------------------------------------
     if (elmxx_state_created) then
+       ! History's partial-month flush needs elmxx_state, so it must run
+       ! BEFORE ELMxxDestroy, not after.
+       if (subgrid_built) then
+          call elmxx_hist_final(elmxx_state, hist_year, hist_month, hist_day, &
+                                hist_tod, iulog)
+       end if
        call ELMxxDestroy(elmxx_state, ierr_elmxx)
        if (ierr_elmxx /= ELMXX_SUCCESS) then
           write(iulog,*) 'elmxx_final: ELMxxDestroy failed with status ',ierr_elmxx
