@@ -17,6 +17,8 @@ module SatellitePhenologyMod
   use abortutils      , only : endrun
   use elm_varctl      , only : scmlat,scmlon,single_column
   use elm_varctl      , only : iulog, use_lai_streams
+  use elm_varctl      , only : lai_sai_fixed_year
+  use fileutils       , only : getfil
   use elm_varcon      , only : grlnd
   use controlMod      , only : NLFilename
   use decompMod       , only : gsmap_lnd_gdc2glo
@@ -59,6 +61,9 @@ module SatellitePhenologyMod
   real(r8), private, allocatable :: msai2t(:,:) ! sai for interpolation (2 months)
   real(r8), private, allocatable :: mhvt2t(:,:) ! top vegetation height for interpolation (2 months)
   real(r8), private, allocatable :: mhvb2t(:,:) ! bottom vegetation height for interpolation(2 months)
+  integer , private :: lai_sai_year_min          ! minimum year in fsurdat's 'year' coordinate variable
+  integer , private :: lai_sai_year_max          ! maximum year in fsurdat's 'year' coordinate variable
+  integer , private :: lai_sai_nyears            ! length of the 'year' dimension (wraparound cycle length)
   !-----------------------------------------------------------------------
 
 contains
@@ -262,12 +267,19 @@ contains
     !
     ! !USES:
     use shr_infnan_mod, only : nan => shr_infnan_nan, assignment(=)
+    use elm_varctl     , only : fsurdat
     !
     ! !ARGUMENTS:
     type(bounds_type), intent(in) :: bounds
     !
     ! !LOCAL VARIABLES:
     integer :: ier    ! error code
+    character(len=256) :: locfn           ! local file name
+    type(file_desc_t)  :: ncid            ! netcdf id
+    integer :: dimid                      ! netcdf dimension id
+    logical :: readvar                    ! true => variable/dimension is on file
+    integer, allocatable :: year_vals(:)  ! values of the 'year' coordinate variable
+    character(len=32) :: subname = 'SatellitePhenologyInit'
     !-----------------------------------------------------------------------
 
     InterpMonths1 = -999  ! saved month index
@@ -288,6 +300,34 @@ contains
     msai2t(bounds%begp : bounds%endp, :) = nan
     mhvt2t(bounds%begp : bounds%endp, :) = nan
     mhvb2t(bounds%begp : bounds%endp, :) = nan
+
+    ! Determine the valid range of years for MONTHLY_LAI/MONTHLY_SAI from the fsurdat
+    ! file's 'year' coordinate variable, instead of assuming a hard-coded range.
+    call getfil(fsurdat, locfn, 0)
+    call ncd_pio_openfile (ncid, trim(locfn), 0)
+    call ncd_inqdid(ncid, 'year', dimid, readvar)
+    if (.not. readvar) call endrun(msg=trim(subname)//' ERROR: year dimension NOT on fsurdat file'//errMsg(__FILE__, __LINE__))
+    call ncd_inqdlen(ncid, dimid, lai_sai_nyears, 'year')
+    allocate(year_vals(lai_sai_nyears))
+    call ncd_io(ncid=ncid, varname='year', flag='read', data=year_vals, readvar=readvar)
+    if (.not. readvar) call endrun(msg=trim(subname)//' ERROR: year NOT on fsurdat file'//errMsg(__FILE__, __LINE__))
+    lai_sai_year_min = minval(year_vals)
+    lai_sai_year_max = maxval(year_vals)
+    deallocate(year_vals)
+    call ncd_pio_closefile(ncid)
+
+    if (masterproc) then
+       write(iulog,*) trim(subname), ' fsurdat year range for MONTHLY_LAI/MONTHLY_SAI = ', &
+            lai_sai_year_min, ' to ', lai_sai_year_max
+    end if
+
+    if (lai_sai_fixed_year > 0) then
+       if (lai_sai_fixed_year < lai_sai_year_min .or. lai_sai_fixed_year > lai_sai_year_max) then
+          write(iulog,*) trim(subname), ' ERROR: lai_sai_fixed_year = ', lai_sai_fixed_year, &
+               ' is outside the fsurdat year range [', lai_sai_year_min, ',', lai_sai_year_max, ']'
+          call endrun(msg=trim(subname)//' ERROR: lai_sai_fixed_year out of range '//errMsg(__FILE__, __LINE__))
+       end if
+    end if
 
     if (use_lai_streams) then
        call lai_init(bounds)
@@ -428,7 +468,7 @@ contains
     real(r8):: t           ! a fraction: kda/ndaypm
     integer :: it(2)       ! month 1 and month 2 (step 1)
     integer :: months(2)   ! months to be interpolated (1 to 12)
-    integer :: kyrs(2)   ! years in which months to be interpolated (2001 to 2020)
+    integer :: kyrs(2)   ! years in which months to be interpolated (within fsurdat's year range)
     integer, dimension(12) :: ndaypm= &
          (/31,28,31,30,31,30,31,31,30,31,30,31/) !days per month
     !-----------------------------------------------------------------------
@@ -449,13 +489,18 @@ contains
     	months(2) = 1
     	kyrs(2) = kyr + 1
     end if
-    
-    do while (kyrs(1) > 2019)
-    	kyrs(1) = kyrs(1) - 19
+
+    if (lai_sai_fixed_year > 0) then
+       kyrs(1) = lai_sai_fixed_year
+       kyrs(2) = lai_sai_fixed_year
+    end if
+
+    do while (kyrs(1) > lai_sai_year_max)
+    	kyrs(1) = kyrs(1) - lai_sai_nyears
     end do
-    
-    do while (kyrs(2) > 2019)
-    	kyrs(2) = kyrs(2) - 19
+
+    do while (kyrs(2) > lai_sai_year_max)
+    	kyrs(2) = kyrs(2) - lai_sai_nyears
     end do
     
     timwt(1) = (it(1)+0.5_r8) - t
@@ -464,7 +509,8 @@ contains
     if (InterpMonths1 /= months(1)) then
        if (masterproc) then
           write(iulog,*) 'Attempting to read monthly vegetation data .....'
-          write(iulog,*) 'nstep = ',get_nstep(),' year = ',kyr,' month = ',kmo,' day = ',kda
+          write(iulog,*) 'nstep = ',get_nstep(),' year = ',kyr,' month = ',kmo,' day = ',kda, &
+               ' data years used (kyrs) = ',kyrs(1),kyrs(2)
        end if
        call t_startf('readMonthlyVeg')
        call readMonthlyVegetation (bounds, fsurdat, months, kyrs, canopystate_vars)
@@ -622,8 +668,8 @@ contains
     ! Determine necessary indices
 
     allocate(&
-         mlai(bounds%begg:bounds%endg,1:max_topounits,0:numpft,2001:2019), &
-         msai(bounds%begg:bounds%endg,1:max_topounits,0:numpft,2001:2019), &  
+         mlai(bounds%begg:bounds%endg,1:max_topounits,0:numpft,lai_sai_year_min:lai_sai_year_max), &
+         msai(bounds%begg:bounds%endg,1:max_topounits,0:numpft,lai_sai_year_min:lai_sai_year_max), &
          mhgtt(bounds%begg:bounds%endg,1:max_topounits,0:numpft), &
          mhgtb(bounds%begg:bounds%endg,1:max_topounits,0:numpft), &
          stat=ier)

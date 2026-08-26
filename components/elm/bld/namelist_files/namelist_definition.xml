@@ -1316,6 +1316,13 @@ Toggle to turn on use of LAI streams in place of the LAI on the surface dataset 
 (EXPERIMENTAL and NOT tested)
 </entry>
 
+<entry id="lai_sai_fixed_year" type="integer" category="physics"
+        group="elm_inparm" valid_values="" value="0">
+If greater than 0, hold MONTHLY_LAI/MONTHLY_SAI at this calendar year for the entire run instead of
+tracking the model clock's year. Must fall within the fsurdat file's 'year' coordinate range.
+A value of 0 disables this option (default).
+</entry>
+
 <entry id="stream_year_first_lai" type="integer" category="datasets"
        group="lai_streams" valid_values="" >
 First year to loop over for LAI data

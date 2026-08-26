@@ -276,7 +276,7 @@ contains
 
     namelist /elm_inparm / use_betr
 
-    namelist /elm_inparm / use_lai_streams
+    namelist /elm_inparm / use_lai_streams, lai_sai_fixed_year
 
     namelist /elm_inparm/  &
          use_c14_bombspike, atm_c14_filename
@@ -843,6 +843,8 @@ contains
 
     call mpi_bcast (use_lai_streams, 1, MPI_LOGICAL, 0, mpicom, ier)
 
+    call mpi_bcast (lai_sai_fixed_year, 1, MPI_INTEGER, 0, mpicom, ier)
+
     call mpi_bcast (use_dynroot, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     call mpi_bcast (use_lake_wat_storage, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1060,6 +1062,7 @@ contains
     write(iulog,*) '    use_mexicocity = ', use_mexicocity
     write(iulog,*) '    use_noio = ', use_noio
     write(iulog,*) '    use_betr = ', use_betr
+    write(iulog,*) '    lai_sai_fixed_year = ', lai_sai_fixed_year
     write(iulog,*) '    use_IM2_hillslope_hydrology = ', use_IM2_hillslope_hydrology
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
     write(iulog,*) '    precip_downscaling_method = ', precip_downscaling_method

@@ -268,6 +268,11 @@ module elm_varctl
   !----------------------------------------------------------
 
   logical, public :: use_lai_streams = .false. ! true => use lai streams in SatellitePhenologyMod.F90
+
+  integer, public :: lai_sai_fixed_year = 0 ! if > 0, hold MONTHLY_LAI/MONTHLY_SAI at this calendar
+                                             ! year for the whole run instead of tracking the model
+                                             ! clock's year (must fall within the fsurdat file's
+                                             ! 'year' coordinate range)
   !----------------------------------------------------------
   ! plant hydraulic stress switch
   !----------------------------------------------------------
