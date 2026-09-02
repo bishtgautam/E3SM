@@ -46,6 +46,7 @@ module elmxxKernelMod
                                ELMxxComputeSoilWaterNatural, &
                                ELMxxComputeHydrologyDrainageNatural, &
                                ELMxxComputeWaterTableNatural, &
+                               ELMxxComputeBeginWaterBalanceNatural, &
                                ELMxxComputeSnowWater, &
                                ELMxxComputeSnowCompaction, &
                                ELMxxComputeSnowLayers, &
@@ -70,7 +71,7 @@ module elmxxKernelMod
 
   ! Driver order. This is the order the kernels run in, and the order they
   ! should be activated in. It is ELM's driver order, not alphabetical.
-  integer, parameter, public :: NKERNEL = 21
+  integer, parameter, public :: NKERNEL = 22
 
   !--------------------------------------------------------------------------
   ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
@@ -135,6 +136,10 @@ module elmxxKernelMod
   ! companion Drainage is not a separate token -- it runs at the top of
   ! hydrodrain, where ELM calls it.
   integer, parameter, public :: K_WATERTABLE  = 20
+  ! BeginColWaterBalance: ELM takes the column water inventory at the very
+  ! top of the step (elm_driver.F90:559), before any physics. Dispatched
+  ! first below, regardless of where this sits in the token list.
+  integer, parameter, public :: K_BEGWATERBAL = 22
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
        'canhydro        ', 'cansunshade     ', 'surfrad         ', &
@@ -144,7 +149,7 @@ module elmxxKernelMod
        'surfrunoff      ', 'rootwater       ', 'soilwater       ', &
        'lakehydro       ', 'hydrodrain      ', &
        'snowwater       ', 'snowlayers      ', 'watertable      ', &
-       'snowage         ' ]
+       'snowage         ', 'begwaterbal     ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -301,6 +306,10 @@ contains
        ! inert unless fsnowoptics and fsnowaging are both given in the
        ! namelist. Without aging snw_rds never moves off the fresh-snow value
        ! and the snowpack stays permanently bright.
+       why = ' '
+
+    case (K_BEGWATERBAL)
+       ! Bookkeeping, not physics: reads state Stage 2 already seeds.
        why = ' '
 
     case (K_WATERTABLE)
@@ -481,6 +490,14 @@ contains
     end if
 
     if (phase == 1) then
+
+    ! ELM snapshots the column water inventory at the very top of the step,
+    ! before any physics (elm_driver.F90:559). It must therefore be first
+    ! here too, whatever order the namelist lists it in.
+    if (kernel_active(K_BEGWATERBAL)) then
+       call ELMxxComputeBeginWaterBalanceNatural(elm, ierr)
+       call check(ierr, logunit, K_BEGWATERBAL)
+    end if
 
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
