@@ -84,6 +84,7 @@ module elmxxMod
                                       elmxx_kokkos_seed_stomata_closed, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
+                                      elmxx_kokkos_push_shared_precip, &
                                       elmxx_kokkos_push_latlon, &
                                       elmxx_push_monthly_phenology, &
                                       elmxx_kokkos_push_root_statics, &
@@ -884,6 +885,16 @@ contains
                             elmxx_hist_start_day, n_kokkos_col, num_cells_global, &
                             natural_id_cells_owned, lonc_g, latc_g, areac_g)
        hist_state_init_done = .true.
+    end if
+
+    ! Shared topounit-indexed precipitation. It has to be here rather than in
+    ! elmxx_kokkos_push_forcing above: the views it writes are allocated by
+    ! elmxx_soil_kernel_init, which runs lazily in the block just above on the
+    ! first step, so pushing earlier aborts step 1. Still ahead of the kernel
+    ! dispatch below, so it is current on every step. Feeds the water balance
+    ! check's precipitation term.
+    if (kokkos_state_built .and. soil_kernel_built) then
+       call elmxx_kokkos_push_shared_precip(elmxx_state, logunit)
     end if
 
     if (kokkos_state_built .and. any_kernel_active) then
