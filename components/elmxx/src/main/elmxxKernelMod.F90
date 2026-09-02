@@ -45,6 +45,7 @@ module elmxxKernelMod
                                ELMxxComputeRootWaterUpdateNatural, &
                                ELMxxComputeSoilWaterNatural, &
                                ELMxxComputeHydrologyDrainageNatural, &
+                               ELMxxComputeWaterTableNatural, &
                                ELMxxComputeSnowWater, &
                                ELMxxComputeSnowCompaction, &
                                ELMxxComputeSnowLayers, &
@@ -69,7 +70,7 @@ module elmxxKernelMod
 
   ! Driver order. This is the order the kernels run in, and the order they
   ! should be activated in. It is ELM's driver order, not alphabetical.
-  integer, parameter, public :: NKERNEL = 20
+  integer, parameter, public :: NKERNEL = 21
 
   !--------------------------------------------------------------------------
   ! ELM'S DRIVER ORDER, TAKEN FROM elm_driver.F90 RATHER THAN REASONED OUT.
@@ -128,7 +129,12 @@ module elmxxKernelMod
   ! ELM ages the grain near the end of the step, after hydrology has settled
   ! the layers and before SurfaceAlbedo reads snw_rds. A no-op unless the
   ! SNICAR tables were given.
-  integer, parameter, public :: K_SNOWAGE     = 20
+  integer, parameter, public :: K_SNOWAGE     = 21
+  ! WaterTable: ELM runs it inside HydrologyNoDrainage, after the Richards
+  ! solve and before the snow kernels (HydrologyNoDrainageMod.F90:290). Its
+  ! companion Drainage is not a separate token -- it runs at the top of
+  ! hydrodrain, where ELM calls it.
+  integer, parameter, public :: K_WATERTABLE  = 20
 
   character(len=16), parameter, public :: kernel_name(NKERNEL) = [ &
        'canhydro        ', 'cansunshade     ', 'surfrad         ', &
@@ -137,7 +143,8 @@ module elmxxKernelMod
        'laketemp        ', 'soiltemp        ', 'soilflux        ', &
        'surfrunoff      ', 'rootwater       ', 'soilwater       ', &
        'lakehydro       ', 'hydrodrain      ', &
-       'snowwater       ', 'snowlayers      ', 'snowage         ' ]
+       'snowwater       ', 'snowlayers      ', 'watertable      ', &
+       'snowage         ' ]
 
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
@@ -294,6 +301,11 @@ contains
        ! inert unless fsnowoptics and fsnowaging are both given in the
        ! namelist. Without aging snw_rds never moves off the fresh-snow value
        ! and the snowpack stays permanently bright.
+       why = ' '
+
+    case (K_WATERTABLE)
+       ! Runnable wherever soilwater is: it reads the same soil state plus
+       ! qcharge, which SoilWater produces.
        why = ' '
 
     case (K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, K_ROOTWATER, K_HYDRODRAIN)
@@ -562,6 +574,14 @@ contains
     if (kernel_active(K_SOILWATER)) then
        call ELMxxComputeSoilWaterNatural(elm, dtime, ierr)
        call check(ierr, logunit, K_SOILWATER)
+    end if
+
+    ! ELM calls WaterTable here, right after the Richards solve and before
+    ! the snow kernels (HydrologyNoDrainageMod.F90:290). It is what advances
+    ! zwt from aquifer recharge; without it the water table never moves.
+    if (kernel_active(K_WATERTABLE)) then
+       call ELMxxComputeWaterTableNatural(elm, ierr)
+       call check(ierr, logunit, K_WATERTABLE)
     end if
 
     ! Straight after the Richards solve, before HydrologyDrainage moves water.
