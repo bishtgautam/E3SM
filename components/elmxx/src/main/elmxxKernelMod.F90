@@ -27,6 +27,7 @@ module elmxxKernelMod
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux
+  use elmxxKokkosStateMod , only : n_kokkos_col
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
@@ -48,6 +49,7 @@ module elmxxKernelMod
                                ELMxxComputeWaterTableNatural, &
                                ELMxxComputeBeginWaterBalanceNatural, &
                                ELMxxComputeWaterBalanceCheckNatural, &
+                               ELMxxGetWaterInventoryNatural, &
                                ELMxxComputeSnowWater, &
                                ELMxxComputeSnowCompaction, &
                                ELMxxComputeSnowLayers, &
@@ -155,6 +157,29 @@ module elmxxKernelMod
        'snowwater       ', 'snowlayers      ', 'watertable      ', &
        'snowage         ', 'begwaterbal     ', 'balancecheck    ' ]
 
+  !--------------------------------------------------------------------------
+  ! Per-kernel water budget.
+  !
+  ! A water balance that does not close says the model gained or lost water
+  ! but not where. This brackets every active kernel with the SAME column
+  ! inventory begwb/endwb use, so differencing consecutive marks attributes
+  ! the change to one kernel. Most kernels only move water between reservoirs
+  ! and should show zero; one that changes the total without reporting a
+  ! matching flux is the leak.
+  !
+  ! Off unless ELMXX_WBAL is set in the environment, following ELMXX_DIAG.
+  !--------------------------------------------------------------------------
+  logical,  private :: wbal_on      = .false.
+  logical,  private :: wbal_probed  = .false.
+  integer,  private :: wbal_ncol    = 0
+  integer,  private :: wbal_nstep   = 0
+  real(r8), private, allocatable :: wbal_prev(:)      ! inventory at last mark
+  real(r8), private, allocatable :: wbal_cur(:)
+  real(r8), private, allocatable :: wbal_accum(:)     ! per-kernel, summed over run
+  real(r8), private, allocatable :: wbal_first(:)     ! per-kernel, first step
+
+  public :: elmxx_wbal_report
+
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
 
@@ -166,6 +191,90 @@ module elmxxKernelMod
   public :: elmxx_report_surfrad
 
 contains
+
+  !-----------------------------------------------------------------------
+  subroutine wbal_begin(elm, ncol)
+    !
+    ! Start a step's budget: allocate on first use, read the env gate, and
+    ! take the opening inventory mark.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: ncol
+
+    integer :: ierr, dlen
+    character(len=8) :: val
+
+    if (.not. wbal_probed) then
+       wbal_probed = .true.
+       call get_environment_variable('ELMXX_WBAL', val, dlen)
+       wbal_on = (dlen > 0)
+    end if
+    if (.not. wbal_on .or. ncol <= 0) return
+
+    if (.not. allocated(wbal_prev)) then
+       wbal_ncol = ncol
+       allocate(wbal_prev(ncol), wbal_cur(ncol))
+       allocate(wbal_accum(NKERNEL), wbal_first(NKERNEL))
+       wbal_accum = 0._r8
+       wbal_first = 0._r8
+    end if
+
+    wbal_nstep = wbal_nstep + 1
+    call ELMxxGetWaterInventoryNatural(elm, wbal_prev, wbal_ncol, ierr)
+  end subroutine wbal_begin
+
+  !-----------------------------------------------------------------------
+  subroutine wbal_mark(elm, k)
+    !
+    ! Attribute the change in column water since the previous mark to kernel
+    ! k. Column 1 only: these are single-column validation cases, and a
+    ! per-column breakdown would bury the signal.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: k
+
+    integer :: ierr
+
+    if (.not. wbal_on .or. wbal_ncol <= 0) return
+
+    call ELMxxGetWaterInventoryNatural(elm, wbal_cur, wbal_ncol, ierr)
+    wbal_accum(k) = wbal_accum(k) + (wbal_cur(1) - wbal_prev(1))
+    if (wbal_nstep == 1) wbal_first(k) = wbal_cur(1) - wbal_prev(1)
+    wbal_prev(1:wbal_ncol) = wbal_cur(1:wbal_ncol)
+  end subroutine wbal_mark
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_wbal_report(logunit)
+    !
+    ! Per-kernel water budget, accumulated over the run.
+    !
+    ! Read it against expectation, not against zero in isolation: on
+    ! 1x1_brazil only canhydro (precipitation in), the flux kernels
+    ! (evaporation out), surfrunoff and hydrodrain should move total column
+    ! water at all. Anything else with a non-trivial total is changing
+    ! storage without a flux to match, which is the shape of a leak.
+    !
+    implicit none
+    integer, intent(in) :: logunit
+    integer :: k
+
+    if (.not. wbal_on .or. .not. allocated(wbal_accum)) return
+
+    write(logunit,'(a)') ' '
+    write(logunit,'(a)') '=== ELMxx per-kernel water budget (column 1) ==='
+    write(logunit,'(a,i0,a)') 'steps: ', wbal_nstep, &
+         '   units: mm of column water'
+    write(logunit,'(a)') 'kernel            first step        run total'
+    do k = 1, NKERNEL
+       if (.not. kernel_active(k)) cycle
+       write(logunit,'(a16,2x,es16.8,2x,es16.8)') kernel_name(k), &
+            wbal_first(k), wbal_accum(k)
+    end do
+    write(logunit,'(a)') '==============================================='
+    write(logunit,'(a)') ' '
+  end subroutine elmxx_wbal_report
 
   !-----------------------------------------------------------------------
   function blocked_reason(k) result(why)
@@ -499,6 +608,9 @@ contains
 
     if (phase == 1) then
 
+    ! Opening mark for the per-kernel water budget (no-op unless ELMXX_WBAL).
+    call wbal_begin(elm, n_kokkos_col)
+
     ! ELM snapshots the column water inventory at the very top of the step,
     ! before any physics (elm_driver.F90:559). It must therefore be first
     ! here too, whatever order the namelist lists it in.
@@ -506,58 +618,69 @@ contains
        call ELMxxComputeBeginWaterBalanceNatural(elm, ierr)
        call check(ierr, logunit, K_BEGWATERBAL)
     end if
+    call wbal_mark(elm, K_BEGWATERBAL)
 
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
        call check(ierr, logunit, K_CANHYDRO)
        call elmxx_diag_snapshot_postcanhydro(elm, 'elmxx_ch')
     end if
+    call wbal_mark(elm, K_CANHYDRO)
 
     if (kernel_active(K_CANSUNSHADE)) then
        call ELMxxComputeCanopySunShadeFractions(elm, ierr)
        call check(ierr, logunit, K_CANSUNSHADE)
     end if
+    call wbal_mark(elm, K_CANSUNSHADE)
 
     if (kernel_active(K_SURFRAD)) then
        call ELMxxComputeSurfaceRadiation(elm, ierr)
        call check(ierr, logunit, K_SURFRAD)
     end if
+    call wbal_mark(elm, K_SURFRAD)
 
     if (kernel_active(K_URBANRAD)) then
        call ELMxxComputeUrbanRadiation(elm, ierr)
        call check(ierr, logunit, K_URBANRAD)
     end if
+    call wbal_mark(elm, K_URBANRAD)
 
     if (kernel_active(K_CANTEMP)) then
        call ELMxxComputeCanopyTemperature(elm, ierr)
        call check(ierr, logunit, K_CANTEMP)
     end if
+    call wbal_mark(elm, K_CANTEMP)
 
     if (kernel_active(K_BAREGRND)) then
        call ELMxxComputeBareGroundFluxes(elm, ierr)
        call check(ierr, logunit, K_BAREGRND)
     end if
+    call wbal_mark(elm, K_BAREGRND)
 
     if (kernel_active(K_CANFLUX)) then
        call ELMxxComputeCanopyFluxes(elm, dtime, ierr)
        call check(ierr, logunit, K_CANFLUX)
        call elmxx_diag_snapshot_postcanflux(elm, 'elmxx_cf')
     end if
+    call wbal_mark(elm, K_CANFLUX)
 
     if (kernel_active(K_URBANFLUX)) then
        call ELMxxComputeUrbanFluxes(elm, ierr)
        call check(ierr, logunit, K_URBANFLUX)
     end if
+    call wbal_mark(elm, K_URBANFLUX)
 
     if (kernel_active(K_LAKEFLUX)) then
        call ELMxxComputeLakeFluxes(elm, ierr)
        call check(ierr, logunit, K_LAKEFLUX)
     end if
+    call wbal_mark(elm, K_LAKEFLUX)
 
     if (kernel_active(K_LAKETEMP)) then
        call ELMxxComputeLakeTemperature(elm, ierr)
        call check(ierr, logunit, K_LAKETEMP)
     end if
+    call wbal_mark(elm, K_LAKETEMP)
 
     end if
 
@@ -569,6 +692,7 @@ contains
        call ELMxxComputeSoilTemperatureNatural(elm, ierr)
        call check(ierr, logunit, K_SOILTEMP)
     end if
+    call wbal_mark(elm, K_SOILTEMP)
 
     call elmxx_diag_snapshot_presoilflux(elm, nlevsno + nlevgrnd, 'elmxx_sf')
 
@@ -576,6 +700,7 @@ contains
        call ELMxxComputeSoilFluxesNatural(elm, ierr)
        call check(ierr, logunit, K_SOILFLUX)
     end if
+    call wbal_mark(elm, K_SOILFLUX)
 
     ! ELM HydrologyNoDrainage calls SnowWater first, ahead of SurfaceRunoff:
     ! meltwater leaving the snowpack is part of what reaches the soil surface.
@@ -583,6 +708,7 @@ contains
        call ELMxxComputeSnowWater(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWWATER)
     end if
+    call wbal_mark(elm, K_SNOWWATER)
 
     call elmxx_diag_snapshot_preinfil(elm, 'elmxx_ri')
 
@@ -590,16 +716,19 @@ contains
        call ELMxxComputeSurfRunInfilHydroActive(elm, ierr)
        call check(ierr, logunit, K_SURFRUNOFF)
     end if
+    call wbal_mark(elm, K_SURFRUNOFF)
 
     if (kernel_active(K_ROOTWATER)) then
        call ELMxxComputeRootWaterUpdateNatural(elm, ierr)
        call check(ierr, logunit, K_ROOTWATER)
     end if
+    call wbal_mark(elm, K_ROOTWATER)
 
     if (kernel_active(K_SOILWATER)) then
        call ELMxxComputeSoilWaterNatural(elm, dtime, ierr)
        call check(ierr, logunit, K_SOILWATER)
     end if
+    call wbal_mark(elm, K_SOILWATER)
 
     ! ELM calls WaterTable here, right after the Richards solve and before
     ! the snow kernels (HydrologyNoDrainageMod.F90:290). It is what advances
@@ -608,6 +737,7 @@ contains
        call ELMxxComputeWaterTableNatural(elm, ierr)
        call check(ierr, logunit, K_WATERTABLE)
     end if
+    call wbal_mark(elm, K_WATERTABLE)
 
     ! Straight after the Richards solve, before HydrologyDrainage moves water.
     call elmxx_diag_snapshot_soilwater(elm, nlevgrnd, 'elmxx_sw')
@@ -616,11 +746,13 @@ contains
        call ELMxxComputeLakeHydrology(elm, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
     end if
+    call wbal_mark(elm, K_LAKEHYDRO)
 
     if (kernel_active(K_HYDRODRAIN)) then
        call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
        call check(ierr, logunit, K_HYDRODRAIN)
     end if
+    call wbal_mark(elm, K_HYDRODRAIN)
 
     ! Compaction, then combine, then divide -- ELM's order at the end of
     ! HydrologyNoDrainage. CombineSnowLayers is what packs away a layer too
@@ -632,6 +764,7 @@ contains
        call ELMxxComputeSnowLayers(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWLAYERS)
     end if
+    call wbal_mark(elm, K_SNOWLAYERS)
 
     ! Grain aging LAST among the snow kernels: it must see the layers
     ! hydrology finally settled on, and its result is read by SurfaceAlbedo
@@ -640,6 +773,7 @@ contains
        call ELMxxSnowAgeGrainNatural(elm, ierr)
        call check(ierr, logunit, K_SNOWAGE)
     end if
+    call wbal_mark(elm, K_SNOWAGE)
 
     ! ELM runs the balance check once the hydrology has finished
     ! (elm_driver.F90:1333), so it goes last here whatever order the
@@ -649,6 +783,7 @@ contains
        call ELMxxComputeWaterBalanceCheckNatural(elm, ierr)
        call check(ierr, logunit, K_BALANCECHK)
     end if
+    call wbal_mark(elm, K_BALANCECHK)
 
     end if
 

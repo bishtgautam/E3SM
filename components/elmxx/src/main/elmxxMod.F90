@@ -69,6 +69,7 @@ module elmxxMod
                                       elmxx_hist_write_if_month_end, &
                                       elmxx_hist_final
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
+                                      elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
                                       K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, &
@@ -1139,6 +1140,10 @@ contains
     integer, intent(in) :: hist_year, hist_month, hist_day, hist_tod
 
     integer :: ierr_elmxx
+
+    ! Per-kernel water budget, if ELMXX_WBAL was set in the environment.
+    ! Before teardown: it reads state the destroy below releases.
+    call elmxx_wbal_report(iulog)
 
     !-----------------------------------------------------------------------
     ! Tear down in reverse order of elmxx_init: object first, then Kokkos.
