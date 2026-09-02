@@ -91,6 +91,7 @@ module elmxxKokkosStateMod
                                ELMxxSetForcUCol, ELMxxSetForcVCol, &
                                ELMxxSetForcThCol, ELMxxSetForcT, &
                                ELMxxSetForcRain, ELMxxSetForcSnow, &
+                               ELMxxSetSharedForcRain, ELMxxSetSharedForcSnow, &
                                ELMxxSetDewmx, ELMxxSetMicroSigma, ELMxxSetNMelt, &
                                ELMxxSetFracVegNosno, ELMxxSetFwet, ELMxxSetH2ocan, &
                                ELMxxSetH2osfc, ELMxxSetIntSnow, &
@@ -172,6 +173,7 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_push_latlon
   public :: elmxx_push_monthly_phenology
   public :: elmxx_kokkos_push_forcing
+  public :: elmxx_kokkos_push_shared_precip
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_push_snicar_tables
   public :: elmxx_kokkos_push_finidat
@@ -1398,6 +1400,53 @@ contains
     integer, intent(in) :: kc
     cell_of_kcol = lun_gridcell(col_landunit(col_of_kcol(kc)))
   end function cell_of_kcol
+
+  !-----------------------------------------------------------------------
+  !-----------------------------------------------------------------------
+  subroutine elmxx_kokkos_push_shared_precip(elm, logunit)
+    !
+    ! Push precipitation into the SHARED, topounit-indexed views.
+    !
+    ! Separate from elmxx_kokkos_push_forcing for one reason: the shared views
+    ! are allocated by ELMxxInitSharedMetadata, which elmxx_soil_kernel_init
+    ! calls lazily on elmxx_run's FIRST step -- after push_forcing has already
+    ! run. Doing it there aborted step 1 with a size mismatch. This is called
+    ! instead from elmxx_run after the soil-kernel bring-up block and before
+    ! the kernels dispatch, so it is correct on every step including the
+    ! first. Same lazy-init ordering that once moved elmxx_hist_init.
+    !
+    ! ELMxxInitSharedMetadata allocates exactly one topounit and
+    ! ELMxxSetColTopounit maps every column to it, so this is a single value.
+    ! Revisit for a genuinely multi-topounit configuration.
+    !
+    ! These setters were imported but never called until 2026-09-02, leaving
+    ! shared%forc_rain/forc_snow identically zero. Nothing noticed, because
+    ! their only consumer was HydrologyDrainage's wetland qflx_qrgwl branch,
+    ! which no natural column takes -- until the water balance check went in
+    ! and reported an error that turned out to be exactly the missing
+    ! precipitation.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+
+    integer  :: g, ierr
+    real(r8) :: rtopo1(1)
+    character(len=*), parameter :: subname = '(elmxx_kokkos_push_shared_precip) '
+
+    if (n_kokkos_patch <= 0) return
+
+    g = cell_of_kpatch(1)
+
+    rtopo1(1) = forc_rainc(g) + forc_rainl(g)
+    call ELMxxSetSharedForcRain(elm, rtopo1, 1, ierr)
+    call check(ierr, subname, 'SharedForcRain')
+
+    rtopo1(1) = forc_snowc(g) + forc_snowl(g)
+    call ELMxxSetSharedForcSnow(elm, rtopo1, 1, ierr)
+    call check(ierr, subname, 'SharedForcSnow')
+
+  end subroutine elmxx_kokkos_push_shared_precip
 
   !-----------------------------------------------------------------------
   integer function cell_of_kpatch(kp)
