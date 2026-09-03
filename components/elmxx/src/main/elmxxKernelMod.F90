@@ -127,7 +127,11 @@ module elmxxKernelMod
   integer, parameter, public :: K_LAKEHYDRO   = 16
   integer, parameter, public :: K_HYDRODRAIN  = 17
   ! ELM runs SnowWater at the top of HydrologyNoDrainage, before SurfaceRunoff,
-  ! and compaction/combine/divide at the very end, after drainage.
+  ! and compaction/combine/divide at the end of that SAME module
+  ! (HydrologyNoDrainageMod.F90:312-320) -- i.e. still BEFORE HydrologyDrainage,
+  ! not after it. An earlier version of this comment said "after drainage" and
+  ! the dispatch order below followed it; corrected 2026-09-02, with the
+  ! reasoning at the call site.
   integer, parameter, public :: K_SNOWWATER   = 18
   integer, parameter, public :: K_SNOWLAYERS  = 19
   ! ELM ages the grain near the end of the step, after hydrology has settled
@@ -742,6 +746,32 @@ contains
     ! Straight after the Richards solve, before HydrologyDrainage moves water.
     call elmxx_diag_snapshot_soilwater(elm, nlevgrnd, 'elmxx_sw')
 
+    ! Compaction, then combine, then divide.
+    !
+    ! CORRECTED 2026-09-02. This block used to sit AFTER hydrodrain, and the
+    ! comment claimed ELM ran it "at the very end, after drainage". ELM does
+    ! not: SnowCompaction/CombineSnowLayers/DivideSnowLayers are called from
+    ! HydrologyNoDrainageMod.F90:312-320, i.e. BEFORE HydrologyDrainage, and
+    ! HydrologyDrainageMod.F90:253 says so outright -- "since need snow
+    ! updated from CombineSnowLayers". The ordering matters because
+    ! HydrologyDrainage is where endwb is taken (:182): with snowlayers after
+    ! it, endwb was computed on a snowpack CombineSnowLayers had not yet
+    ! resummed, so every step's water balance closed against the wrong snow
+    ! mass and the discrepancy was carried into the next step's begwb. On
+    ! 1x1_glc that showed up as ERRH2O tracking the unmatched inventory change
+    ! the per-kernel budget attributed to `snowlayers`.
+    !
+    ! CombineSnowLayers is also what packs away a layer too thin or too light
+    ! to keep (bulk density below 50 kg/m3); without it a layer
+    ! CanopyHydrology created never goes away again.
+    if (kernel_active(K_SNOWLAYERS)) then
+       call ELMxxComputeSnowCompaction(elm, dtime, ierr)
+       call check(ierr, logunit, K_SNOWLAYERS)
+       call ELMxxComputeSnowLayers(elm, dtime, ierr)
+       call check(ierr, logunit, K_SNOWLAYERS)
+    end if
+    call wbal_mark(elm, K_SNOWLAYERS)
+
     if (kernel_active(K_LAKEHYDRO)) then
        call ELMxxComputeLakeHydrology(elm, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
@@ -753,18 +783,6 @@ contains
        call check(ierr, logunit, K_HYDRODRAIN)
     end if
     call wbal_mark(elm, K_HYDRODRAIN)
-
-    ! Compaction, then combine, then divide -- ELM's order at the end of
-    ! HydrologyNoDrainage. CombineSnowLayers is what packs away a layer too
-    ! thin or too light to keep (bulk density below 50 kg/m3); without it a
-    ! layer CanopyHydrology created never goes away again.
-    if (kernel_active(K_SNOWLAYERS)) then
-       call ELMxxComputeSnowCompaction(elm, dtime, ierr)
-       call check(ierr, logunit, K_SNOWLAYERS)
-       call ELMxxComputeSnowLayers(elm, dtime, ierr)
-       call check(ierr, logunit, K_SNOWLAYERS)
-    end if
-    call wbal_mark(elm, K_SNOWLAYERS)
 
     ! Grain aging LAST among the snow kernels: it must see the layers
     ! hydrology finally settled on, and its result is read by SurfaceAlbedo
