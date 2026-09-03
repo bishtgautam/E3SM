@@ -26,7 +26,7 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux
+  use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux, elmxx_diag_snapshot_snowstate
   use elmxxKokkosStateMod , only : n_kokkos_col
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
@@ -624,10 +624,13 @@ contains
     end if
     call wbal_mark(elm, K_BEGWATERBAL)
 
+    call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_pre')
+
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
        call check(ierr, logunit, K_CANHYDRO)
        call elmxx_diag_snapshot_postcanhydro(elm, 'elmxx_ch')
+       call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_post')
     end if
     call wbal_mark(elm, K_CANHYDRO)
 

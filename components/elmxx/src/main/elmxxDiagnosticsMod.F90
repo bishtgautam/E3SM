@@ -53,6 +53,7 @@ module elmxxDiagnosticsMod
                            ELMxxGetH2osno, ELMxxGetSnowDepth,               &
                            ELMxxGetFracSno, ELMxxGetFracH2osfc,             &
                            ELMxxGetIntSnow, ELMxxGetSnl,                    &
+                           ELMxxGetQflxSnowMelt,                            &
                            ELMxxGetTVeg, ELMxxGetBtran, ELMxxGetH2ocan,     &
                            ELMxxGetEflxShTot, ELMxxGetEflxLhTot,            &
                            ELMxxGetQflxEvapTot, ELMxxGetFsa, ELMxxGetFsr,   &
@@ -92,6 +93,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_snapshot_presoilflux
   public :: elmxx_diag_snapshot_presoiltemp
   public :: elmxx_diag_snapshot_soilwater
+  public :: elmxx_diag_snapshot_snowstate
   public :: elmxx_diag_snapshot_postcanhydro
   public :: elmxx_diag_snapshot_postcanflux
   public :: elmxx_diag_write_maps
@@ -639,6 +641,41 @@ contains
          call elmxx_diag_2d(tag//':h2osoi_liq', cg, n_kokkos_col, nlevgrnd_in)
     deallocate(cg)
   end subroutine elmxx_diag_snapshot_soilwater
+
+  subroutine elmxx_diag_snapshot_snowstate(elm, tag)
+    ! The snow-cover state CanopyHydrology both reads and writes, dumped so it
+    ! can be differenced step by step against ELM's own canhydro_in /
+    ! canhydro_out records. frac_sno is the field of interest: ELM never
+    ! modifies it between two CanopyHydrology calls (verified, 0 of 1488 steps
+    ! of the 1x1_glc binary), so its whole trajectory is that one routine's,
+    ! and a divergence has to come from one of the inputs dumped alongside.
+    type(ELMxxType) , intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    integer :: ierr
+    real(r8), allocatable :: c1(:)
+    integer,  allocatable :: i1(:)
+    if (.not. elmxx_diag_enabled) return
+    if (n_kokkos_col <= 0) return
+    allocate(c1(n_kokkos_col), i1(n_kokkos_col))
+    call ELMxxGetFracSno(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno', c1, n_kokkos_col)
+    call ELMxxGetFracSnoEff(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':frac_sno_eff', c1, n_kokkos_col)
+    call ELMxxGetH2osno(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':h2osno', c1, n_kokkos_col)
+    call ELMxxGetIntSnow(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':int_snow', c1, n_kokkos_col)
+    call ELMxxGetSnowDepth(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':snow_depth', c1, n_kokkos_col)
+    call ELMxxGetQflxSnowMelt(elm, c1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':qflx_snow_melt', c1, n_kokkos_col)
+    call ELMxxGetSnl(elm, i1, n_kokkos_col, ierr)
+    if (ierr == ELMXX_SUCCESS) then
+       c1 = real(i1, r8)
+       call elmxx_diag_1d(tag//':snl', c1, n_kokkos_col)
+    end if
+    deallocate(c1, i1)
+  end subroutine elmxx_diag_snapshot_snowstate
 
   subroutine elmxx_diag_snapshot_postcanhydro(elm, tag)
     ! CanopyHydrology's own outputs, right after it runs. No existing
