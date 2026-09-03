@@ -783,6 +783,9 @@ contains
      use elm_varctl       , only : use_vsfm, use_var_soil_thick
      use domainMod        , only : ldomain
      use SoilWaterMovementMod, only : zengdecker_2009_with_var_soil_thick
+     use ElmDiagnostics   , only : diag_snapshot_1d, diag_snapshot_2d, &
+                                   diag_snapshot_int_1d, diag_snapshot_scalar, &
+                                   diag_enabled
      !
      ! !ARGUMENTS:
      type(bounds_type)        , intent(in)    :: bounds
@@ -874,6 +877,75 @@ contains
           qflx_rsub_sat      =>    col_wf%qflx_rsub_sat        & ! Output: [real(r8) (:)   ]  soil saturation excess [mm h2o/s]
           )
 
+
+       ! ELMxx replay instrumentation. WaterTable had no records at all before
+       ! 2026-09-03, which is why its ELMxx port could only ever be graded
+       ! end-to-end: soilwater_out is written just BEFORE this call, so its zwt
+       ! is this routine's input, and nothing captured the output. Recorded on
+       ! the soil half only (1:nlevgrnd) because that is the representation
+       ! ELMxx's SoilHydrologyData carries.
+       if (diag_enabled) then
+          call diag_snapshot_scalar('watertable_in:dtime', dtime)
+          call diag_snapshot_scalar('watertable_in:origflag', real(origflag, r8))
+          call diag_snapshot_scalar('watertable_in:num_hydrologyc', &
+               real(num_hydrologyc, r8))
+          call diag_snapshot_int_1d('watertable_in:filter_hydrologyc', &
+               filter_hydrologyc(1:num_hydrologyc), num_hydrologyc)
+          call diag_snapshot_int_1d('watertable_in:snl', &
+               snl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_int_1d('watertable_in:nlevbed', &
+               nlev2bed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:zwt', &
+               zwt(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:zwt_perched', &
+               zwt_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:frost_table', &
+               frost_table(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:wa', &
+               wa(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:qcharge', &
+               qcharge(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:h2osfc', &
+               h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_in:frac_h2osfc', &
+               frac_h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_2d('watertable_in:h2osoi_liq', &
+               h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:h2osoi_ice', &
+               h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:h2osoi_vol', &
+               h2osoi_vol(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:t_soisno', &
+               t_soisno(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:eff_porosity', &
+               eff_porosity(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:watsat', &
+               watsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:sucsat', &
+               sucsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:bsw', &
+               bsw(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:hksat', &
+               hksat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:dz', &
+               dz(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:z', &
+               z(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_in:zi', &
+               zi(bounds%begc:bounds%endc, 0:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd+1)
+       end if
 
        ! Convert layer thicknesses from m to mm
 
@@ -1103,6 +1175,33 @@ contains
 
        end do
 
+       if (diag_enabled) then
+          call diag_snapshot_1d('watertable_out:zwt', &
+               zwt(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:zwt_perched', &
+               zwt_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:frost_table', &
+               frost_table(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:wa', &
+               wa(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:qcharge', &
+               qcharge(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:h2osfc', &
+               h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:qflx_drain', &
+               qflx_drain(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:qflx_drain_perched', &
+               qflx_drain_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('watertable_out:qflx_rsub_sat', &
+               qflx_rsub_sat(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_2d('watertable_out:h2osoi_liq', &
+               h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('watertable_out:h2osoi_ice', &
+               h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+       end if
+
      end associate
 
    end subroutine WaterTable
@@ -1126,6 +1225,9 @@ contains
      use landunit_varcon  , only : istice_mec, istice
      use domainMod        , only : ldomain
      use ocn2lndType      , only : ocn2lnd_type 
+     use ElmDiagnostics   , only : diag_snapshot_1d, diag_snapshot_2d, &
+                                   diag_snapshot_int_1d, diag_snapshot_scalar, &
+                                   diag_enabled
 
      !
      ! !ARGUMENTS:
@@ -1249,6 +1351,80 @@ contains
           h2osoi_ice         =>    col_ws%h2osoi_ice          & ! Output: [real(r8) (:,:) ] ice lens (kg/m2)
           )
 
+
+       ! ELMxx replay instrumentation, the Drainage half. Taken BEFORE the
+       ! icefrac loop below on purpose: icefrac is derived from h2osoi_ice
+       ! inside this routine, and ELMxx's DrainageColumn recomputes it the
+       ! same way, so it belongs with the outputs rather than the inputs.
+       ! hydrodrain_in, which brackets the enclosing module, carries none of
+       ! zwt / zwt_perched / frost_table / icefrac -- which is why this port
+       ! had no isolated replay before 2026-09-03.
+       if (diag_enabled) then
+          call diag_snapshot_scalar('drainage_in:dtime', dtime)
+          call diag_snapshot_scalar('drainage_in:origflag', real(origflag, r8))
+          call diag_snapshot_scalar('drainage_in:h2osfcflag', real(h2osfcflag, r8))
+          call diag_snapshot_scalar('drainage_in:rsub_top_globalmax', rsub_top_globalmax)
+          call diag_snapshot_scalar('drainage_in:num_hydrologyc', real(num_hydrologyc, r8))
+          call diag_snapshot_int_1d('drainage_in:filter_hydrologyc', &
+               filter_hydrologyc(1:num_hydrologyc), num_hydrologyc)
+          call diag_snapshot_int_1d('drainage_in:snl', &
+               snl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_int_1d('drainage_in:nlevbed', &
+               nlev2bed(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:zwt', &
+               zwt(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:zwt_perched', &
+               zwt_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:frost_table', &
+               frost_table(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:wa', &
+               wa(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:qcharge', &
+               qcharge(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:h2osfc', &
+               h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:hkdepth', &
+               hkdepth(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:qflx_snwcp_ice', &
+               qflx_snwcp_ice(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:qflx_snwcp_liq', &
+               qflx_snwcp_liq(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_in:topo_slope', &
+               col_pp%topo_slope(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_2d('drainage_in:h2osoi_liq', &
+               h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:h2osoi_ice', &
+               h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:t_soisno', &
+               t_soisno(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:eff_porosity', &
+               eff_porosity(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:watsat', &
+               watsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:sucsat', &
+               sucsat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:bsw', &
+               bsw(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:hksat', &
+               hksat(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:dz', &
+               dz(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:z', &
+               z(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_in:zi', &
+               zi(bounds%begc:bounds%endc, 0:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd+1)
+       end if
 
        ! Convert layer thicknesses from m to mm
 
@@ -1793,6 +1969,40 @@ contains
              qflx_qrgwl(c)   = qflx_snwcp_liq(c)
           end if
        end do
+
+       if (diag_enabled) then
+          call diag_snapshot_1d('drainage_out:zwt', &
+               zwt(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:zwt_perched', &
+               zwt_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:frost_table', &
+               frost_table(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:wa', &
+               wa(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:h2osfc', &
+               h2osfc(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_drain', &
+               qflx_drain(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_drain_perched', &
+               qflx_drain_perched(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_rsub_sat', &
+               qflx_rsub_sat(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_qrgwl', &
+               qflx_qrgwl(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_lnd2ocn', &
+               qflx_lnd2ocn(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_1d('drainage_out:qflx_snwcp_ice', &
+               qflx_snwcp_ice(bounds%begc:bounds%endc), bounds%endc-bounds%begc+1)
+          call diag_snapshot_2d('drainage_out:h2osoi_liq', &
+               h2osoi_liq(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_out:h2osoi_ice', &
+               h2osoi_ice(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+          call diag_snapshot_2d('drainage_out:icefrac', &
+               icefrac(bounds%begc:bounds%endc, 1:nlevgrnd), &
+               bounds%endc-bounds%begc+1, nlevgrnd)
+       end if
 
      end associate
 
