@@ -47,13 +47,23 @@ ANCHOR = {
 # Sampled at the END of the step (elmxx_out:), because ELM records these
 # during the step. Comparing a top-of-step value against them shifts the whole
 # diurnal cycle by one timestep and looks like a large error.
-END_OF_STEP = {"fsa", "fsr"}
+END_OF_STEP = {"fsa", "fsr", "albgrd", "albgri", "albsod"}
 ANCHOR["fsa"] = "surfrad_out:fsa"
 ANCHOR["fsr"] = "surfrad_out:fsr"
 
+# Ground albedo, the quantity April says is wrong (FSA 87.9 vs ELM's 114.9 on
+# identical incoming). The instants match: elmxx_diag_snapshot_fluxes runs
+# BEFORE the phenology/SurfaceAlbedo block, so elmxx_out:albgrd at step N is
+# the albedo computed at the end of step N-1 -- exactly the one ELM's
+# surfrad_in:albgrd at step N describes.
+ANCHOR["albgrd"] = "surfrad_in:albgrd"
+ANCHOR["albgri"] = "surfrad_in:albgri"
+ANCHOR["albsod"] = "surfrad_in:albsod"
+
 COLUMN_VARS = {"t_grnd", "t_h2osfc", "h2osfc", "h2osno", "snow_depth",
                "frac_sno", "frac_h2osfc", "int_snow", "snl",
-               "t_soisno", "h2osoi_liq_soi", "h2osoi_ice_soi"}
+               "t_soisno", "h2osoi_liq_soi", "h2osoi_ice_soi",
+               "albgrd", "albgri", "albsod"}
 
 # Full-depth column profiles: slots 0..NLEVSNO-1 are snow, the rest soil.
 NLEVSNO = 5
@@ -65,8 +75,14 @@ PROFILE_NLEVTOT = {"t_soisno"}
 PATCH_FILTER = "canflx_in:filter_nolakeurbanp"
 
 
-def read_bin(path):
-    """Read an ELMDIAG1 file into {timestep: {label: array}}."""
+def read_bin(path, keep=None):
+    """Read an ELMDIAG1 file into {timestep: {label: array}}.
+
+    `keep`, when given, is the set of labels to retain. Every record is still
+    parsed -- the format has no index to seek by -- but the unwanted arrays
+    are dropped instead of held. The Jan-Apr reference binary is 4.0 GB and
+    does not fit in memory otherwise.
+    """
     out = {}
     with open(path, "rb") as f:
         if f.read(8) != MAGIC:
@@ -92,7 +108,8 @@ def read_bin(path):
                 val = np.frombuffer(f.read(4 * n), "<i4").astype(float)
             else:
                 sys.exit(f"{path}: unknown ndims {ndims}")
-            out.setdefault(ts, {})[label] = np.array(val)
+            if keep is None or label in keep:
+                out.setdefault(ts, {})[label] = np.array(val)
     return out
 
 
@@ -114,8 +131,14 @@ def main():
     ap.add_argument("--var", default=None, help="restrict to one variable")
     args = ap.parse_args()
 
-    xx = read_bin(args.elmxx)
-    em = read_bin(args.elm)
+    wanted = [v for v in ANCHOR if args.var in (None, v)]
+    xx_keep = {"elmxxmap:col_of_kcol", "elmxxmap:patch_of_kpatch"}
+    for v in wanted:
+        xx_keep.add(f"elmxx_out:{v}" if v in END_OF_STEP else f"elmxx_in:{v}")
+    em_keep = {PATCH_FILTER} | {ANCHOR[v] for v in wanted}
+
+    xx = read_bin(args.elmxx, xx_keep)
+    em = read_bin(args.elm, em_keep)
 
     maps = xx.get(0, {})
     if "elmxxmap:col_of_kcol" not in maps:
@@ -148,7 +171,7 @@ def main():
         patch_sel = None
         print("WARNING: no patch filter found; comparing all patches\n")
 
-    variables = [v for v in ANCHOR if args.var in (None, v)]
+    variables = wanted
     rows = []
     for var in sorted(variables):
         anchor = ANCHOR[var]
