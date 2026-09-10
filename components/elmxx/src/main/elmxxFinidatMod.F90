@@ -57,6 +57,15 @@ module elmxxFinidatMod
   real(r8), allocatable, public :: fi_zisno(:,:)           ! (nlevsno, ncol) -- see the ordering note
   real(r8), allocatable, public :: fi_snw_rds(:,:)         ! (nlevsno, ncol) -- see the ordering note
   real(r8), allocatable, public :: fi_qflx_snofrz_lyr(:,:) ! (nlevsno, ncol) -- see the ordering note
+  ! Snow aerosol mass, (nlevsno, ncol). Seeded because it is ACCUMULATED
+  ! state: a restart that leaves it zero hands ELMxx a clean snowpack against
+  ! ELM's loaded one, which reads as a large albedo error on day 1 and decays
+  ! over weeks as deposition rebuilds it. That makes the instrument useless
+  ! for grading anything aerosol touches -- including G26.
+  real(r8), allocatable, public :: fi_mss_bcphi(:,:), fi_mss_bcpho(:,:), &
+                                   fi_mss_ocphi(:,:), fi_mss_ocpho(:,:), &
+                                   fi_mss_dst1(:,:),  fi_mss_dst2(:,:),  &
+                                   fi_mss_dst3(:,:),  fi_mss_dst4(:,:)
   real(r8), allocatable, public :: fi_snow_depth(:), fi_h2osno(:), fi_int_snow(:)
   real(r8), allocatable, public :: fi_frac_sno(:), fi_frac_sno_eff(:)
   real(r8), allocatable, public :: fi_t_grnd(:), fi_t_h2osfc(:), fi_h2osfc(:)
@@ -115,6 +124,14 @@ contains
              fi_h2osoi_ice(nlevtot_r, fi_ncol))
     allocate(fi_dzsno(nlevsno_r, fi_ncol), fi_zsno(nlevsno_r, fi_ncol), &
              fi_zisno(nlevsno_r, fi_ncol), fi_snw_rds(nlevsno_r, fi_ncol), &
+             fi_mss_bcphi(nlevsno_r, fi_ncol), &
+             fi_mss_bcpho(nlevsno_r, fi_ncol), &
+             fi_mss_ocphi(nlevsno_r, fi_ncol), &
+             fi_mss_ocpho(nlevsno_r, fi_ncol), &
+             fi_mss_dst1(nlevsno_r, fi_ncol), &
+             fi_mss_dst2(nlevsno_r, fi_ncol), &
+             fi_mss_dst3(nlevsno_r, fi_ncol), &
+             fi_mss_dst4(nlevsno_r, fi_ncol), &
              fi_qflx_snofrz_lyr(nlevsno_r, fi_ncol))
     allocate(fi_snow_depth(fi_ncol), fi_h2osno(fi_ncol), fi_int_snow(fi_ncol), &
              fi_frac_sno(fi_ncol), fi_frac_sno_eff(fi_ncol), &
@@ -136,6 +153,14 @@ contains
     call read_real2d(ncid, fname, 'ZSNO'        , fi_zsno)
     call read_real2d(ncid, fname, 'ZISNO'       , fi_zisno)
     call read_real2d(ncid, fname, 'snw_rds'     , fi_snw_rds)
+    call read_real2d(ncid, fname, 'mss_bcphi'   , fi_mss_bcphi)
+    call read_real2d(ncid, fname, 'mss_bcpho'   , fi_mss_bcpho)
+    call read_real2d(ncid, fname, 'mss_ocphi'   , fi_mss_ocphi)
+    call read_real2d(ncid, fname, 'mss_ocpho'   , fi_mss_ocpho)
+    call read_real2d(ncid, fname, 'mss_dst1'    , fi_mss_dst1)
+    call read_real2d(ncid, fname, 'mss_dst2'    , fi_mss_dst2)
+    call read_real2d(ncid, fname, 'mss_dst3'    , fi_mss_dst3)
+    call read_real2d(ncid, fname, 'mss_dst4'    , fi_mss_dst4)
     call read_real2d(ncid, fname, 'qflx_snofrz_lyr', fi_qflx_snofrz_lyr)
     call read_real1d(ncid, fname, 'SNOW_DEPTH'  , fi_snow_depth)
     call read_real1d(ncid, fname, 'H2OSNO'      , fi_h2osno)
@@ -189,6 +214,14 @@ contains
     if (allocated(fi_zsno))              deallocate(fi_zsno)
     if (allocated(fi_zisno))             deallocate(fi_zisno)
     if (allocated(fi_snw_rds))           deallocate(fi_snw_rds)
+    if (allocated(fi_mss_bcphi))       deallocate(fi_mss_bcphi)
+    if (allocated(fi_mss_bcpho))       deallocate(fi_mss_bcpho)
+    if (allocated(fi_mss_ocphi))       deallocate(fi_mss_ocphi)
+    if (allocated(fi_mss_ocpho))       deallocate(fi_mss_ocpho)
+    if (allocated(fi_mss_dst1))        deallocate(fi_mss_dst1)
+    if (allocated(fi_mss_dst2))        deallocate(fi_mss_dst2)
+    if (allocated(fi_mss_dst3))        deallocate(fi_mss_dst3)
+    if (allocated(fi_mss_dst4))        deallocate(fi_mss_dst4)
     if (allocated(fi_qflx_snofrz_lyr))   deallocate(fi_qflx_snofrz_lyr)
     if (allocated(fi_snow_depth))        deallocate(fi_snow_depth)
     if (allocated(fi_h2osno))            deallocate(fi_h2osno)
