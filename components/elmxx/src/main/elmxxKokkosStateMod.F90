@@ -114,6 +114,8 @@ module elmxxKokkosStateMod
                                ELMxxSetFtdd, ELMxxSetFtid, ELMxxSetFtii, &
                                ELMxxSetSnicarOptics, ELMxxSetSnowAgeTables, &
                                ELMxxSetSnicarAerosolOptics, &
+                               ELMxxSetMssBcphi, ELMxxSetMssBcpho, ELMxxSetMssOcphi, ELMxxSetMssOcpho, &
+                               ELMxxSetMssDst1, ELMxxSetMssDst2, ELMxxSetMssDst3, ELMxxSetMssDst4, &
                                ELMxxSetWa, ELMxxSetZwt, &
                                ELMxxSetTSoisnoSoi, ELMxxSetH2osoiLiqSoi, &
                                ELMxxSetH2osoiIceSoi, ELMxxSetSnwRds, &
@@ -1854,7 +1856,9 @@ contains
          fi_h2osfc, fi_frac_h2osfc, fi_coszen, fi_wa, fi_zwt, &
          fi_albgrd, fi_albgri, fi_flx_absdv, fi_flx_absdn, &
          fi_flx_absiv, fi_flx_absin, fi_t_veg, fi_h2ocan, fi_fwet, &
-         fi_elai, fi_esai, fi_htop, fi_albd, fi_albi
+         fi_elai, fi_esai, fi_htop, fi_albd, fi_albi, &
+         fi_mss_bcphi, fi_mss_bcpho, fi_mss_ocphi, fi_mss_ocpho, &
+         fi_mss_dst1, fi_mss_dst2, fi_mss_dst3, fi_mss_dst4
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
@@ -1931,6 +1935,30 @@ contains
     do kc = 1, nc; c = col_of_kcol(kc)
        do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(j, c); end do; end do
     call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);      call check(ierr, subname, 'SnwRds')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_bcphi(j, c); end do; end do
+    call ELMxxSetMssBcphi(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssBcphi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_bcpho(j, c); end do; end do
+    call ELMxxSetMssBcpho(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssBcpho')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_ocphi(j, c); end do; end do
+    call ELMxxSetMssOcphi(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssOcphi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_ocpho(j, c); end do; end do
+    call ELMxxSetMssOcpho(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssOcpho')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst1(j, c); end do; end do
+    call ELMxxSetMssDst1(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst1')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst2(j, c); end do; end do
+    call ELMxxSetMssDst2(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst2')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst3(j, c); end do; end do
+    call ELMxxSetMssDst3(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst3')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst4(j, c); end do; end do
+    call ELMxxSetMssDst4(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst4')
     do kc = 1, nc; c = col_of_kcol(kc)
        do j = 1, nlevsno; bs(kc,j) = fi_qflx_snofrz_lyr(j, c); end do; end do
     call ELMxxSetQflxSnofrzLyr(elm, bs, sz_sno, ierr)
@@ -2082,7 +2110,11 @@ contains
     ! overwritten; this puts it back after the overwriter has run.
     !
     use elmxxFinidatMod, only : finidat_read, fi_t_soisno, fi_h2osoi_liq, &
-                                fi_h2osoi_ice, fi_dzsno, fi_snw_rds
+                                fi_h2osoi_ice, fi_dzsno, fi_snw_rds, &
+                                fi_mss_bcphi, fi_mss_bcpho, &
+                                fi_mss_ocphi, fi_mss_ocpho, &
+                                fi_mss_dst1, fi_mss_dst2, &
+                                fi_mss_dst3, fi_mss_dst4
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
@@ -2112,6 +2144,30 @@ contains
     do kc = 1, nc; c = col_of_kcol(kc)
        do j = 1, nlevsno; bs(kc,j) = fi_snw_rds(j, c); end do; end do
     call ELMxxSetSnwRds(elm, bs, sz_sno, ierr);       call check(ierr, subname, 'SnwRds')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_bcphi(j, c); end do; end do
+    call ELMxxSetMssBcphi(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssBcphi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_bcpho(j, c); end do; end do
+    call ELMxxSetMssBcpho(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssBcpho')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_ocphi(j, c); end do; end do
+    call ELMxxSetMssOcphi(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssOcphi')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_ocpho(j, c); end do; end do
+    call ELMxxSetMssOcpho(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssOcpho')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst1(j, c); end do; end do
+    call ELMxxSetMssDst1(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst1')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst2(j, c); end do; end do
+    call ELMxxSetMssDst2(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst2')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst3(j, c); end do; end do
+    call ELMxxSetMssDst3(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst3')
+    do kc = 1, nc; c = col_of_kcol(kc)
+       do j = 1, nlevsno; bs(kc,j) = fi_mss_dst4(j, c); end do; end do
+    call ELMxxSetMssDst4(elm, bs, sz_sno, ierr); call check(ierr, subname, 'MssDst4')
 
     deallocate(bs)
     if (masterproc) then
