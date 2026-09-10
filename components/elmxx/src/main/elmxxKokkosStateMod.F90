@@ -71,7 +71,8 @@ module elmxxKokkosStateMod
   use elmxxForcingMod , only : forc_z, forc_u, forc_v, forc_ptem, forc_shum, forc_pbot, &
                                forc_tbot, forc_lwrad, forc_rainc, forc_rainl, &
                                forc_snowc, forc_snowl, &
-                               forc_swvdr, forc_swndr, forc_swvdf, forc_swndf
+                               forc_swvdr, forc_swndr, forc_swvdf, forc_swndf, &
+                               forc_aer, nforcaer
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxSetPatchColumn, &
                                ELMxxSetElai, ELMxxSetEsai, ELMxxSetHtop, &
@@ -103,6 +104,7 @@ module elmxxKokkosStateMod
                                ELMxxSetSmpmin, ELMxxSetTH2osfc, &
                                ELMxxSetPatchItype, ELMxxSetForcHgtPatch, &
                                ELMxxSetForcSolad, ELMxxSetForcSolai, &
+                               ELMxxSetForcAer, &
                                ELMxxSetBtran, &
                                ELMxxSetAlbgrd, ELMxxSetAlbgri, &
                                ELMxxSetAlbsod, ELMxxSetAlbsoi, &
@@ -111,6 +113,7 @@ module elmxxKokkosStateMod
                                ELMxxSetFabd, ELMxxSetFabi, &
                                ELMxxSetFtdd, ELMxxSetFtid, ELMxxSetFtii, &
                                ELMxxSetSnicarOptics, ELMxxSetSnowAgeTables, &
+                               ELMxxSetSnicarAerosolOptics, &
                                ELMxxSetWa, ELMxxSetZwt, &
                                ELMxxSetTSoisnoSoi, ELMxxSetH2osoiLiqSoi, &
                                ELMxxSetH2osoiIceSoi, ELMxxSetSnwRds, &
@@ -1253,16 +1256,16 @@ contains
     real(r8), intent(in) :: lat(:), lon(:) ! per gridcell [degrees]
     integer, intent(in) :: logunit
     integer :: kc, kp, g, ierr
-    integer :: szp(2)
+    integer :: szp(2), szaer(2)
     real(r8), allocatable :: rcol(:), rpatch(:)
-    real(r8), allocatable :: rsol(:,:)
+    real(r8), allocatable :: rsol(:,:), raer(:,:)
     logical, save :: reported = .false.
     integer, parameter :: numrad = 2   ! 1 = visible, 2 = near-IR
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
 
     call require_built(subname)
     allocate(rcol(n_kokkos_col), rpatch(n_kokkos_patch), &
-             rsol(n_kokkos_patch, numrad))
+             rsol(n_kokkos_patch, numrad), raer(n_kokkos_col, nforcaer))
 
     ! ---- column-level ----
     do kc = 1, n_kokkos_col
@@ -1369,6 +1372,25 @@ contains
        rsol(kp,2) = forc_swndf(g)
     end do
     call ELMxxSetForcSolai(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolai')
+
+    ! Aerosol deposition, (column, 14). Pushed per column rather than per
+    ! gridcell because ELMxx has no gridcell-level store; ELM's AerosolFluxes
+    ! reads forc_aer(col_gridcell(c), :), so this is the same gather done once
+    ! here instead of once per column inside the kernel.
+    !
+    ! LAYOUT: same rule as rsol above -- (column, species) is Fortran-native
+    ! and SetView2D wraps it under LayoutLeft without transposing.
+    !
+    ! ORDER IS THE CONTRACT. AerosolFluxesColumn indexes these by number, so
+    ! a permutation here does not fail, it just puts dust where black carbon
+    ! belongs. Dust and BC differ by ~3 orders of magnitude in mass and by
+    ! their spectral absorption, so the result would be wrong in a way that
+    ! still looks like a plausible snowpack.
+    do kc = 1, n_kokkos_col
+       raer(kc, :) = forc_aer(cell_of_kcol(kc), :)
+    end do
+    szaer = (/ n_kokkos_col, nforcaer /)
+    call ELMxxSetForcAer(elm, raer, szaer, ierr); call check(ierr, subname, 'ForcAer')
 
     ! ---- static geometry, once ----
     call elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
@@ -1772,7 +1794,8 @@ contains
     use elmxxSnicarMod, only : snicar_tables_read, &
                                ss_alb_drc, asm_prm_drc, ext_cff_drc, &
                                ss_alb_dfs, asm_prm_dfs, ext_cff_dfs, &
-                               snowage_tau, snowage_kappa, snowage_drdt0
+                               snowage_tau, snowage_kappa, snowage_drdt0, &
+                               ss_alb_aer, asm_prm_aer, ext_cff_aer
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
@@ -1786,6 +1809,10 @@ contains
     call ELMxxSetSnicarOptics(elm, ss_alb_drc, asm_prm_drc, ext_cff_drc, &
                               ss_alb_dfs, asm_prm_dfs, ext_cff_dfs, ierr)
     call check(ierr, subname, 'SnicarOptics')
+
+    ! After SnicarOptics, which allocates the table struct.
+    call ELMxxSetSnicarAerosolOptics(elm, ss_alb_aer, asm_prm_aer, ext_cff_aer, ierr)
+    call check(ierr, subname, 'SnicarAerosolOptics')
 
     call ELMxxSetSnowAgeTables(elm, snowage_tau, snowage_kappa, &
                                snowage_drdt0, ierr)

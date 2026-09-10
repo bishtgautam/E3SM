@@ -52,6 +52,12 @@ module elmxxForcingMod
   real(r8), public, pointer :: forc_swndf(:) => null()  ! diffuse near-IR shortwave (W/m2)
   real(r8), public, pointer :: forc_swvdf(:) => null()  ! diffuse visible shortwave (W/m2)
 
+  ! Aerosol deposition, (gridcell, 14), in ELM's forc_aer_grc order. Consumed
+  ! by AerosolFluxes inside SnowWater; without it the snowpack is optically
+  ! pure and its visible albedo is ~0.96 against ELM's ~0.85.
+  integer,  parameter, public :: nforcaer = 14
+  real(r8), public, pointer :: forc_aer(:,:) => null()  ! (ncells, nforcaer) [kg/m2/s]
+
   integer, private :: ncells_f = 0
   integer, private :: nimports = 0
 
@@ -75,6 +81,7 @@ contains
     allocate(forc_lwrad(ncells), forc_rainc(ncells), forc_rainl(ncells), &
              forc_snowc(ncells), forc_snowl(ncells), forc_swndr(ncells), &
              forc_swvdr(ncells), forc_swndf(ncells), forc_swvdf(ncells))
+    allocate(forc_aer(ncells, nforcaer))
 
     forc_z = 0.0_r8; forc_topo = 0.0_r8; forc_u = 0.0_r8; forc_v = 0.0_r8
     forc_ptem = 0.0_r8; forc_shum = 0.0_r8; forc_pbot = 0.0_r8; forc_tbot = 0.0_r8
@@ -83,6 +90,7 @@ contains
     forc_snowc = 0.0_r8; forc_snowl = 0.0_r8
     forc_swndr = 0.0_r8; forc_swvdr = 0.0_r8
     forc_swndf = 0.0_r8; forc_swvdf = 0.0_r8
+    forc_aer = 0.0_r8
 
     nimports = 0
 
@@ -123,6 +131,23 @@ contains
        forc_swvdr(g) = x2l%rAttr(index_x2l_Faxa_swvdr, g)
        forc_swndf(g) = x2l%rAttr(index_x2l_Faxa_swndf, g)
        forc_swvdf(g) = x2l%rAttr(index_x2l_Faxa_swvdf, g)
+
+       ! Positional, and the position is the contract: AerosolFluxes indexes
+       ! this array by number, so a reordering here is silent and wrong.
+       forc_aer(g, 1)  = x2l%rAttr(index_x2l_Faxa_bcphidry, g)
+       forc_aer(g, 2)  = x2l%rAttr(index_x2l_Faxa_bcphodry, g)
+       forc_aer(g, 3)  = x2l%rAttr(index_x2l_Faxa_bcphiwet, g)
+       forc_aer(g, 4)  = x2l%rAttr(index_x2l_Faxa_ocphidry, g)
+       forc_aer(g, 5)  = x2l%rAttr(index_x2l_Faxa_ocphodry, g)
+       forc_aer(g, 6)  = x2l%rAttr(index_x2l_Faxa_ocphiwet, g)
+       forc_aer(g, 7)  = x2l%rAttr(index_x2l_Faxa_dstwet1 , g)
+       forc_aer(g, 8)  = x2l%rAttr(index_x2l_Faxa_dstdry1 , g)
+       forc_aer(g, 9)  = x2l%rAttr(index_x2l_Faxa_dstwet2 , g)
+       forc_aer(g, 10) = x2l%rAttr(index_x2l_Faxa_dstdry2 , g)
+       forc_aer(g, 11) = x2l%rAttr(index_x2l_Faxa_dstwet3 , g)
+       forc_aer(g, 12) = x2l%rAttr(index_x2l_Faxa_dstdry3 , g)
+       forc_aer(g, 13) = x2l%rAttr(index_x2l_Faxa_dstwet4 , g)
+       forc_aer(g, 14) = x2l%rAttr(index_x2l_Faxa_dstdry4 , g)
     end do
 
     nimports = nimports + 1
@@ -168,6 +193,7 @@ contains
     !
     implicit none
 
+    if (associated(forc_aer))   deallocate(forc_aer)
     if (associated(forc_z))     deallocate(forc_z)
     if (associated(forc_topo))  deallocate(forc_topo)
     if (associated(forc_u))     deallocate(forc_u)
