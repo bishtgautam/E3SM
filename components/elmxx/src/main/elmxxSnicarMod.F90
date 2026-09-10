@@ -23,9 +23,12 @@ module elmxxSnicarMod
   ! likewise (density, dTdz, T) matches C (T, dTdz, density). So the flat
   ! buffers map straight across and no transpose happens anywhere.
   !
-  ! AEROSOLS ARE NOT READ. The optics file also carries black carbon, organic
-  ! carbon and dust; the port is clean-snow because those move albedo by
-  ! 0.002 against the 0.31 error the port removes. See plans/STATUS.md.
+  ! AEROSOLS ARE READ (2026-09-09). The eight species carry no grain-radius
+  ! axis -- an aerosol particle's optics do not depend on the snow grain it
+  ! sits in -- so each is five numbers, one per band. They are stored
+  ! (band, species) here, which is the memory of a C (species, band) array,
+  ! matching ELMxxSetSnicarAerosolOptics. Species order is ELM's and is the
+  ! contract shared with the deposition and the mixing; see SnicarData.h.
   !-----------------------------------------------------------------------
 
   use shr_kind_mod  , only : r8 => shr_kind_r8
@@ -50,6 +53,9 @@ module elmxxSnicarMod
   ! (radius, band) -- see the memory-layout note above.
   real(r8), allocatable, public :: ss_alb_drc(:,:), asm_prm_drc(:,:), ext_cff_drc(:,:)
   real(r8), allocatable, public :: ss_alb_dfs(:,:), asm_prm_dfs(:,:), ext_cff_dfs(:,:)
+  ! (band, species) -- see the memory-layout note above.
+  integer, parameter, public :: snicar_naer = 8
+  real(r8), allocatable, public :: ss_alb_aer(:,:), asm_prm_aer(:,:), ext_cff_aer(:,:)
   ! (density, dTdz, T)
   real(r8), allocatable, public :: snowage_tau(:,:,:), snowage_kappa(:,:,:), &
                                    snowage_drdt0(:,:,:)
@@ -94,6 +100,20 @@ contains
     call read_var2d(ncid, fsnowoptics, 'ss_alb_ice_dfs',      ss_alb_dfs)
     call read_var2d(ncid, fsnowoptics, 'asm_prm_ice_dfs',     asm_prm_dfs)
     call read_var2d(ncid, fsnowoptics, 'ext_cff_mss_ice_dfs', ext_cff_dfs)
+
+    ! ---- aerosol Mie parameters, ELM species order 1..8 ----
+    allocate(ss_alb_aer (snicar_nbnd, snicar_naer), &
+             asm_prm_aer(snicar_nbnd, snicar_naer), &
+             ext_cff_aer(snicar_nbnd, snicar_naer))
+    call read_aerosol(ncid, fsnowoptics, 'bcphil', 1)
+    call read_aerosol(ncid, fsnowoptics, 'bcphob', 2)
+    call read_aerosol(ncid, fsnowoptics, 'ocphil', 3)
+    call read_aerosol(ncid, fsnowoptics, 'ocphob', 4)
+    call read_aerosol(ncid, fsnowoptics, 'dust01', 5)
+    call read_aerosol(ncid, fsnowoptics, 'dust02', 6)
+    call read_aerosol(ncid, fsnowoptics, 'dust03', 7)
+    call read_aerosol(ncid, fsnowoptics, 'dust04', 8)
+
     call pio_closefile(ncid)
 
     ! ---- snow aging ----
@@ -130,6 +150,9 @@ contains
   !-----------------------------------------------------------------------
   subroutine elmxx_snicar_clean()
     implicit none
+    if (allocated(ss_alb_aer   )) deallocate(ss_alb_aer)
+    if (allocated(asm_prm_aer  )) deallocate(asm_prm_aer)
+    if (allocated(ext_cff_aer  )) deallocate(ext_cff_aer)
     if (allocated(ss_alb_drc   )) deallocate(ss_alb_drc)
     if (allocated(asm_prm_drc  )) deallocate(asm_prm_drc)
     if (allocated(ext_cff_drc  )) deallocate(ext_cff_drc)
@@ -166,6 +189,49 @@ contains
             trim(fname)//' is not the expected length')
     end if
   end subroutine check_dim
+
+  !-----------------------------------------------------------------------
+  !-----------------------------------------------------------------------
+  subroutine read_aerosol(ncid, fname, species, idx)
+    !
+    ! One aerosol species' three Mie parameters into column `idx`.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, species
+    integer          , intent(in)    :: idx
+    real(r8) :: buf(snicar_nbnd)
+
+    call read_var1d(ncid, fname, 'ss_alb_'//trim(species),      buf)
+    ss_alb_aer(:, idx)  = buf
+    call read_var1d(ncid, fname, 'asm_prm_'//trim(species),     buf)
+    asm_prm_aer(:, idx) = buf
+    call read_var1d(ncid, fname, 'ext_cff_mss_'//trim(species), buf)
+    ext_cff_aer(:, idx) = buf
+
+  end subroutine read_aerosol
+
+  !-----------------------------------------------------------------------
+  subroutine read_var1d(ncid, fname, varname, out)
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    real(r8)         , intent(out)   :: out(:)
+    type(var_desc_t) :: vardesc
+    integer :: status
+
+    status = pio_inq_varid(ncid, trim(varname), vardesc)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort('(read_var1d) ERROR: '//trim(varname)// &
+                          ' not found in '//trim(fname))
+    end if
+    status = pio_get_var(ncid, vardesc, out)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort('(read_var1d) ERROR: cannot read '//trim(varname))
+    end if
+
+  end subroutine read_var1d
 
   !-----------------------------------------------------------------------
   subroutine read_var2d(ncid, fname, varname, out)

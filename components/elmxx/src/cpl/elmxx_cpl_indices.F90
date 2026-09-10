@@ -46,6 +46,24 @@ module elmxx_cpl_indices
   integer, public :: index_x2l_Faxa_swndf  = 0  ! diffuse near-infrared shortwave (W/m2)
   integer, public :: index_x2l_Faxa_swvdf  = 0  ! diffuse visible shortwave (W/m2)
 
+  ! Aerosol deposition. Order matches ELM's forc_aer_grc(g,1:14) exactly --
+  ! AerosolFluxes indexes that array positionally, so the order IS the
+  ! contract, not just documentation.
+  integer, public :: index_x2l_Faxa_bcphidry = 0  ! BC hydrophillic dry dep (kg/m2/s)
+  integer, public :: index_x2l_Faxa_bcphodry = 0  ! BC hydrophobic  dry dep
+  integer, public :: index_x2l_Faxa_bcphiwet = 0  ! BC hydrophillic wet dep
+  integer, public :: index_x2l_Faxa_ocphidry = 0  ! OC hydrophillic dry dep
+  integer, public :: index_x2l_Faxa_ocphodry = 0  ! OC hydrophobic  dry dep
+  integer, public :: index_x2l_Faxa_ocphiwet = 0  ! OC hydrophillic wet dep
+  integer, public :: index_x2l_Faxa_dstwet1  = 0  ! dust bin 1 wet dep
+  integer, public :: index_x2l_Faxa_dstdry1  = 0  ! dust bin 1 dry dep
+  integer, public :: index_x2l_Faxa_dstwet2  = 0  ! dust bin 2 wet dep
+  integer, public :: index_x2l_Faxa_dstdry2  = 0  ! dust bin 2 dry dep
+  integer, public :: index_x2l_Faxa_dstwet3  = 0  ! dust bin 3 wet dep
+  integer, public :: index_x2l_Faxa_dstdry3  = 0  ! dust bin 3 dry dep
+  integer, public :: index_x2l_Faxa_dstwet4  = 0  ! dust bin 4 wet dep
+  integer, public :: index_x2l_Faxa_dstdry4  = 0  ! dust bin 4 dry dep
+
   !--------------------------------------------------------------------------
   ! lnd -> atm
   !--------------------------------------------------------------------------
@@ -102,6 +120,21 @@ contains
     call setx(x2l, 'Faxa_swvdr' , index_x2l_Faxa_swvdr)
     call setx(x2l, 'Faxa_swndf' , index_x2l_Faxa_swndf)
     call setx(x2l, 'Faxa_swvdf' , index_x2l_Faxa_swvdf)
+
+    call setx(x2l, 'Faxa_bcphidry', index_x2l_Faxa_bcphidry)
+    call setx(x2l, 'Faxa_bcphodry', index_x2l_Faxa_bcphodry)
+    call setx(x2l, 'Faxa_bcphiwet', index_x2l_Faxa_bcphiwet)
+    call setx(x2l, 'Faxa_ocphidry', index_x2l_Faxa_ocphidry)
+    call setx(x2l, 'Faxa_ocphodry', index_x2l_Faxa_ocphodry)
+    call setx(x2l, 'Faxa_ocphiwet', index_x2l_Faxa_ocphiwet)
+    call setx(x2l, 'Faxa_dstwet1' , index_x2l_Faxa_dstwet1)
+    call setx(x2l, 'Faxa_dstdry1' , index_x2l_Faxa_dstdry1)
+    call setx(x2l, 'Faxa_dstwet2' , index_x2l_Faxa_dstwet2)
+    call setx(x2l, 'Faxa_dstdry2' , index_x2l_Faxa_dstdry2)
+    call setx(x2l, 'Faxa_dstwet3' , index_x2l_Faxa_dstwet3)
+    call setx(x2l, 'Faxa_dstdry3' , index_x2l_Faxa_dstdry3)
+    call setx(x2l, 'Faxa_dstwet4' , index_x2l_Faxa_dstwet4)
+    call setx(x2l, 'Faxa_dstdry4' , index_x2l_Faxa_dstdry4)
 
     ! ---- lnd -> atm ----
     call setx(l2x, 'Sl_t'       , index_l2x_Sl_t)
