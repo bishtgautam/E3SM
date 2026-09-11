@@ -53,6 +53,10 @@ module elmxxPftconMod
   ! makes cf infinite and rb exactly zero -- and rb sits in the denominator
   ! of rppdry. Zero dleaf is therefore not a small leaf; it is a NaN.
   real(r8), public, pointer :: dleaf(:) => null()
+  ! Woody lifeform flag: 0 = non-woody, 1 = tree, 2 = shrub. SatellitePhenology
+  ! picks its snow-burial formula on `woody >= 1`; without it every PFT would
+  ! take the grass branch, which buries completely under 0.2 m of snow.
+  real(r8), public, pointer :: woody(:) => null()
 
   ! Canopy optical properties, per PFT and waveband (1 = VIS, 2 = NIR).
   ! rhol/rhos are leaf and stem reflectance, taul/taus leaf and stem
@@ -129,7 +133,8 @@ contains
     allocate(roota_par(0:npft_param-1), rootb_par(0:npft_param-1), &
              smpso(0:npft_param-1), smpsc(0:npft_param-1), &
              z0mr(0:npft_param-1), displar(0:npft_param-1), &
-             dleaf(0:npft_param-1), xl(0:npft_param-1), &
+             dleaf(0:npft_param-1), woody(0:npft_param-1), &
+             xl(0:npft_param-1), &
              rhol(0:npft_param-1,2), rhos(0:npft_param-1,2), &
              taul(0:npft_param-1,2), taus(0:npft_param-1,2), &
              c3psn(0:npft_param-1), leafcn(0:npft_param-1), &
@@ -145,6 +150,7 @@ contains
     call read_pft_real(ncid, fname, 'z0mr'     , z0mr)
     call read_pft_real(ncid, fname, 'displar'  , displar)
     call read_pft_real(ncid, fname, 'dleaf'    , dleaf)
+    call read_pft_real(ncid, fname, 'woody'    , woody)
     call read_pft_real(ncid, fname, 'xl'       , xl)
     call read_pft_real(ncid, fname, 'rholvis'  , rhol(:,1))
     call read_pft_real(ncid, fname, 'rholnir'  , rhol(:,2))
@@ -278,6 +284,7 @@ contains
     if (associated(z0mr))      deallocate(z0mr)
     if (associated(displar))   deallocate(displar)
     if (associated(dleaf))     deallocate(dleaf)
+    if (associated(woody))     deallocate(woody)
     if (associated(xl))        deallocate(xl)
     if (associated(rhol))      deallocate(rhol)
     if (associated(rhos))      deallocate(rhos)
