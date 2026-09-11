@@ -63,7 +63,7 @@ module elmxxKokkosStateMod
                                sp_sucsat => sucsat, sp_watfc => watfc, &
                                sp_dz => col_dz, sp_tsoisno => col_t_soisno, &
                                sp_liq => col_h2osoi_liq, sp_ice => col_h2osoi_ice
-  use elmxxPftconMod  , only : z0mr, displar, dleaf, npft_param, pftcon_read, &
+  use elmxxPftconMod  , only : z0mr, displar, dleaf, woody, npft_param, pftcon_read, &
                                pft_smpsc => smpsc, pft_smpso => smpso, &
                                pft_tc_stress => tc_stress, &
                                pft_rhol => rhol, pft_rhos => rhos, &
@@ -83,6 +83,7 @@ module elmxxKokkosStateMod
                                ELMxxSetCoszen, &
                                ELMxxSetPhenActive, ELMxxSetMonthlyLai, &
                                ELMxxSetMonthlySai, ELMxxSetMonthlyHtop, &
+                               ELMxxSetWoody, &
                                ELMxxSetMonthlyHbot, &
                                ELMxxSetColLatRad, ELMxxSetColLonRad, &
                                ELMxxComputeForcingDerivedNatural, &
@@ -1074,6 +1075,14 @@ contains
       call ELMxxSetDleaf(elm, bufp, n_kokkos_patch, ierr)
       call check(ierr, subname, 'Dleaf')
       write(logunit,*) subname,'rank ',iam,' dleaf [m] ',minval(bufp),' .. ',maxval(bufp)
+
+      ! Same shape, same reason: phenology's snow-burial branch is per patch.
+      do kp = 1, n_kokkos_patch
+         bufp(kp) = woody(patch_itype(patch_of_kpatch(kp)))
+      end do
+      call ELMxxSetWoody(elm, bufp, n_kokkos_patch, ierr)
+      call check(ierr, subname, 'Woody')
+      write(logunit,*) subname,'rank ',iam,' woody ',minval(bufp),' .. ',maxval(bufp)
       deallocate(bufp)
     end block
 
