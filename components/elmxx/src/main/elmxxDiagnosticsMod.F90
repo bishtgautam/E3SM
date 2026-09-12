@@ -45,6 +45,7 @@ module elmxxDiagnosticsMod
                            ELMxxGetSweOld, ELMxxGetImeltReal,                &
                            ELMxxGetQflxDewSnowCol,                          &
                            ELMxxGetSabgSoil, ELMxxGetSabgSnow,               &
+                           ELMxxGetSabg, ELMxxGetSabgPen,                    &
                            ELMxxGetSabgLyr,                                  &
                            ELMxxGetQflxSnowGrnd, ELMxxGetQflxRainGrnd,       &
                            ELMxxGetQflxPrecIntr, ELMxxGetQflxEvapVeg,        &
@@ -612,6 +613,14 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg_soil', p1, n_kokkos_patch)
       call ELMxxGetSabgSnow(elm, p1, n_kokkos_patch, ierr)
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg_snow', p1, n_kokkos_patch)
+      ! sabg and sabg_pen: ELM records both at surfrad_out, and sabg_pen is a
+      ! DIFFERENCE of two large numbers (sabg - lyr[top]), so it cannot be
+      ! reconstructed from the other traces without error. Added 2026-09-11
+      ! while chasing April's +3.72 W/m2.
+      call ELMxxGetSabg(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg', p1, n_kokkos_patch)
+      call ELMxxGetSabgPen(elm, p1, n_kokkos_patch, ierr)
+      if (ierr == ELMXX_SUCCESS) call elmxx_diag_1d(tag//':sabg_pen', p1, n_kokkos_patch)
       deallocate(p1)
     end block
     block
@@ -623,6 +632,11 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':sabg_lyr', plyr, n_kokkos_patch, nlevsno+1)
       deallocate(plyr)
     end block
+    ! TODO snow aerosol: the C getters exist (ELMxx.h:1171 onward) but the
+    ! eight Fortran bindings do not, so mss_* still cannot be traced here.
+    ! ELM records them at snowlayer_in:mss_*. Needed to test whether
+    ! melt-season scavenging (S3, "graded only by construction") is what makes
+    ! ELMxx's April snow ~0.009 brighter in albedo than ELM's.
     deallocate(cg, c1, i1)
   end subroutine elmxx_diag_snapshot_presoiltemp
 
