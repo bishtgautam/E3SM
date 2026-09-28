@@ -53,6 +53,7 @@ module elmxxKernelMod
                                ELMxxComputeSnowWater, &
                                ELMxxComputeSnowCompaction, &
                                ELMxxComputeSnowLayers, &
+                               ELMxxUpdateGroundTemperatureNatural, &
                                ELMxxSnowAgeGrainNatural, &
                                ELMxxComputeLakeHydrology, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
@@ -774,6 +775,17 @@ contains
        call check(ierr, logunit, K_SNOWLAYERS)
     end if
     call wbal_mark(elm, K_SNOWLAYERS)
+
+    ! ELM re-weights t_grnd here, at the end of HydrologyNoDrainage
+    ! (HydrologyNoDrainageMod.F90:873-887), from the post-hydrology snow top,
+    ! soil top and standing water. It is the t_grnd ELM's history records as
+    ! TG; CanopyTemperature recomputes it before anything physical reads it.
+    ! Without this ELMxx's TG sampled the pre-hydrology value -- 1-3 K cold
+    ! of ELM's on 1x1_glc's thin-snow days, 0.63 K in the January mean.
+    if (kernel_active(K_SOILTEMP)) then
+       call ELMxxUpdateGroundTemperatureNatural(elm, ierr)
+       call check(ierr, logunit, K_SOILTEMP)
+    end if
 
     if (kernel_active(K_LAKEHYDRO)) then
        call ELMxxComputeLakeHydrology(elm, ierr)
