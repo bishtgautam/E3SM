@@ -47,6 +47,10 @@ module elmxxDiagnosticsMod
                            ELMxxGetSabgSoil, ELMxxGetSabgSnow,               &
                            ELMxxGetSabg, ELMxxGetSabgPen,                    &
                            ELMxxGetSabgLyr,                                  &
+                           ELMxxGetMssBcphi, ELMxxGetMssBcpho,               &
+                           ELMxxGetMssOcphi, ELMxxGetMssOcpho,               &
+                           ELMxxGetMssDst1, ELMxxGetMssDst2,                 &
+                           ELMxxGetMssDst3, ELMxxGetMssDst4,                 &
                            ELMxxGetQflxSnowGrnd, ELMxxGetQflxRainGrnd,       &
                            ELMxxGetQflxPrecIntr, ELMxxGetQflxEvapVeg,        &
                            ELMxxGetH2osoiIceSoi, ELMxxGetTGrnd,             &
@@ -280,6 +284,18 @@ contains
     call get_cs('h2osoi_ice_sno', ELMxxGetH2osoiIceSno)
     call get_cs('dz_sno',         ELMxxGetDzSno)
     call get_cs('snw_rds',        ELMxxGetSnwRds)
+    ! Snow aerosol mass per layer [kg/m2], ELM order. ELM records the same at
+    ! snowlayer_in:mss_*. Traced so melt-season scavenging (S3) can be graded
+    ! against ELM rather than by construction -- the suspect for April's snow
+    ! being brighter than ELM's.
+    call get_cs('mss_bcphi', ELMxxGetMssBcphi)
+    call get_cs('mss_bcpho', ELMxxGetMssBcpho)
+    call get_cs('mss_ocphi', ELMxxGetMssOcphi)
+    call get_cs('mss_ocpho', ELMxxGetMssOcpho)
+    call get_cs('mss_dst1',  ELMxxGetMssDst1)
+    call get_cs('mss_dst2',  ELMxxGetMssDst2)
+    call get_cs('mss_dst3',  ELMxxGetMssDst3)
+    call get_cs('mss_dst4',  ELMxxGetMssDst4)
 
     ! ---- patch scalars ----
     if (n_kokkos_patch > 0) then
@@ -635,11 +651,8 @@ contains
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':sabg_lyr', plyr, n_kokkos_patch, nlevsno+1)
       deallocate(plyr)
     end block
-    ! TODO snow aerosol: the C getters exist (ELMxx.h:1171 onward) but the
-    ! eight Fortran bindings do not, so mss_* still cannot be traced here.
-    ! ELM records them at snowlayer_in:mss_*. Needed to test whether
-    ! melt-season scavenging (S3, "graded only by construction") is what makes
-    ! ELMxx's April snow ~0.009 brighter in albedo than ELM's.
+    ! Snow aerosol mass (mss_*) is traced with the rest of the snow state, in
+    ! the per-step snapshot above.
     deallocate(cg, c1, i1)
   end subroutine elmxx_diag_snapshot_presoiltemp
 
