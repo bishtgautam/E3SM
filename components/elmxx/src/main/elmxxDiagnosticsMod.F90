@@ -628,6 +628,9 @@ contains
       integer :: szp(2)
       allocate(plyr(n_kokkos_patch, nlevsno+1))
       szp(1) = n_kokkos_patch; szp(2) = nlevsno + 1
+      ! ELM order (top snow first, soil surface last), like every snow field
+      ! in this trace: the getter reflects the H7 storage. Until 2026-09-27 it
+      ! did not, and this one label was H7 among ELM-ordered neighbours (F3).
       call ELMxxGetSabgLyr(elm, plyr, szp, ierr)
       if (ierr == ELMXX_SUCCESS) call elmxx_diag_2d(tag//':sabg_lyr', plyr, n_kokkos_patch, nlevsno+1)
       deallocate(plyr)
