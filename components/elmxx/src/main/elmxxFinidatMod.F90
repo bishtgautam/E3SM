@@ -11,6 +11,19 @@ module elmxxFinidatMod
   ! Starting both models from bit-identical state and stepping ONCE removes
   ! accumulation from the picture -- whatever differs was caused in that step.
   !
+  ! WHICH STEP "ONCE" IS (F1). A startup does not begin stepping from the file.
+  ! lnd_run_mct takes a physics pass at nstep 0 and again at nstep 1 on the
+  ! first coupling call, both on the SAME imported forcing -- and ELM's own
+  ! lnd_run_mct/elm_drv do exactly the same, so this is E3SM startup
+  ! semantics, not an ELMxx quirk. Measured on elm.r.0001-03-01: the file
+  ! equals ELM's continuous-run diag at ts 2833, ELMxx's step-1 forcing is
+  ! ts 2833's, but its step-1 STATE is ts 2834's -- 0.56 K warm on t_grnd.
+  ! So:
+  !   - ELMxx probe vs ELM probe (both startups from this file, e.g.
+  !     elm_dec1_diag): aligned step for step. This is the clean comparison.
+  !   - either probe vs ELM's CONTINUOUS run: align on FORCING (offset 2832
+  !     for this file), never on state, or every field reads ~10% off for free.
+  !
   ! READ-ONLY, DELIBERATELY. ELMxx does not write restarts. This is a
   ! debugging instrument, not restart capability; do not mistake it for one.
   !
@@ -27,8 +40,10 @@ module elmxxFinidatMod
   !
   ! WHAT IS NOT SEEDED, AND WHY IT IS SAFE. frac_iceold and do_capsnow are not
   ! in the restart; ELM recomputes both before first use each step. Anything
-  ! else absent is a hole in the premise, which is why elmxx_finidat_verify
-  ! exists -- see the note there.
+  ! else absent is a hole in the premise. There is NO automated guard for
+  ! that -- an earlier version of this header cited an elmxx_finidat_verify
+  ! routine that was never written. Check by tracing the step-1 state
+  ! (ELMXX_DIAG) against the file.
   !-----------------------------------------------------------------------
 
   use shr_kind_mod  , only : r8 => shr_kind_r8
