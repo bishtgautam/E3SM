@@ -367,10 +367,19 @@ contains
     ! so no gather is needed here -- unlike the Kokkos push, which packs.
     !
     use elmxxSoilPropMod, only : soil_prop_built, col_t_soisno, &
-                                 col_h2osoi_liq, col_h2osoi_ice
+                                 col_h2osoi_liq, col_h2osoi_ice, &
+                                 col_h2osoi_vol, col_dz, watsat, &
+                                 nlevsno, nlevgrnd
+    use elmxxSubgridMod , only : col_landunit, lun_itype, istsoil, istcrop
+    use shr_const_mod   , only : SHR_CONST_RHOFW, SHR_CONST_RHOICE
     implicit none
     integer, intent(in) :: logunit
-    integer :: c, j
+    integer :: c, j, jj, lt
+    real(r8) :: dzj, liq, ice, vol, maxwatsat, excess, totwat
+    real(r8), parameter :: watmin = 0.01_r8           ! elm_varcon.F90:73
+    real(r8), parameter :: pondmx = 0.0_r8            ! elm_varcon.F90:104
+    real(r8), parameter :: denh2o = SHR_CONST_RHOFW   ! as elm_varcon
+    real(r8), parameter :: denice = SHR_CONST_RHOICE
     character(len=*), parameter :: subname = '(elmxx_finidat_apply_soilprop) '
 
     if (.not. finidat_read) then
@@ -390,6 +399,44 @@ contains
           col_t_soisno  (c,j) = fi_t_soisno  (j,c)
           col_h2osoi_liq(c,j) = fi_h2osoi_liq(j,c)
           col_h2osoi_ice(c,j) = fi_h2osoi_ice(j,c)
+       end do
+    end do
+
+    ! ELM bounds the soil water it reads on the first step of a run started
+    ! from a restart (ColumnDataType.F90:2066-2101, bound_h2osoi = .true.):
+    ! for soil/crop landunits, ground layers 1..nlevgrnd, clip negatives,
+    ! remove water above saturation (layer 1 may also hold pondmx), then
+    ! floor BOTH phases at watmin. The file itself is not bounded -- ELM's
+    ! 0001-11-01 restart has 0 ice in unfrozen layers and 0 liquid in
+    ! bedrock, which ELM's state at nstep 0 carries as 0.01. Copying the file
+    ! verbatim left every identical-IC probe 0.01 kg/m2 short there; the
+    ! latent heat of that missing ice put unfrozen layers 0.008-0.04 K off
+    ! ELM at step 1. A cold start reads no restart, so the free run never
+    ! sees this.
+    do c = 1, fi_ncol
+       lt = lun_itype(col_landunit(c))
+       if (lt /= istsoil .and. lt /= istcrop) cycle
+       do j = 1, nlevgrnd
+          jj   = nlevsno + j
+          dzj  = col_dz(c,jj)
+          liq  = max(0._r8, col_h2osoi_liq(c,jj))
+          ice  = max(0._r8, col_h2osoi_ice(c,jj))
+          vol  = liq/(dzj*denh2o) + ice/(dzj*denice)
+          if (j == 1) then
+             maxwatsat = (watsat(c,j)*dzj*1000.0_r8 + pondmx) / (dzj*1000.0_r8)
+          else
+             maxwatsat = watsat(c,j)
+          end if
+          if (vol > maxwatsat) then
+             excess = (vol - maxwatsat)*dzj*1000.0_r8
+             totwat = liq + ice
+             liq = liq - (liq/totwat)*excess
+             ice = ice - (ice/totwat)*excess
+          end if
+          col_h2osoi_liq(c,jj) = max(watmin, liq)
+          col_h2osoi_ice(c,jj) = max(watmin, ice)
+          col_h2osoi_vol(c,j)  = col_h2osoi_liq(c,jj)/(dzj*denh2o) &
+                               + col_h2osoi_ice(c,jj)/(dzj*denice)
        end do
     end do
 
