@@ -65,6 +65,7 @@ module elmxxMod
                                    elmxx_diag_snapshot_state,              &
                                    elmxx_diag_snapshot_fluxes,             &
                                    elmxx_diag_write_maps
+  use elmxxRestMod           , only : elmxx_rest_read
   use elmxxHistMod           , only : elmxx_hist_init, elmxx_hist_step, &
                                       elmxx_hist_write_if_month_end, &
                                       elmxx_hist_final
@@ -166,6 +167,12 @@ module elmxxMod
   ! coupling error from an arithmetic one -- the replay tests bypass the
   ! coupling by construction and so cannot see it.
   character(len=256), public :: finidat = ' '
+  ! Stage 6 restart. elmxx_nrevsn is ELM's nrevsn: the ELMxx restart a BRANCH
+  ! run starts from. A CONTINUE run reads rpointer.lnd instead. The read
+  ! itself is deferred to the top of the first elmxx_run (see there).
+  character(len=256), public :: elmxx_nrevsn = ' '
+  character(len=256), private :: rest_read_file = ' '
+  logical, private :: rest_read_pending = .false.
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
   ! seed, which silently discards a step of physics. That was harmless while
@@ -227,6 +234,8 @@ module elmxxMod
   public :: elmxx_run
   public :: elmxx_init_albedo
   public :: elmxx_final
+  public :: elmxx_restart_set_start
+  public :: elmxx_restart_write
 
 contains
 
@@ -250,7 +259,7 @@ contains
                             elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
                             elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
-                            elmxx_hist_fincl
+                            elmxx_hist_fincl, elmxx_nrevsn
 
     ! defaults
     do_elmxx   = .true.
@@ -259,6 +268,7 @@ contains
     fsnowoptics = ' '
     fsnowaging  = ' '
     finidat     = ' '
+    elmxx_nrevsn = ' '
     elmxx_check_boundary  = .false.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
@@ -303,6 +313,7 @@ contains
     call mpi_bcast (fsnowoptics, len(fsnowoptics) , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fsnowaging , len(fsnowaging)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (finidat    , len(finidat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_nrevsn, len(elmxx_nrevsn), MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
@@ -789,6 +800,46 @@ contains
     if (present(doalb)) doalb_in = doalb
     do_albedo_this_step = elmxx_do_albedo .and. doalb_in
 
+    ! RESTART READ, on the first step of a continue/branch run. It has to be
+    ! HERE: before the forcing push (forcing views are restart fields, and
+    ! this step's forcing must win) and before root stress (btran must come
+    ! from the restored soil, not the cold start). The pieces a startup
+    ! builds lazily later in its first step are built now so the read can
+    ! overwrite them; their own lazy checks below then see them built.
+    if (rest_read_pending) then
+       if (root_built .and. .not. root_statics_pushed) then
+          call elmxx_kokkos_push_root_statics(elmxx_state, logunit)
+          root_statics_pushed = .true.
+       end if
+       if (kokkos_state_built .and. .not. soil_kernel_built) then
+          if (kernel_active(K_SOILTEMP)   .or. kernel_active(K_SOILFLUX)  .or. &
+              kernel_active(K_SURFRUNOFF) .or. kernel_active(K_ROOTWATER) .or. &
+              kernel_active(K_HYDRODRAIN)) then
+             call elmxx_soil_kernel_init(elmxx_state, &
+                  real(coupling_dt_in_sec, r8), logunit)
+          end if
+       end if
+       if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done) then
+          call elmxx_hist_init(elmxx_state, logunit, elmxx_caseid, elmxx_hist_fincl, &
+                               elmxx_hist_start_year, elmxx_hist_start_month, &
+                               elmxx_hist_start_day, n_kokkos_col, num_cells_global, &
+                               natural_id_cells_owned, lonc_g, latc_g, areac_g)
+          hist_state_init_done = .true.
+       end if
+       if (kokkos_state_built .and. any_kernel_active .and. elmxx_do_photosynthesis) then
+          if (.not. photosyn_built) then
+             call elmxx_photosyn_init(cell_lat, real(coupling_dt_in_sec, r8), logunit)
+             call elmxx_photosyn_seed(elmxx_state, logunit)
+          end if
+          if (.not. photosyn_statics_pushed) then
+             call elmxx_push_photosyn_statics(elmxx_state, logunit)
+             photosyn_statics_pushed = .true.
+          end if
+       end if
+       call elmxx_rest_read(elmxx_state, rest_read_file, nstep, logunit)
+       rest_read_pending = .false.
+    end if
+
     nstep = nstep + 1
     call elmxx_diag_new_timestep(nstep)
 
@@ -1190,5 +1241,55 @@ contains
     call elmxx_diag_finalize()
 
   end subroutine elmxx_final
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_restart_set_start(start_type, inst_suffix, logunit, nstep_restart)
+    !
+    ! Decide, from the coupler's start type, whether this run starts from an
+    ! ELMxx restart (ELM's nsrest): 'continue' reads rpointer.lnd, 'branch'
+    ! reads elmxx_nrevsn, 'startup' reads nothing (finidat, if set, is the
+    ! separate ELM-restart path). Returns the restart's step counter, or -1,
+    ! so the driver can carry its own count on; the read itself happens at
+    ! the top of the first elmxx_run.
+    !
+    use elmxxRestMod, only : elmxx_rest_rpointer_read, elmxx_rest_peek_nstep
+    character(len=*), intent(in)  :: start_type, inst_suffix
+    integer         , intent(in)  :: logunit
+    integer         , intent(out) :: nstep_restart
+    character(len=*), parameter :: subname = '(elmxx_restart_set_start) '
+
+    nstep_restart = -1
+    select case (trim(start_type))
+    case ('continue')
+       rest_read_file = elmxx_rest_rpointer_read(inst_suffix)
+    case ('branch')
+       if (len_trim(elmxx_nrevsn) == 0) call shr_sys_abort(subname// &
+            'ERROR: a branch run needs elmxx_nrevsn (the ELMxx restart to branch from)')
+       rest_read_file = elmxx_nrevsn
+    case default
+       return
+    end select
+    rest_read_pending = .true.
+    nstep_restart = elmxx_rest_peek_nstep(rest_read_file)
+    if (masterproc) then
+       write(logunit,*) subname, trim(start_type), ' run from ', trim(rest_read_file), &
+            ' (nstep ', nstep_restart, ')'
+       call shr_sys_flush(logunit)
+    end if
+  end subroutine elmxx_restart_set_start
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_restart_write(inst_suffix, yr, mon, day, tod, logunit)
+    !
+    ! Write a restart dated (yr, mon, day, tod) -- the END of the step just
+    ! taken, which is the time the next run starts from.
+    !
+    use elmxxRestMod, only : elmxx_rest_write
+    character(len=*), intent(in) :: inst_suffix
+    integer         , intent(in) :: yr, mon, day, tod, logunit
+    if (.not. kokkos_state_built) return
+    call elmxx_rest_write(elmxx_state, elmxx_caseid, inst_suffix, yr, mon, day, tod, &
+                          nstep, logunit)
+  end subroutine elmxx_restart_write
 
 end module elmxxMod

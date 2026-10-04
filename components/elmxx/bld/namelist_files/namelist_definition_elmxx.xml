@@ -68,6 +68,18 @@ SNICAR snow grain aging lookup table (best-fit tau, kappa, drdsdt0).
 Default: ' '
 </entry>
 
+<entry id="elmxx_nrevsn"
+       type="char*256"
+       category="elmxx"
+       input_pathname="abs"
+       group="elmxx_inparm"
+       valid_values="" >
+Full pathname of an ELMxx restart file (*.elmxx.r.*.nc) to start a BRANCH run
+from -- ELM's nrevsn. Required when RUN_TYPE=branch; ignored otherwise. A
+CONTINUE_RUN takes its file from rpointer.lnd instead.
+Default: ' '
+</entry>
+
 <entry id="finidat"
        type="char*256"
        category="elmxx"
@@ -76,7 +88,8 @@ Default: ' '
        valid_values="" >
 Full pathname of an ELM restart file to read as an initial condition.
 
-READ-ONLY. ELMxx never writes restart files. This exists to start ELMxx from
+READ-ONLY, and it reads an ELM file -- ELMxx's own restarts (Stage 6) are
+read by CONTINUE_RUN or elmxx_nrevsn, not here. This exists to start ELMxx from
 ELM's exact state so the two can be stepped once from a bit-identical
 starting point, which is the only way to separate a coupling error from an
 arithmetic one -- the replay tests seed each kernel from ELM and so bypass
