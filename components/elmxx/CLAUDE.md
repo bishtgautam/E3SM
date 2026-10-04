@@ -136,8 +136,39 @@ cases -- use a standard grid.
 
 ## Not supported yet
 
-Restarts (nothing writes `rpointer.lnd`, so branch/hybrid runs fail), multi-instance
+Multi-rank restarts (`elmxxRestMod` aborts on `npes > 1`), multi-instance
 (`NINST_LND > 1` is asserted against in `buildnml`), and the moab driver.
+
+## Restarts
+
+ELMxx writes ALL persistent state (`src/main/elmxxRestMod.F90`): every field of
+the C++ restart registry (`ELMxxRestartField*`, generated from the state-container
+headers by `external_models/elmxx/tools/gen_restart_registry.py`), the active
+history accumulators, and the Fortran-side `nstep` and history interval. Written
+when the coupler's restart alarm rings, dated with the step's END time
+(`<case>.elmxx.r.YYYY-MM-DD-SSSSS.nc`), plus `rpointer.lnd`. Read on
+`CONTINUE_RUN=TRUE` (from `rpointer.lnd`) or a branch (`elmxx_nrevsn`).
+
+- **The read happens at the top of the first `elmxx_run`**, after forcing the
+  first-step lazy inits and BEFORE the forcing push and root stress. Moving it
+  later breaks bit-for-bit: forcing views are restart fields, and `btran` would
+  come from the cold start.
+- **A continue run takes no duplicate nstep-0 pass** and its clock starts at the
+  coupler's current time, as ELM's does.
+- **Reading is strict:** every allocated registry field must be on the file with
+  the same shape, or the run aborts. A new view must be added to the registry
+  (re-run the generator; the `RestartRegistrySync` CTest fails otherwise) and
+  then old restart files no longer read.
+- **Closure test (passes bit-for-bit, 2026-10-04):** run A 45 days from cold
+  start with `REST_OPTION=ndays REST_N=15`; set A's day-45 restart and Jan h0
+  aside; point `rpointer.lnd`, `rpointer.drv` AND `rpointer.atm` at the day-15
+  date; `CONTINUE_RUN=TRUE STOP_N=30`; compare with
+  `ncdump -p 17,17 | tail -n +2` (drop `date_written`/`time_written`). A mid-month
+  restart must reproduce that month's h0 exactly. Negative control: perturb a
+  PROGNOSTIC field (soil T) in the restart by 1e-12 -- not `t_grnd`, which
+  CanopyTemperature recomputes at the start of every step.
+- `ncdump -v` cannot select the registry's `natcol:...` names (the colon); dump
+  the whole file.
 
 
 ## Validating a Fortran-side port against ELM

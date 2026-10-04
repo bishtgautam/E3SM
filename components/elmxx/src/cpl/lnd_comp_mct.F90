@@ -16,7 +16,7 @@ module lnd_comp_mct
   use seq_cdata_mod   , only : seq_cdata, seq_cdata_setptrs
   use seq_infodata_mod, only : seq_infodata_type, seq_infodata_PutData, seq_infodata_GetData
   use seq_comm_mct    , only : seq_comm_inst, seq_comm_name, seq_comm_suffix
-  use seq_timemgr_mod , only : seq_timemgr_EClockDateInSync
+  use seq_timemgr_mod , only : seq_timemgr_EClockDateInSync, seq_timemgr_RestartAlarmIsOn
   use shr_kind_mod    , only : IN=>SHR_KIND_IN, R8=>SHR_KIND_R8, CS=>SHR_KIND_CS, CL=>SHR_KIND_CL
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_file_mod    , only : shr_file_getunit, shr_file_getlogunit, shr_file_getloglevel
@@ -25,6 +25,7 @@ module lnd_comp_mct
   use elmxxSpmdMod    , only : masterproc, mpicom_lnd, iam, npes, LNDID, elmxxSpmdInit
   use elmxxMod        , only : elmxx_read_namelist, elmxx_init, elmxx_run, elmxx_final
   use elmxxMod        , only : elmxx_init_albedo
+  use elmxxMod        , only : elmxx_restart_set_start, elmxx_restart_write
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
   use elmxxMod        , only : elmxx_caseid
@@ -53,6 +54,10 @@ module lnd_comp_mct
   type(ESMF_Time), private :: elmxx_clock_time
   logical, private :: elmxx_clock_started = .false.
   integer, private :: elmxx_nstep = 0
+  ! True for a continue/branch run (ELM's nsrest /= startup): the clock starts
+  ! at the coupler's current time and there is no duplicate nstep-0 pass --
+  ! ELM takes neither on a restart either.
+  logical, private :: elmxx_from_restart = .false.
   public :: lnd_final_mct
 
   !--------------------------------------------------------------------------
@@ -165,6 +170,20 @@ CONTAINS
     call seq_infodata_GetData(infodata, case_name=elmxx_caseid)
 
     call elmxx_init(logunit_lnd, year, month, day)
+
+    ! Restart (Stage 6): a continue or branch run carries ELMxx's step count
+    ! on, so doalb's nstep-0/1 special cases do not fire again; the state
+    ! itself is read at the top of the first elmxx_run.
+    block
+      character(len=CS) :: starttype
+      integer :: nstep_restart
+      call seq_infodata_GetData(infodata, start_type=starttype)
+      call elmxx_restart_set_start(starttype, inst_suffix, logunit_lnd, nstep_restart)
+      if (nstep_restart >= 0) then
+         elmxx_nstep = nstep_restart + 1
+         elmxx_from_restart = .true.
+      end if
+    end block
 
     !----------------------------------------------------------------------------
     ! Register the ELMxx decomposition and domain with the coupler
@@ -279,6 +298,12 @@ CONTAINS
     ! this runs twice -- nstep 0 then nstep 1 -- and once per call thereafter.
     ! Running once unconditionally left ELMxx a physics pass behind ELM and
     ! also broke as soon as l_ncpl stopped matching the model timestep.
+    if (.not. elmxx_clock_started .and. elmxx_from_restart) then
+       ! The first step of a continued run ends at the coupler's current time.
+       call ESMF_ClockGet(EClock, currTime=elmxx_clock_time, rc=rc)
+       call chkrc(rc, 'lnd::lnd_run_mct: ESMF_ClockGet currTime')
+       elmxx_clock_started = .true.
+    end if
     if (.not. elmxx_clock_started) then
        call ESMF_ClockGet(EClock, startTime=elmxx_clock_time, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_ClockGet startTime')
@@ -327,6 +352,13 @@ CONTAINS
                       nextsw_cday, declinp1, doalb=doalb_step, &
                       hist_year=hist_year, hist_month=hist_month, &
                       hist_day=hist_day, hist_tod=hist_tod)
+
+       ! Restart at the end of the coupling interval the alarm rings in, dated
+       ! with this step's end time (ELM: rstwr = rstwr_sync .and. dosend).
+       if (dosend .and. seq_timemgr_RestartAlarmIsOn(EClock)) then
+          call elmxx_restart_write(inst_suffix, hist_year, hist_month, hist_day, &
+                                   hist_tod, logunit_lnd)
+       end if
 
        elmxx_nstep = elmxx_nstep + 1
        elmxx_clock_time = elmxx_clock_time + elmxx_step

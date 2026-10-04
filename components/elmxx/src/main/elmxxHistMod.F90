@@ -38,6 +38,8 @@ module elmxxHistMod
   public :: elmxx_hist_step
   public :: elmxx_hist_write_if_month_end
   public :: elmxx_hist_final
+  public :: elmxx_hist_get_restart_state
+  public :: elmxx_hist_set_restart_state
 
   !--------------------------------------------------------------------------
   ! Module state. One instance only -- ELMxx runs one land model per
@@ -68,6 +70,25 @@ module elmxxHistMod
   real(r4), parameter :: HIST_FILL = 1.0e36_r4
 
 contains
+
+  !-----------------------------------------------------------------------
+  ! Restart (Stage 6): the Fortran half of the history state -- the open
+  ! interval's start date and this module's own sample count. The device
+  ! accumulators and the C++ nacs cross through the restart field registry.
+  !-----------------------------------------------------------------------
+  subroutine elmxx_hist_get_restart_state(nacs, start_year, start_month, start_day)
+    integer, intent(out) :: nacs, start_year, start_month, start_day
+    nacs = hist_nacs
+    start_year = hist_start_year; start_month = hist_start_month
+    start_day = hist_start_day
+  end subroutine elmxx_hist_get_restart_state
+
+  subroutine elmxx_hist_set_restart_state(nacs, start_year, start_month, start_day)
+    integer, intent(in) :: nacs, start_year, start_month, start_day
+    hist_nacs = nacs
+    hist_start_year = start_year; hist_start_month = start_month
+    hist_start_day = start_day
+  end subroutine elmxx_hist_set_restart_state
 
   !-----------------------------------------------------------------------
   subroutine elmxx_hist_init(elmxx_state, logunit, caseid, elmxx_hist_fincl, &
