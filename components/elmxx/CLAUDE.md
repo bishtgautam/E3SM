@@ -351,6 +351,10 @@ shell's directory is not what you assume. Check `CMakeCache.txt` actually
 changed before believing a result — a whole "suite is green against the snow
 case" run turned out to be the wrong binary.
 
+**`case.build` needs `export SDKROOT=$(xcrun --show-sdk-path)` on this laptop.**
+Without it the PIO configure fails with `ld: library 'System' not found` —
+before any ELMxx code is compiled, so it looks unrelated to your change.
+
 **A new source file needs `./case.build --clean-all`**; `--clean lnd` is not
 enough and fails on a missing `.mod`. So does any `env_build` change.
 
