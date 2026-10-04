@@ -42,7 +42,7 @@ module elmxxKernelMod
                                ELMxxComputeLakeTemperature, &
                                ELMxxComputeSoilTemperatureNatural, &
                                ELMxxComputeSoilFluxesNatural, &
-                               ELMxxComputeSurfRunInfilHydroActive, &
+                               ELMxxComputeSurfaceRunoffInfiltration, &
                                ELMxxComputeRootWaterUpdateNatural, &
                                ELMxxComputeSoilWaterNatural, &
                                ELMxxComputeHydrologyDrainageNatural, &
@@ -721,7 +721,7 @@ contains
     call elmxx_diag_snapshot_preinfil(elm, 'elmxx_ri')
 
     if (kernel_active(K_SURFRUNOFF)) then
-       call ELMxxComputeSurfRunInfilHydroActive(elm, ierr)
+       call ELMxxComputeSurfaceRunoffInfiltration(elm, ierr)
        call check(ierr, logunit, K_SURFRUNOFF)
     end if
     call wbal_mark(elm, K_SURFRUNOFF)
