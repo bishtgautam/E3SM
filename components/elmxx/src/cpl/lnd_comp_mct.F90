@@ -306,13 +306,19 @@ CONTAINS
           doalb_step = (nextsw_cday >= -0.5_r8)
        end if
 
-       ! History's month-end trigger needs the per-substep END time -- a
-       ! separate clock read from elmxx_clock_time (this substep's START),
-       ! not the once-per-coupling-interval month/day above. Deliberately a
-       ! new argument rather than repurposing month/day: those already drive
-       ! phenology, and changing what they carry as a side effect of adding
-       ! history would risk a silent phenology behavior change.
-       hist_time = elmxx_clock_time + elmxx_step
+       ! History's month-end trigger needs the per-substep END time, as a
+       ! separate argument from month/day above (those drive phenology, and
+       ! changing what they carry would be a silent phenology change).
+       !
+       ! That end time IS elmxx_clock_time, not clock + step: because of the
+       ! duplicate nstep-0 pass, the clock during step n already reads
+       ! start + n*dt, the end of step n's forcing interval -- the stamp ELM
+       ! gives step n (it advances its clock after elm_drv,
+       ! lnd_comp_mct.F90:656). Adding a step put every sample one step late,
+       ! so each monthly h0 held steps ending 00:00 day 1 .. 23:30 last day
+       ! instead of 00:30 day 1 .. 00:00 next day: April H2OCAN was 3.9e-3
+       ! off ELM purely from a rain event ramping canopy water at month end.
+       hist_time = elmxx_clock_time
        call ESMF_TimeGet(hist_time, yy=hist_year, mm=hist_month, dd=hist_day, &
                          s=hist_tod, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet hist_time')

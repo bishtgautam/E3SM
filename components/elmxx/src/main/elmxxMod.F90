@@ -1042,7 +1042,11 @@ contains
     !-----------------------------------------------------------------------
     if (kokkos_state_built .and. subgrid_built) then
        call elmxx_hist_step(elmxx_state, logunit)
-       if (present(hist_year) .and. present(hist_month) .and. &
+       ! The nstep-0 pass is accumulated (ELM's January mean includes it --
+       ! measured, H2OCAN to 1.3e-7) but never closes a tape: ELM skips the
+       ! write at nstep 0 (histFileMod.F90:3415). Its stamp is the run start,
+       ! day 1 00:00, which would otherwise write a one-sample file.
+       if (nstep > 0 .and. present(hist_year) .and. present(hist_month) .and. &
            present(hist_day) .and. present(hist_tod)) then
           call elmxx_hist_write_if_month_end(elmxx_state, hist_year, hist_month, &
                                              hist_day, hist_tod, logunit)
