@@ -99,7 +99,9 @@ plan, Part 5.
   (`SoilMoistStressMod` → `SoilMoistStressImpl.h` / `…Data.h`).
 - **Directories** mirror ELM's `src/`: `src/{biogeophys,biogeochem,data_types,main,utils}`
   in the submodule, each module's header and source together; `include/` holds
-  only the public API. *(Being introduced by Part 5, phase N2.)*
+  only the public API (`ELMxx.h`, `ELMxxMacros.h`, `elmxx_mod.F90`, `finclude/`).
+  The include root is `src/`: `#include "biogeophys/SoilTemperatureImpl.h"`.
+  Containers live in `data_types/`, the C API and history/restart in `main/`.
 - **R2 Kernel functions** carry the ELM subroutine name, plus at most one element
   suffix: `Column`, `Patch`, `Landunit`.
 - **R3** Rename only where ELMxx uses *different words* from ELM. Pure style
@@ -112,7 +114,9 @@ plan, Part 5.
   and the urban per-surface members stay — one kernel serves all five surfaces.
 - **R6** Every ported function's header names its ELM origin by subroutine, not
   line number: `// ELM: SoilTemperatureMod :: Phasechange_beta`. Every field
-  declaration names its ELM variable: `// ELM: forc_lwrad`.
+  declaration names its ELM variable: `// ELM: col_ws%h2osoi_liq`,
+  `// ELM: SoilFluxes local egsmax`. Check an `inst%member` against ELM's type
+  definitions before writing it: 68 earlier references named owners that do not exist.
 - **R7** ELMxx-only constructs say so: `// ELMxx-only: block inside
   HydrologyNoDrainage, no ELM subroutine`.
 - Validation test names and namelist kernel tokens keep their current names
