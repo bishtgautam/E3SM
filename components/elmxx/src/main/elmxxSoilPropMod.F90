@@ -232,7 +232,14 @@ contains
           ! bd is bulk density, and the (sand+clay) denominator is why a
           ! column with neither would divide by zero -- surfdata always has
           ! one or the other, but guard rather than assume.
-          bd  = (1.0_r8 - watsat(c,j)) * 2.7e3_r8
+          !
+          ! bd comes from the MINERAL porosity, not the organic-blended
+          ! watsat: ELM sets bd_col before it mixes om_watsat into watsat_col
+          ! (SoilStateType.F90:753-754). Using the blended value made tkdry
+          ! 1.7% low in soil layer 1 on 1x1_glc -- every layer with organic
+          ! matter -- and was the first coupled divergence from identical
+          ! state (2026-10-04, probe from elm.r.0001-04-01).
+          bd  = (1.0_r8 - wsat_min) * 2.7e3_r8
           if (sand + clay <= 0.0_r8) then
              call shr_sys_abort(subname//'ERROR: column has neither sand nor clay')
           end if

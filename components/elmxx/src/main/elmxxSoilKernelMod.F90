@@ -50,7 +50,8 @@ module elmxxSoilKernelMod
 
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_sys_mod         , only : shr_sys_abort, shr_sys_flush
-  use shr_const_mod       , only : SHR_CONST_STEBOL
+  use shr_const_mod       , only : SHR_CONST_STEBOL, shr_const_pi
+  use shr_spfn_mod        , only : shr_spfn_erf
   use elmxxSpmdMod        , only : masterproc, iam
   use elmxxSubgridMod     , only : num_columns, num_patches, &
                                    col_landunit, lun_gridcell, patch_column, &
@@ -159,6 +160,11 @@ contains
     integer , allocatable :: icol(:), ipatch(:), filt(:)
     real(r8), allocatable :: rcol(:), rpatch(:), buf(:,:)
     character(len=*), parameter :: subname = '(elmxx_soil_kernel_init) '
+    ! h2osfc_thresh (ELM SoilHydrologyType InitCold)
+    real(r8) :: msig, dthr, fd, dfdd
+    real(r8), parameter :: slopebeta = 3.0_r8, slopemax = 0.4_r8   ! initVerticalMod
+    real(r8), parameter :: pc_thresh = 0.4_r8                       ! :569 default
+    real(r8) :: slope0
 
     if (.not. kokkos_state_built) call shr_sys_abort(subname//'ERROR: maps not built')
     if (.not. soil_prop_built)    call shr_sys_abort(subname//'ERROR: soil properties not built')
@@ -447,10 +453,35 @@ contains
     call ELMxxSetZwtPerched(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ZwtPerched')
     call ELMxxSetFrostTable(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FrostTable')
 
-    ! Surface-water depth threshold: ELM's micro-topography relation, with the
-    ! standard 1e-3 m minimum.
-    rcol = 0.0_r8
+    ! Surface-water depth threshold ("fill & spill"): ELM SoilHydrologyType
+    ! InitCold (SoilHydrologyType.F90:581-594), literals kept as ELM has them
+    ! -- sqrt(2.0) is default-real there, and matching it matters at 4e-9.
+    ! pc is ELM's gridcell pc, read from surfdata 'pc' or defaulted to 0.4
+    ! (:567-569); no ELMxx surfdata carries it. It is NOT the 0.5 that
+    ! Infiltration's frac_infclust uses. This was hardcoded 0 while its
+    ! comment described the relation, which made h2osfc runoff
+    ! (proportional to h2osfc - h2osfc_thresh) 4% high on 1x1_glc's April
+    ! ponds, where ELM's threshold is 0.1156 mm.
+    slope0 = slopemax**(-1._r8/slopebeta)
+    do kc = 1, n_kokkos_col
+       msig = (topo_slope(lun_gridcell(col_landunit(col_of_kcol(kc)))) + slope0)**(-slopebeta)
+       rcol(kc) = 0._r8
+       if (msig > 1.e-6_r8) then
+          dthr = 0.0
+          do p = 1, 4
+             fd   = 0.5*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0)))) - pc_thresh
+             dfdd = exp(-dthr**2/(2.0*msig**2))/(msig*sqrt(2.0*shr_const_pi))
+             dthr = dthr - fd/dfdd
+          end do
+          rcol(kc) = 0.5*dthr*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0)))) + &
+               msig/sqrt(2.0*shr_const_pi)*exp(-dthr**2/(2.0*msig**2))
+          rcol(kc) = 1.e3_r8 * rcol(kc)   ! m -> mm
+       end if
+    end do
+    if (masterproc .and. n_kokkos_col > 0) write(logunit,'(a,2es24.16)') subname//'h2osfc_thresh [mm] min/max ', &
+         minval(rcol), maxval(rcol)
     call ELMxxSetH2osfcThresh(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'H2osfcThresh')
+    rcol = 0.0_r8
     call ELMxxSetFracH2osfcAct(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FracH2osfcAct')
     call ELMxxSetDzH2osfc(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'DzH2osfc')
 
