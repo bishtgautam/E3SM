@@ -38,13 +38,13 @@ module elmxxMod
   use elmxxForcingMod , only : elmxx_forcing_init, elmxx_forcing_clean
 
   use elmxx_mod              , only : ELMxxType, ELMxxCreate, ELMxxDestroy, ELMXX_SUCCESS, &
-                                      ELMxxComputeRootStressNatural, &
-                                      ELMxxComputeGroundHeatFluxNatural, &
+                                      ELMxxComputeSoilMoistStressNatural, &
+                                      ELMxxComputeGroundHeatFluxAndDerivNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
                                       ELMxxComputeForcingDerivedNatural, &
                                       ELMxxComputePhotosynForcingNatural, &
-                                      ELMxxComputePhenologyNatural
+                                      ELMxxComputeSatellitePhenologyNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use elmxxPftconMod         , only : elmxx_read_pftcon, elmxx_pftcon_clean, pftcon_read
@@ -890,9 +890,9 @@ contains
           call elmxx_kokkos_push_root_statics(elmxx_state, logunit)
           root_statics_pushed = .true.
        end if
-       call ELMxxComputeRootStressNatural(elmxx_state, ierr_rs)
+       call ELMxxComputeSoilMoistStressNatural(elmxx_state, ierr_rs)
        if (ierr_rs /= ELMXX_SUCCESS) &
-            call shr_sys_abort('(elmxx_run) ERROR: ComputeRootStressNatural failed')
+            call shr_sys_abort('(elmxx_run) ERROR: ComputeSoilMoistStressNatural failed')
     end if
 
     !-----------------------------------------------------------------------
@@ -1001,9 +1001,9 @@ contains
              call ELMxxSetGroundHeatFluxSb(elmxx_state, SHR_CONST_STEBOL, ierr_rs)
              ghf_sb_pushed = .true.
           end if
-          call ELMxxComputeGroundHeatFluxNatural(elmxx_state, ierr_rs)
+          call ELMxxComputeGroundHeatFluxAndDerivNatural(elmxx_state, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
-               call shr_sys_abort('(elmxx_run) ERROR: ComputeGroundHeatFluxNatural failed')
+               call shr_sys_abort('(elmxx_run) ERROR: ComputeGroundHeatFluxAndDerivNatural failed')
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
@@ -1042,9 +1042,9 @@ contains
              monthly_phen_pushed = .true.
           end if
           call elmxx_phenology_weights(month, day, phm1, phm2, phw1, phw2)
-          call ELMxxComputePhenologyNatural(elmxx_state, phm1, phm2, phw1, phw2, ierr_rs)
+          call ELMxxComputeSatellitePhenologyNatural(elmxx_state, phm1, phm2, phw1, phw2, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
-               call shr_sys_abort('(elmxx_run) ERROR: ComputePhenologyNatural failed')
+               call shr_sys_abort('(elmxx_run) ERROR: ComputeSatellitePhenologyNatural failed')
        end if
 
        if (do_albedo_this_step) then
