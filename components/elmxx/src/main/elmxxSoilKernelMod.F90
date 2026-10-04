@@ -3,7 +3,7 @@ module elmxxSoilKernelMod
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
   ! Stage 4: the integration surface for the five soil/hydrology kernels --
-  ! SoilTemperature, SoilFluxes, SurfRunInfil, RootWaterUpdate and
+  ! SoilTemperature, SoilFluxes, SurfaceRunoffInfiltration, RootWaterUpdate and
   ! HydrologyDrainage.
   !
   ! THIS IS A MUCH SMALLER SURFACE THAN STATUS ONCE CLAIMED, and the reason is
@@ -36,7 +36,7 @@ module elmxxSoilKernelMod
   !   _p1         NLEVTOT_P1= 21 snow[1..5] SSW[6] soil[7..21]
   !   _soi        NLEVGRND  = 15 soil only
   !
-  ! SoilTemperature reads the _p1 views. SurfRunInfil and HydrologyDrainage
+  ! SoilTemperature reads the _p1 views. SurfaceRunoffInfiltration and HydrologyDrainage
   ! read the _soi views. SoilFluxes reads the plain ones. ELMxxSetDz writes the
   ! PLAIN view; ELMxxSetDzP1 and ELMxxSetDzSoi are separate calls. So the
   ! seeding that satisfied the canopy kernels leaves the other two
