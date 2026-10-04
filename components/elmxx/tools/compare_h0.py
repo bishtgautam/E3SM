@@ -104,7 +104,9 @@ def main():
     print("conservation fields, worst magnitude over the year (want ~0):")
     for f in sorted(mag):
         m, k = mag[f]
-        print(f"  {f:<12} {m:.3e}   (month {k:02d})")
+        # k stays None for a field that is exactly zero all year (brazil's
+        # snow-balance fields), which crashed the report.
+        print(f"  {f:<12} {m:.3e}   " + (f"(month {k:02d})" if k is not None else "(all months)"))
 
     print(f"\nworst {a.top} fields, error scaled by the field's annual peak:")
     print(f"  {'field':<14}{'err/scale':>10}  {'mon':>3}  {'ELM':>12}{'ELMxx':>12}")
