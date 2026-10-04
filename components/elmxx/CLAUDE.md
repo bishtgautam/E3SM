@@ -89,6 +89,35 @@ There is no `elmxx_cpl_indices.F90` yet -- add it (from
 `components/elm/src/cpl/elm_cpl_indices.F90`) in the same change that first reads
 field values out of `x2l_l`.
 
+## Naming — standing rules for ELMxx C++ (owner-approved 2026-10-04)
+
+Goal: an ELM developer finds the ELMxx counterpart of any ELM subroutine by
+grepping its ELM name. Details and the full rename inventory: development
+plan, Part 5.
+
+- **R1 Files** are named after the ELM module they port, minus `Mod`
+  (`SoilMoistStressMod` → `SoilMoistStressImpl.h` / `…Data.h`).
+- **Directories** mirror ELM's `src/`: `src/{biogeophys,biogeochem,data_types,main,utils}`
+  in the submodule, each module's header and source together; `include/` holds
+  only the public API. *(Being introduced by Part 5, phase N2.)*
+- **R2 Kernel functions** carry the ELM subroutine name, plus at most one element
+  suffix: `Column`, `Patch`, `Landunit`.
+- **R3** Rename only where ELMxx uses *different words* from ELM. Pure style
+  variants stay (`PhaseChangeBeta` for `Phasechange_beta`, `SnicarAdRt` for
+  `SNICAR_AD_RT`) and are covered by R6.
+- **R4 Data structs** for one kernel: ELM subroutine name + `Data`.
+- **R5 Field names are not changed to ELM's spelling, and ELMxx does not add
+  underscores.** ELMxx's camelCase names are its convention. **Snow and soil are
+  separate arrays, the snow index reversed relative to ELM's** (`SnowIndexing.h`),
+  and the urban per-surface members stay — one kernel serves all five surfaces.
+- **R6** Every ported function's header names its ELM origin by subroutine, not
+  line number: `// ELM: SoilTemperatureMod :: Phasechange_beta`. Every field
+  declaration names its ELM variable: `// ELM: forc_lwrad`.
+- **R7** ELMxx-only constructs say so: `// ELMxx-only: block inside
+  HydrologyNoDrainage, no ELM subroutine`.
+- Validation test names and namelist kernel tokens keep their current names
+  (tests match instrumented ELM's diagnostic labels; tokens are user-facing).
+
 ## Coupler constraints -- do not "fix" these
 
 Read out of `driver-mct/main/seq_domain_mct.F90`; each one aborts the run if broken.
