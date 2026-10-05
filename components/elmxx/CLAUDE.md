@@ -171,9 +171,35 @@ cases -- use a standard grid.
 
 Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
 driver, `RUN_TYPE=hybrid` (it cold-starts ELMxx: `finidat` reads ELM files,
-not ELMxx restarts), and restarting lake / urban-column / urban-patch state
+not ELMxx restarts), and restarting urban-column / urban-patch state
 (never allocated on the coupled path; `elmxxRestMod` aborts naming the field
-if one ever is).
+if one ever is). Lake state restarts (`LAKECOL`/`LAKEPATCH`, since Stage 6.5).
+
+## The lake surface
+
+Lake is its own surface, a peer of natural and urban: `lakeCol`/`lakePatch`
+(`src/data_types/Lake{Column,Patch}Data.h`), driven from
+`src/main/elmxxLakeMod.F90`. Durable facts:
+
+- **Seeded and read by NAME** through the restart registry
+  (`ELMxxRestartFieldFind` + `ELMxxRestartFieldGet/Set`, e.g.
+  `"lakecol:t_lake"`), not per-field setters. The registry crosses a flat
+  ROW-major buffer; `elmxxLakeMod`'s helpers transpose Fortran arrays.
+- **ELM's combined snow+ground index space**, not naturalCol's reversed
+  snow index: slot j <-> ELM layer j-4; `zi` slot i <-> ELM `zi(i-5)`.
+  LakeTemperature reads `zi` ONE SLOT EARLIER than LakeHydrology, so it gets
+  `zi_lt`, refreshed from `zi` each step. Never hand it `zi` directly.
+- **One patch per lake column, packed alike** (LakeHydrology indexes
+  p = c); `ELMxxAllocateLakeSurface` refuses anything else.
+- **Forcing comes from the cell's natural column** (`col_natcol`), which
+  every cell has: ELM allocates the natural landunit whatever its weight.
+- **History is the natural+lake landunit mean**, per field by `LakeRule`
+  (`HistData.h`), each rule read off ELM's own h0 over a 100% lake cell
+  (`brazil_lake100`), not guessed. The h0 guard is natural + lake weight = 1.
+- **ELM's lake column keeps `frac_sno` = 0 under snow** (lake code never
+  sets it), so its lake ground albedo is the snow-free one.
+- **Lake negative controls need >= 1e-6 K.** Convective mixing averages a
+  1e-12 K perturbation of `t_lake` below a 300 K ULP; it vanishes.
 
 ## Restarts
 
@@ -404,6 +430,19 @@ before any ELMxx code is compiled, so it looks unrelated to your change.
 
 **A new source file needs `./case.build --clean-all`**; `--clean lnd` is not
 enough and fails on a missing `.mod`. So does any `env_build` change.
+
+**Running `e3sm.exe` directly does not regenerate namelists.** After
+`./xmlchange STOP_N/STOP_OPTION/CONTINUE_RUN/REST_*`, run
+`./preview_namelists` -- otherwise `drv_in` keeps the old values and the
+"continue" silently runs from the cold start (happened 2026-10-04: a
+two-month diagnostics run became a full year).
+
+**A data-driven test can skip because its binary STARTS late.** The lake
+replays read topology at "step 1"; a binary recorded from a restart has no
+step 1, the suite skipped, and gtest counted it passed. Read topology from
+`reader.timesteps().front()`, and assert the step you validate has records.
+Fixed-step replays (steps 10/50/100/200) also never reach a seasonal branch:
+sweep a year (`ELMXX_LAKE_SWEEP=all`) before calling a kernel validated.
 
 **`cime` can silently leave its branch.** Found detached at upstream master with
 `uses_kokkos()`'s elmxx case absent. Parent `git status` shows `? cime` instead
