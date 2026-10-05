@@ -197,7 +197,14 @@ Lake is its own surface, a peer of natural and urban: `lakeCol`/`lakePatch`
   (`HistData.h`), each rule read off ELM's own h0 over a 100% lake cell
   (`brazil_lake100`), not guessed. The h0 guard is natural + lake weight = 1.
 - **ELM's lake column keeps `frac_sno` = 0 under snow** (lake code never
-  sets it), so its lake ground albedo is the snow-free one.
+  sets it), so its lake ground albedo is the snow-free one, and SNICAR enters
+  only through the per-layer factors, weighted `(1-albsod)*flx/(1-albsnd)`
+  (ELM's "subgridflag == 0 .or. is_lake" branch) -- not the natural path's
+  `(1-albsnd)` weighting. `SnowAge_grain` on lake reads `frac_sno_eff` (1).
+- **Lake snow carries aerosol, and it dominates its albedo** (0.2 by March
+  on the glc lake twin): deposition, meltwater scavenging, combine/divide,
+  dead-slot zeroing all run in `LakeHydrologyImpl.h`. Optional on
+  `LakeHydrologyData` (the replay structs carry none).
 - **Lake negative controls need >= 1e-6 K.** Convective mixing averages a
   1e-12 K perturbation of `t_lake` below a 300 K ULP; it vanishes.
 
