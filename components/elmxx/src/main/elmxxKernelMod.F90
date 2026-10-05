@@ -42,6 +42,7 @@ module elmxxKernelMod
                                ELMxxComputeLakeFluxesLake, &
                                ELMxxLakeGatherForcing, &
                                ELMxxComputeSurfaceRadiationLake, &
+                               ELMxxSnowAgeGrainLake, &
                                ELMxxComputeBeginWaterBalanceLake, &
                                ELMxxComputeWaterBalanceCheckLake, &
                                ELMxxComputeLakeTemperatureLake, &
@@ -822,6 +823,12 @@ contains
        call check(ierr, logunit, K_LAKEHYDRO)
        call ELMxxComputeWaterBalanceCheckLake(elm, dtime, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
+       ! ELM's driver ages lake snow right after LakeHydrology, on the lake
+       ! filters it leaves; gated with the natural pass, on snowage.
+       if (kernel_active(K_SNOWAGE)) then
+          call ELMxxSnowAgeGrainLake(elm, ierr)
+          call check(ierr, logunit, K_SNOWAGE)
+       end if
     end if
     call wbal_mark(elm, K_LAKEHYDRO)
 
