@@ -173,6 +173,7 @@ module elmxxMod
   character(len=256), public :: elmxx_nrevsn = ' '
   character(len=256), private :: rest_read_file = ' '
   logical, private :: rest_read_pending = .false.
+  logical, private :: rest_read_branch  = .false.   ! branch: history starts fresh
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
   ! seed, which silently discards a step of physics. That was harmless while
@@ -319,6 +320,12 @@ contains
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fparamfile   , len(fparamfile)   , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_hist_fincl, len(elmxx_hist_fincl), MPI_CHARACTER, 0, mpicom_lnd, ier)
+    ! These four went unbroadcast until 2026-10-04: every rank but 0 ran with
+    ! albedo and photosynthesis OFF. Every namelist member needs a line here.
+    call mpi_bcast (elmxx_do_albedo        , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_stomata_closed   , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_do_photosynthesis, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_co2_ppmv         , 1, MPI_REAL8  , 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -836,7 +843,8 @@ contains
              photosyn_statics_pushed = .true.
           end if
        end if
-       call elmxx_rest_read(elmxx_state, rest_read_file, nstep, logunit)
+       call elmxx_rest_read(elmxx_state, rest_read_file, rest_read_branch, &
+                            num_cells_owned, num_cells_global, nstep, logunit)
        rest_read_pending = .false.
     end if
 
@@ -1266,6 +1274,7 @@ contains
        if (len_trim(elmxx_nrevsn) == 0) call shr_sys_abort(subname// &
             'ERROR: a branch run needs elmxx_nrevsn (the ELMxx restart to branch from)')
        rest_read_file = elmxx_nrevsn
+       rest_read_branch = .true.
     case default
        return
     end select
@@ -1289,7 +1298,7 @@ contains
     integer         , intent(in) :: yr, mon, day, tod, logunit
     if (.not. kokkos_state_built) return
     call elmxx_rest_write(elmxx_state, elmxx_caseid, inst_suffix, yr, mon, day, tod, &
-                          nstep, logunit)
+                          nstep, num_cells_owned, num_cells_global, logunit)
   end subroutine elmxx_restart_write
 
 end module elmxxMod

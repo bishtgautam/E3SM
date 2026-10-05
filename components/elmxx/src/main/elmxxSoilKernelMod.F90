@@ -184,7 +184,10 @@ contains
     ! Urban arrives as its own increment with its own kernel variants
     ! (ELMxxComputeSoilFluxesUrban and friends), not by widening these.
     !-----------------------------------------------------------------
-    call ELMxxInitSharedMetadata(elm, 1, num_gridcells_local(), &
+    ! One topounit per gridcell, ELM's default: forc_rain/forc_snow are
+    ! per topounit, and a single topounit per RANK gave every cell on the
+    ! rank the first cell's precipitation (BalanceCheck's errh2o read it).
+    call ELMxxInitSharedMetadata(elm, num_gridcells_local(), num_gridcells_local(), &
          n_kokkos_col, n_kokkos_patch, n_kokkos_col, 0, dtime, ierr)
     call check(ierr, subname, 'InitSharedMetadata')
 
@@ -249,13 +252,14 @@ contains
     ! No urban among the packed columns, by construction.
     icol = 0
     call ELMxxSetLunUrbpoi(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'LunUrbpoi')
-    call ELMxxSetColTopounit(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'ColTopounit')
 
-    ! Gridcell index, 0-based, for the per-gridcell shared forcing.
+    ! Gridcell index, 0-based, for the per-gridcell shared forcing; the
+    ! topounit is the same index (one topounit per gridcell).
     do kc = 1, n_kokkos_col
        icol(kc) = lun_gridcell(col_landunit(col_of_kcol(kc))) - 1
     end do
     call ELMxxSetColGridcell(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'ColGridcell')
+    call ELMxxSetColTopounit(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'ColTopounit')
 
     call ELMxxSetColNpfts(elm, kcol_npfts, n_kokkos_col, ierr); call check(ierr, subname, 'ColNpfts')
     call ELMxxSetColPfti (elm, kcol_pfti , n_kokkos_col, ierr); call check(ierr, subname, 'ColPfti')
