@@ -169,8 +169,11 @@ cases -- use a standard grid.
 
 ## Not supported yet
 
-Multi-rank restarts (`elmxxRestMod` aborts on `npes > 1`), multi-instance
-(`NINST_LND > 1` is asserted against in `buildnml`), and the moab driver.
+Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
+driver, `RUN_TYPE=hybrid` (it cold-starts ELMxx: `finidat` reads ELM files,
+not ELMxx restarts), and restarting lake / urban-column / urban-patch state
+(never allocated on the coupled path; `elmxxRestMod` aborts naming the field
+if one ever is).
 
 ## Restarts
 
@@ -188,6 +191,17 @@ when the coupler's restart alarm rings, dated with the step's END time
   come from the cold start.
 - **A continue run takes no duplicate nstep-0 pass** and its clock starts at the
   coupler's current time, as ELM's does.
+- **Layout-independent, as ELM's are:** a restart written on N ranks reads on
+  M. Each registry field carries an entity KIND (`natcol`, `natpatch`, `cell`,
+  `urblun`, ...; emitted by the generator from the view's first allocation
+  extent -- an unclassified extent fails generation), the file's leading dim is
+  that kind over the whole domain, and an entity's position is (global cell
+  ordinal, occurrence within the cell), per-cell counts from an allreduce.
+  Packed urban order is (density class, cell), so this is a real reorder.
+  `TOPO` fields (`col_gridcell`, `patch_column`, `filter_*`, ...) hold
+  rank-local indices: rebuilt at init, never written or read. The
+  `KindMatchesLeadingExtent` CTest and a per-field extent check at write/read
+  guard the classification.
 - **Reading is strict:** every allocated registry field must be on the file with
   the same shape, or the run aborts. A new view must be added to the registry
   (re-run the generator; the `RestartRegistrySync` CTest fails otherwise) and
@@ -200,6 +214,29 @@ when the coupler's restart alarm rings, dated with the step's END time
   restart must reproduce that month's h0 exactly. Negative control: perturb a
   PROGNOSTIC field (soil T) in the restart by 1e-12 -- not `t_grnd`, which
   CanopyTemperature recomputes at the start of every step.
+- **Layout test (passes, 2026-10-04):** a 4-cell grid at four coordinates
+  (so cells differ; `tools/make_4cell_rsttest.py` builds it from the 2x1
+  files: urban region 0,3,3,3, zero urban weight -- h0 needs natural weight
+  1), the 2x1 case with the domain/fsurdat swapped, `REST_N=5`, 10 d,
+  on 1 and on 2 ranks: h0 and both restarts identical across layouts; a 2-rank
+  continue from the 1-rank day-5 restart, and vice versa, reproduce the day-10
+  restart and the Jan h0. The driver rejects another case's `cpl.r` on a
+  continue, so each run keeps its own `cpl.r`/`datm.rs1` and only
+  `rpointer.lnd` points at the other layout's file. A grid of identical cells
+  cannot catch a permutation -- every reorder compares equal.
+- **A branch starts history fresh**, as ELM's does (`hist_restart_ncd` zeroes
+  `ntimes` on `nsrBranch`): the `hist:*` accumulators and the interval
+  start/count are not read, so the first h0 holds only the branch's own steps
+  and `elmxx_hist_fincl` may change. `buildnml` sets `elmxx_nrevsn` to
+  `$RUNDIR/$RUN_REFCASE.elmxx.r.$RUN_REFDATE-$RUN_REFTOD.nc` unless
+  `user_nl_elmxx` sets it. **Branch test (passes, 2026-10-04):** A = 45 d
+  startup, `REST_N=15`; B = clone with `RUN_TYPE=branch RUN_REFCASE=A
+  RUN_REFDATE=0001-01-16 GET_REFCASE=FALSE STOP_N=30`, A's 01-16 `cpl.r`,
+  `datm.rs1` and `elmxx.r` copied into B's run dir and `rpointer.drv`/`.atm`
+  written by hand. B's day-45 restart and Feb h0 equal A's; B's Jan h0 has
+  768 samples (Jan 16–31). **`create_clone --keepexe` keeps the source's
+  `RUNDIR`** -- `./xmlchange RUNDIR=$PWD/run` before `preview_namelists`, or
+  the clone overwrites the source's namelists.
 - `ncdump -v` cannot select the registry's `natcol:...` names (the colon); dump
   the whole file.
 
@@ -299,6 +336,16 @@ plausible garbage several kernels downstream — `z0mr`, `displar`, `dleaf`,
 `qflx_top_soil`, `qflx_snow_melt`, and PAR in a validation test that then
 silently solved the night problem. Ask of every parameter a kernel divides by
 whether anything sets it.
+
+**A single-rank, single-cell run hides a whole class of defect.** Two were
+found the first time ELMxx ran on >1 cell or >1 rank (2026-10-04): four
+namelist variables (`elmxx_do_albedo`, `elmxx_do_photosynthesis`,
+`elmxx_stomata_closed`, `elmxx_co2_ppmv`) were never `mpi_bcast`, so every
+rank but 0 ran with albedo and photosynthesis off; and there was ONE topounit
+per rank, so every cell got the rank's first cell's precipitation in its water
+balance. Every new namelist member needs a broadcast line, and any per-rank
+scalar is a per-cell array in disguise. Check new work on the 4-cell, 2-rank
+grid ("Restarts"): 1 vs 2 ranks must be bit-identical.
 
 **`minval`/`maxval` skip NaN.** Every range report carries a non-finite count
 for this reason.

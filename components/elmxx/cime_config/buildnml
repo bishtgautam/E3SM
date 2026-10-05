@@ -56,9 +56,25 @@ def buildnml(case, caseroot, compname):
     if os.path.exists(input_data_list):
         os.remove(input_data_list)
 
+    # A branch reads the reference case's ELMxx restart (ELM's nrevsn, which
+    # ELM's buildnml likewise derives from RUN_REFCASE/RUN_REFDATE/RUN_REFTOD).
+    # The file is staged into RUNDIR by CIME (GET_REFCASE/RUN_REFDIR). A value
+    # in user_nl_elmxx overrides this one.
+    infile_text = ""
+    user_nl = os.path.join(caseroot, "user_nl_elmxx")
+    user_sets_nrevsn = os.path.isfile(user_nl) and any(
+        line.split("=")[0].strip().lower() == "elmxx_nrevsn"
+        for line in open(user_nl) if not line.lstrip().startswith("!"))
+    if case.get_value("RUN_TYPE") == "branch" and not user_sets_nrevsn:
+        nrevsn = "{}.elmxx.r.{}-{}.nc".format(case.get_value("RUN_REFCASE"),
+                                              case.get_value("RUN_REFDATE"),
+                                              case.get_value("RUN_REFTOD"))
+        infile_text = "elmxx_nrevsn = '{}'\n".format(os.path.join(rundir, nrevsn))
+
     create_namelist_infile(case,
                            "{}/user_nl_elmxx".format(caseroot),
-                           "{}/cesm_namelist".format(lndconf_dir))
+                           "{}/cesm_namelist".format(lndconf_dir),
+                           infile_text)
 
     #--------------------------------------------------------------------
     # Invoke elmxx build-namelist - output will go in $CASEBUILD/elmxxconf

@@ -1448,9 +1448,11 @@ contains
     ! the kernels dispatch, so it is correct on every step including the
     ! first. Same lazy-init ordering that once moved elmxx_hist_init.
     !
-    ! ELMxxInitSharedMetadata allocates exactly one topounit and
-    ! ELMxxSetColTopounit maps every column to it, so this is a single value.
-    ! Revisit for a genuinely multi-topounit configuration.
+    ! One topounit per local gridcell (ELMxxInitSharedMetadata, and
+    ! ELMxxSetColTopounit = the column's 0-based cell), so one value per
+    ! cell. Until 2026-10-04 there was ONE topounit per rank, filled from
+    ! the first patch's cell: every other cell on a multi-cell rank got that
+    ! cell's precipitation in its water balance. Invisible on 1x1 grids.
     !
     ! These setters were imported but never called until 2026-09-02, leaving
     ! shared%forc_rain/forc_snow identically zero. Nothing noticed, because
@@ -1463,20 +1465,29 @@ contains
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
 
-    integer  :: g, ierr
-    real(r8) :: rtopo1(1)
+    integer  :: g, kc, ncell, ierr
+    real(r8), allocatable :: rtopo(:)
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_shared_precip) '
 
-    if (n_kokkos_patch <= 0) return
+    if (n_kokkos_col <= 0) return
 
-    g = cell_of_kpatch(1)
+    ! Every cell has a natural column, so this is the local cell count.
+    ncell = 0
+    do kc = 1, n_kokkos_col
+       ncell = max(ncell, cell_of_kcol(kc))
+    end do
+    allocate(rtopo(ncell))
 
-    rtopo1(1) = forc_rainc(g) + forc_rainl(g)
-    call ELMxxSetSharedForcRain(elm, rtopo1, 1, ierr)
+    do g = 1, ncell
+       rtopo(g) = forc_rainc(g) + forc_rainl(g)
+    end do
+    call ELMxxSetSharedForcRain(elm, rtopo, ncell, ierr)
     call check(ierr, subname, 'SharedForcRain')
 
-    rtopo1(1) = forc_snowc(g) + forc_snowl(g)
-    call ELMxxSetSharedForcSnow(elm, rtopo1, 1, ierr)
+    do g = 1, ncell
+       rtopo(g) = forc_snowc(g) + forc_snowl(g)
+    end do
+    call ELMxxSetSharedForcSnow(elm, rtopo, ncell, ierr)
     call check(ierr, subname, 'SharedForcSnow')
 
   end subroutine elmxx_kokkos_push_shared_precip
