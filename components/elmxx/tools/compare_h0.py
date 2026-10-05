@@ -111,6 +111,10 @@ def main():
     print(f"\nworst {a.top} fields, error scaled by the field's annual peak:")
     print(f"  {'field':<14}{'err/scale':>10}  {'mon':>3}  {'ELM':>12}{'ELMxx':>12}")
     for f, (r, k) in sorted(worst.items(), key=lambda kv: -kv[1][0])[:a.top]:
+        if k is None:
+            # Exact in every month: no worst month was ever recorded.
+            print(f"  {f:<14}{r:>10.3e}  all  (identical every month)")
+            continue
         row = next(rw for rw in series[f] if rw[0] == k)
         print(f"  {f:<14}{r:>10.3e}  {k:>3d}  {row[2]:>12.5g}{row[1]:>12.5g}")
 

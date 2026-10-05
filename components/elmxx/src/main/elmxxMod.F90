@@ -42,6 +42,7 @@ module elmxxMod
                                       ELMxxComputeGroundHeatFluxAndDerivNatural, &
                                       ELMxxSetGroundHeatFluxSb, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
+                                      ELMxxComputeSurfaceAlbedoLake, &
                                       ELMxxComputeForcingDerivedNatural, &
                                       ELMxxComputePhotosynForcingNatural, &
                                       ELMxxComputeSatellitePhenologyNatural
@@ -69,6 +70,8 @@ module elmxxMod
   use elmxxHistMod           , only : elmxx_hist_init, elmxx_hist_step, &
                                       elmxx_hist_write_if_month_end, &
                                       elmxx_hist_final
+  use elmxxLakeMod           , only : elmxx_lake_init, elmxx_lake_push_forcing, &
+                                      elmxx_lake_clean, lake_built
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -560,6 +563,9 @@ contains
        ! they are real rather than zero.
        call elmxx_soil_prop_init(logunit)
        call elmxx_kokkos_seed_soil_properties(elmxx_state, logunit)
+       ! The lake surface (plan Stage 6.5): after the soil grid, which it
+       ! shares, and the packed natural maps, through which it reads forcing.
+       call elmxx_lake_init(elmxx_state, logunit)
 
        ! SNICAR lookup tables. Pushed once; nothing crosses per step. Both
        ! files must be given -- with either blank, snow albedo stays at the
@@ -882,6 +888,7 @@ contains
     if (kokkos_state_built) then
        call elmxx_kokkos_push_forcing(elmxx_state, nextsw_cday, declinp1, &
             cell_lat, cell_lon, logunit)
+       call elmxx_lake_push_forcing(elmxx_state)
     end if
 
     !-----------------------------------------------------------------------
@@ -1063,6 +1070,11 @@ contains
           call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
                call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoNatural failed')
+          if (lake_built) then
+             call ELMxxComputeSurfaceAlbedoLake(elmxx_state, ierr_rs)
+             if (ierr_rs /= ELMXX_SUCCESS) &
+                  call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoLake failed')
+          end if
           if (nstep == 1 .or. mod(nstep, 24) == 0) then
              call elmxx_surface_albedo_report(logunit)
           end if
@@ -1147,6 +1159,11 @@ contains
     call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_ia)
     if (ierr_ia /= ELMXX_SUCCESS) &
          call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoNatural failed')
+    if (lake_built) then
+       call ELMxxComputeSurfaceAlbedoLake(elmxx_state, ierr_ia)
+       if (ierr_ia /= ELMXX_SUCCESS) &
+            call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoLake failed')
+    end if
     if (masterproc) then
        write(logunit,*) 'ELMxx: initial SurfaceAlbedo pass complete'
        call shr_sys_flush(logunit)
@@ -1227,6 +1244,7 @@ contains
        elmxx_state_created = .false.
        call elmxx_soil_kernel_clean()
        call elmxx_kokkos_state_clean()
+       call elmxx_lake_clean()
        call elmxx_soil_prop_clean()
        call elmxx_root_clean()
        call elmxx_pftcon_clean()

@@ -29,9 +29,10 @@ module elmxxRestMod
   ! indices (col_gridcell, filters): they are rebuilt at init from the
   ! subgrid and are neither written nor read.
   !
-  ! KINDS NOT MAPPED YET. Urban columns/patches, lake and shared:urbpoi are
-  ! never allocated on the coupled path; if one ever is, write/read abort
-  ! naming it rather than guess its entity-to-cell map.
+  ! KINDS NOT MAPPED YET. Urban columns/patches and shared:urbpoi are never
+  ! allocated on the coupled path; if one ever is, write/read abort naming
+  ! it rather than guess its entity-to-cell map. Lake columns and patches
+  ! are mapped (Stage 6.5, L6): one of each per lake cell (elmxxLakeMod).
   !
   ! A BRANCH STARTS HISTORY FRESH, as ELM's does (hist_restart_ncd zeroes
   ! every tape's ntimes and reads no history buffers on nsrBranch): the
@@ -50,6 +51,7 @@ module elmxxRestMod
   use elmxxIO      , only : pio_subsystem, io_type
   use elmxxHistMod , only : elmxx_hist_get_restart_state, elmxx_hist_set_restart_state
   use elmxxSubgridMod     , only : lun_gridcell, col_landunit, patch_column
+  use elmxxLakeMod        , only : n_lake, cell_of_klake
   use elmxxKokkosStateMod , only : n_kokkos_col, n_kokkos_patch, n_kokkos_urb, &
                                    col_of_kcol, patch_of_kpatch, lun_of_kurb
   use elmxx_mod    , only : ELMxxType, ELMXX_SUCCESS, &
@@ -71,7 +73,8 @@ module elmxxRestMod
 
   ! ELMxxRestartKind (ELMxx.h).
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
-                        KIND_NATPATCH = 3, KIND_URBLUN = 4, NKIND = 9
+                        KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_LAKECOL = 7, &
+                        KIND_LAKEPATCH = 8, NKIND = 9
   character(len=10), parameter :: kind_name(0:NKIND) = (/ &
        'topo      ', 'cell      ', 'natcol    ', 'natpatch  ', 'urblun    ', &
        'urbcol    ', 'urbpatch  ', 'lakecol   ', 'lakepatch ', 'landunit  ' /)
@@ -402,6 +405,8 @@ contains
     case (KIND_NATCOL);   local_count = n_kokkos_col
     case (KIND_NATPATCH); local_count = n_kokkos_patch
     case (KIND_URBLUN);   local_count = n_kokkos_urb
+    case (KIND_LAKECOL);  local_count = n_lake
+    case (KIND_LAKEPATCH); local_count = n_lake   ! one patch per lake column
     case default
        local_count = 0
        call shr_sys_abort(subname//'ERROR: '//trim(name)//' is allocated, but kind '// &
@@ -430,6 +435,7 @@ contains
        case (KIND_NATCOL);   cell(e) = lun_gridcell(col_landunit(col_of_kcol(e)))
        case (KIND_NATPATCH); cell(e) = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);   cell(e) = lun_gridcell(lun_of_kurb(e))
+       case (KIND_LAKECOL, KIND_LAKEPATCH); cell(e) = cell_of_klake(e)
        end select
        if (cell(e) < 1 .or. cell(e) > ncell) call shr_sys_abort(subname// &
             'ERROR: entity maps outside this rank''s cells')

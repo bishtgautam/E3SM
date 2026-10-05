@@ -28,6 +28,7 @@ module elmxxKernelMod
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux, elmxx_diag_snapshot_snowstate
   use elmxxKokkosStateMod , only : n_kokkos_col
+  use elmxxLakeMod       , only : lake_built
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
@@ -38,8 +39,12 @@ module elmxxKernelMod
                                ELMxxComputeCanopyFluxes, &
                                ELMxxComputeUrbanRadiation, &
                                ELMxxComputeUrbanFluxes, &
-                               ELMxxComputeLakeFluxes, &
-                               ELMxxComputeLakeTemperature, &
+                               ELMxxComputeLakeFluxesLake, &
+                               ELMxxLakeGatherForcing, &
+                               ELMxxComputeSurfaceRadiationLake, &
+                               ELMxxComputeBeginWaterBalanceLake, &
+                               ELMxxComputeWaterBalanceCheckLake, &
+                               ELMxxComputeLakeTemperatureLake, &
                                ELMxxComputeSoilTemperatureNatural, &
                                ELMxxComputeSoilFluxesNatural, &
                                ELMxxComputeSurfaceRunoffInfiltration, &
@@ -55,7 +60,7 @@ module elmxxKernelMod
                                ELMxxComputeSnowLayers, &
                                ELMxxUpdateGroundTemperatureNatural, &
                                ELMxxSnowAgeGrainNatural, &
-                               ELMxxComputeLakeHydrology, &
+                               ELMxxComputeLakeHydrologyLake, &
                                ELMxxGetQflxPrecIntr, ELMxxGetQflxPrecGrnd, &
                                ELMxxGetH2ocan, ELMxxGetFwet, ELMxxGetFdry, &
                                ELMxxGetTGrnd, ELMxxGetQg, ELMxxGetThv, &
@@ -471,12 +476,11 @@ contains
              'Stage 5 albedo port'
 
     case (K_LAKEFLUX, K_LAKETEMP, K_LAKEHYDRO)
-       ! The packed Kokkos views carry no lake at all (see
-       ! elmxxKokkosStateMod): ELMxxCreate takes natural columns, natural
-       ! patches and urban landunits only. Lake state is a separate
-       ! allocation (ELMxxAllocateLakeState) that Stage 3 does not make.
-       why = 'needs the lake state allocation and its own packed maps; ' // &
-             'ELMxxCreate carries natural and urban only'
+       ! Runnable since Stage 6.5, on the lake surface (lakeCol/lakePatch,
+       ! elmxxLakeMod). The three run as a set, and only alongside the soil
+       ! kernels, whose shared metadata carries the per-cell precipitation
+       ! the lake gathers: both enforced in elmxx_kernels_parse.
+       why = ' '
 
     case (K_CANHYDRO)
        ! The closest to runnable, and the real first kernel of Stage 4 -- not
@@ -569,6 +573,19 @@ contains
 
     any_kernel_active = any(kernel_active)
 
+    ! The lake kernels share one state; stepping a subset of them would
+    ! leave the rest of that state at its cold start while the stepped part
+    ! moves. And they read the shared per-cell precipitation, which exists
+    ! only once the soil kernels' metadata does (elmxx_soil_kernel_init).
+    if (any(kernel_active((/K_LAKEFLUX, K_LAKETEMP, K_LAKEHYDRO/)))) then
+       if (.not. all(kernel_active((/K_LAKEFLUX, K_LAKETEMP, K_LAKEHYDRO/)))) &
+            call shr_sys_abort(subname//'ERROR: lakeflux, laketemp and lakehydro '// &
+                 'must be activated together')
+       if (.not. kernel_active(K_SOILTEMP)) &
+            call shr_sys_abort(subname//'ERROR: the lake kernels need soiltemp '// &
+                 '(its shared metadata carries the precipitation the lake reads)')
+    end if
+
     if (masterproc) then
        write(logunit,*) subname,'active kernels, in driver order:'
        do k = 1, NKERNEL
@@ -615,6 +632,19 @@ contains
 
     ! Opening mark for the per-kernel water budget (no-op unless ELMXX_WBAL).
     call wbal_begin(elm, n_kokkos_col)
+
+    ! The lake's start of step, in ELM's order: BeginColWaterBalance (lake
+    ! columns: begwb = h2osno), then SurfaceRadiation over lake patches with
+    ! the albedos from the end of the previous step. Its forcing is gathered
+    ! first, on the device, from the cell's natural column.
+    if (kernel_active(K_LAKEFLUX) .and. lake_built) then
+       call ELMxxComputeBeginWaterBalanceLake(elm, ierr)
+       call check(ierr, logunit, K_LAKEFLUX)
+       call ELMxxLakeGatherForcing(elm, ierr)
+       call check(ierr, logunit, K_LAKEFLUX)
+       call ELMxxComputeSurfaceRadiationLake(elm, ierr)
+       call check(ierr, logunit, K_LAKEFLUX)
+    end if
 
     ! ELM snapshots the column water inventory at the very top of the step,
     ! before any physics (elm_driver.F90:559). It must therefore be first
@@ -678,14 +708,14 @@ contains
     end if
     call wbal_mark(elm, K_URBANFLUX)
 
-    if (kernel_active(K_LAKEFLUX)) then
-       call ELMxxComputeLakeFluxes(elm, ierr)
+    if (kernel_active(K_LAKEFLUX) .and. lake_built) then
+       call ELMxxComputeLakeFluxesLake(elm, ierr)
        call check(ierr, logunit, K_LAKEFLUX)
     end if
     call wbal_mark(elm, K_LAKEFLUX)
 
-    if (kernel_active(K_LAKETEMP)) then
-       call ELMxxComputeLakeTemperature(elm, ierr)
+    if (kernel_active(K_LAKETEMP) .and. lake_built) then
+       call ELMxxComputeLakeTemperatureLake(elm, dtime, ierr)
        call check(ierr, logunit, K_LAKETEMP)
     end if
     call wbal_mark(elm, K_LAKETEMP)
@@ -787,8 +817,10 @@ contains
        call check(ierr, logunit, K_SOILTEMP)
     end if
 
-    if (kernel_active(K_LAKEHYDRO)) then
-       call ELMxxComputeLakeHydrology(elm, ierr)
+    if (kernel_active(K_LAKEHYDRO) .and. lake_built) then
+       call ELMxxComputeLakeHydrologyLake(elm, dtime, ierr)
+       call check(ierr, logunit, K_LAKEHYDRO)
+       call ELMxxComputeWaterBalanceCheckLake(elm, dtime, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
     end if
     call wbal_mark(elm, K_LAKEHYDRO)

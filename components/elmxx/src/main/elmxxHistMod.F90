@@ -20,7 +20,8 @@ module elmxxHistMod
   use shr_cal_mod  , only : shr_cal_ymd2julian, shr_cal_numDaysInYear, shr_cal_noleap
   use elmxxSpmdMod , only : masterproc, iam, npes
   use elmxxIO      , only : pio_subsystem, io_type
-  use elmxxSubgridMod, only : num_landunits, lun_itype, lun_wtgcell, istsoil
+  use elmxxSubgridMod, only : num_landunits, lun_itype, lun_wtgcell, lun_gridcell, &
+                             istsoil, istdlak
   use elmxx_mod    , only : ELMxxType, ELMXX_SUCCESS, &
                              ELMxxHistoryActivateDefaults, ELMxxHistoryActivate, &
                              ELMxxHistoryActiveCount, ELMxxHistoryActiveName, &
@@ -249,28 +250,38 @@ contains
   !-----------------------------------------------------------------------
   subroutine elmxx_hist_check_natveg_weight(logunit)
     !
-    ! See elmxx_hist_init's comment at the call site.
+    ! See elmxx_hist_init's comment at the call site. Since Stage 6.5 a cell's
+    ! h0 value is the landunit-weighted mean over its natural and LAKE
+    ! landunits (ELMxxHistorySetLandunitWeights, pushed by elmxxLakeMod), so
+    ! the guard is that those two cover the cell: weight on any landunit
+    ! ELMxx does not model would make the mean a mislabelled partial one.
     !
     implicit none
     integer, intent(in) :: logunit
-    integer :: l
+    integer :: l, g, ncell
+    real(r8), allocatable :: wsum(:)
     real(r8), parameter :: tol = 1.0e-6_r8
     character(len=*), parameter :: subname = '(elmxx_hist_check_natveg_weight) '
 
+    ncell = maxval(lun_gridcell(1:num_landunits))
+    allocate(wsum(ncell))
+    wsum = 0.0_r8
     do l = 1, num_landunits
-       if (lun_itype(l) == istsoil) then
-          if (abs(lun_wtgcell(l) - 1.0_r8) > tol) then
-             write(logunit,*) subname,'ERROR: natural-vegetation landunit weight-on-', &
-                  'gridcell = ',lun_wtgcell(l),' != 1.0 at local landunit ',l,' -- ', &
-                  'PATCH_TO_COL history fields are natural-column values, and only ', &
-                  'coincide with ELM''s gridcell h0 values when this weight is 1.0'
-             call shr_sys_flush(logunit)
-             call shr_sys_abort(subname//'ERROR: natural-veg landunit weight-on-gridcell '// &
-                  '/= 1.0; history output would silently mislabel natural-column values '// &
-                  'as gridcell values')
-          end if
+       if (lun_itype(l) == istsoil .or. lun_itype(l) == istdlak) then
+          wsum(lun_gridcell(l)) = wsum(lun_gridcell(l)) + lun_wtgcell(l)
        end if
     end do
+    do g = 1, ncell
+       if (abs(wsum(g) - 1.0_r8) > tol) then
+          write(logunit,*) subname,'ERROR: natural + lake landunit weight on local cell ', &
+               g,' = ',wsum(g),' != 1.0 -- h0 is the mean over those two landunits only'
+          call shr_sys_flush(logunit)
+          call shr_sys_abort(subname//'ERROR: natural + lake landunit weight-on-gridcell '// &
+               '/= 1.0; history output would silently mislabel a partial mean '// &
+               'as a gridcell value')
+       end if
+    end do
+    deallocate(wsum)
 
   end subroutine elmxx_hist_check_natveg_weight
 
