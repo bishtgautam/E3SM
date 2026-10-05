@@ -74,6 +74,17 @@ module elmxxSurfdataMod
   real(r8), public, pointer :: pct_nat_pft(:,:) => null()  ! (ncells, natpft)
 
   !--------------------------------------------------------------------------
+  ! Lake parameters (plan Stage 6.5, L1), with ELM's fallbacks where the file
+  ! lacks them: LAKEDEPTH -> spval (initVerticalMod then uses its default
+  ! depth), ETALAKE and LAKEFETCH -> -1 (LakeStateType InitCold; the lake
+  ! kernels then use their depth-based defaults).
+  !--------------------------------------------------------------------------
+  real(r8), public, parameter :: lake_spval = 1.0e36_r8
+  real(r8), public, pointer :: lakedepth_in(:)  => null()  ! (ncells) LAKEDEPTH, m
+  real(r8), public, pointer :: etalake_in(:)    => null()  ! (ncells) ETALAKE, 1/m
+  real(r8), public, pointer :: lakefetch_in(:)  => null()  ! (ncells) LAKEFETCH, m
+
+  !--------------------------------------------------------------------------
   ! Topography. Not landunit weights -- these feed the microtopography
   ! parameters ELM derives in initVerticalMod (n_melt from STD_ELEV,
   ! micro_sigma from SLOPE), which CanopyHydrology and the snow-cover
@@ -206,6 +217,12 @@ contains
     call read_gc_real2d(ncid, fname, 'PCT_URBAN'  , ngrid, numurbl, cell_ids, pct_urban)
     call read_gc_real2d(ncid, fname, 'PCT_NAT_PFT', ngrid, natpft , cell_ids, pct_nat_pft)
 
+    ! ---- lake parameters (optional on the file, ELM's fallbacks) ----
+    allocate(lakedepth_in(ncells), etalake_in(ncells), lakefetch_in(ncells))
+    call read_gc_real1d_opt(iulog, ncid, fname, 'LAKEDEPTH', ngrid, cell_ids, lakedepth_in, lake_spval)
+    call read_gc_real1d_opt(iulog, ncid, fname, 'ETALAKE'  , ngrid, cell_ids, etalake_in  , -1.0_r8)
+    call read_gc_real1d_opt(iulog, ncid, fname, 'LAKEFETCH', ngrid, cell_ids, lakefetch_in, -1.0_r8)
+
     ! ---- topography ----
     call read_gc_real1d(ncid, fname, 'STD_ELEV'   , ngrid, cell_ids, topo_std)
     call read_gc_real1d(ncid, fname, 'SLOPE'      , ngrid, cell_ids, topo_slope)
@@ -319,6 +336,36 @@ contains
     deallocate(glob)
 
   end subroutine read_gc_real1d
+
+  !-----------------------------------------------------------------------
+  subroutine read_gc_real1d_opt(iulog, ncid, fname, varname, ngrid, cell_ids, out, fill)
+    !
+    ! !DESCRIPTION:
+    ! As read_gc_real1d, but a variable absent from the file is not an error:
+    ! every cell gets `fill` and the master says so, as ELM's reader does.
+    !
+    implicit none
+    integer          , intent(in)    :: iulog
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    integer          , intent(in)    :: ngrid
+    integer          , intent(in)    :: cell_ids(:)
+    real(r8)         , intent(inout) :: out(:)
+    real(r8)         , intent(in)    :: fill
+    integer :: varid, status
+
+    call pio_seterrorhandling(ncid, PIO_BCAST_ERROR)
+    status = pio_inq_varid(ncid, trim(varname), varid)
+    call pio_seterrorhandling(ncid, PIO_INTERNAL_ERROR)
+    if (status == PIO_NOERR) then
+       call read_gc_real1d(ncid, fname, varname, ngrid, cell_ids, out)
+    else
+       out(:) = fill
+       if (masterproc) write(iulog,*) 'elmxx_read_surfdata: WARNING: ', &
+            trim(varname),' not on ',trim(fname),'; using ',fill
+    end if
+
+  end subroutine read_gc_real1d_opt
 
   !-----------------------------------------------------------------------
   subroutine read_gc_int1d(ncid, fname, varname, ngrid, cell_ids, out)
@@ -470,6 +517,9 @@ contains
     if (associated(pct_natveg))  deallocate(pct_natveg)
     if (associated(pct_crop))    deallocate(pct_crop)
     if (associated(pct_lake))    deallocate(pct_lake)
+    if (associated(lakedepth_in)) deallocate(lakedepth_in)
+    if (associated(etalake_in))   deallocate(etalake_in)
+    if (associated(lakefetch_in)) deallocate(lakefetch_in)
     if (associated(pct_wetland)) deallocate(pct_wetland)
     if (associated(pct_glacier)) deallocate(pct_glacier)
     if (associated(pct_urban))   deallocate(pct_urban)
