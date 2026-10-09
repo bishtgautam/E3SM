@@ -116,6 +116,44 @@ module elmxxSurfdataMod
   real(r8), public, pointer :: wtroad_perv(:,:)  => null()  ! (ncells, numurbl)
 
   !--------------------------------------------------------------------------
+  ! Urban physics parameters, per density type (plan Stage 6.7, U1): ELM's
+  ! UrbanParamsType :: UrbanInput set. Read only when the file carries them
+  ! (urban_params_read); elmxxUrbanMod aborts if an urban landunit exists
+  ! without them. Leading dim the cell, then density type, then band/layer.
+  !--------------------------------------------------------------------------
+  integer , public :: nlevurb = 0   ! urban roof/wall layers (5)
+  integer , public :: numrad_urb = 0 ! radiation bands on the file (2)
+  logical , public :: urban_params_read = .false.
+  real(r8), public, pointer :: canyon_hwr_in(:,:)      => null()  ! CANYON_HWR
+  real(r8), public, pointer :: ht_roof_in(:,:)         => null()  ! HT_ROOF, m
+  real(r8), public, pointer :: wind_hgt_canyon_in(:,:) => null()  ! WIND_HGT_CANYON, m
+  real(r8), public, pointer :: em_roof_in(:,:)         => null()  ! EM_ROOF
+  real(r8), public, pointer :: em_wall_in(:,:)         => null()  ! EM_WALL
+  real(r8), public, pointer :: em_improad_in(:,:)      => null()  ! EM_IMPROAD
+  real(r8), public, pointer :: em_perroad_in(:,:)      => null()  ! EM_PERROAD
+  real(r8), public, pointer :: thick_roof_in(:,:)      => null()  ! THICK_ROOF, m
+  real(r8), public, pointer :: thick_wall_in(:,:)      => null()  ! THICK_WALL, m
+  real(r8), public, pointer :: t_building_min_in(:,:)  => null()  ! T_BUILDING_MIN, K
+  real(r8), public, pointer :: t_building_max_in(:,:)  => null()  ! T_BUILDING_MAX, K
+  real(r8), public, pointer :: nlev_improad_in(:,:)    => null()  ! NLEV_IMPROAD (integer on file)
+  ! (ncells, numurbl, numrad)
+  real(r8), public, pointer :: alb_roof_dir_in(:,:,:)    => null()
+  real(r8), public, pointer :: alb_roof_dif_in(:,:,:)    => null()
+  real(r8), public, pointer :: alb_wall_dir_in(:,:,:)    => null()
+  real(r8), public, pointer :: alb_wall_dif_in(:,:,:)    => null()
+  real(r8), public, pointer :: alb_improad_dir_in(:,:,:) => null()
+  real(r8), public, pointer :: alb_improad_dif_in(:,:,:) => null()
+  real(r8), public, pointer :: alb_perroad_dir_in(:,:,:) => null()
+  real(r8), public, pointer :: alb_perroad_dif_in(:,:,:) => null()
+  ! (ncells, numurbl, nlevurb)
+  real(r8), public, pointer :: tk_roof_in(:,:,:)    => null()  ! W/m/K
+  real(r8), public, pointer :: tk_wall_in(:,:,:)    => null()
+  real(r8), public, pointer :: tk_improad_in(:,:,:) => null()
+  real(r8), public, pointer :: cv_roof_in(:,:,:)    => null()  ! J/m3/K
+  real(r8), public, pointer :: cv_wall_in(:,:,:)    => null()
+  real(r8), public, pointer :: cv_improad_in(:,:,:) => null()
+
+  !--------------------------------------------------------------------------
   ! Satellite-phenology streams, per owned cell: (ncells, lsmpft, nmonths)
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: monthly_lai(:,:,:)        => null()
@@ -239,6 +277,54 @@ contains
     call read_gc_real2d(ncid, fname, 'WTLUNIT_ROOF', ngrid, numurbl, cell_ids, wtlunit_roof)
     call read_gc_real2d(ncid, fname, 'WTROAD_PERV' , ngrid, numurbl, cell_ids, wtroad_perv)
 
+    ! ---- urban physics parameters (Stage 6.7, U1) ----
+    if (has_var(ncid, 'CANYON_HWR') .and. has_dim(ncid, 'nlevurb') .and. &
+        has_dim(ncid, 'numrad')) then
+       nlevurb    = get_dimlen(ncid, fname, 'nlevurb')
+       numrad_urb = get_dimlen(ncid, fname, 'numrad')
+       allocate(canyon_hwr_in(ncells,numurbl), ht_roof_in(ncells,numurbl), &
+                wind_hgt_canyon_in(ncells,numurbl), em_roof_in(ncells,numurbl), &
+                em_wall_in(ncells,numurbl), em_improad_in(ncells,numurbl), &
+                em_perroad_in(ncells,numurbl), thick_roof_in(ncells,numurbl), &
+                thick_wall_in(ncells,numurbl), t_building_min_in(ncells,numurbl), &
+                t_building_max_in(ncells,numurbl), nlev_improad_in(ncells,numurbl))
+       allocate(alb_roof_dir_in(ncells,numurbl,numrad_urb), alb_roof_dif_in(ncells,numurbl,numrad_urb), &
+                alb_wall_dir_in(ncells,numurbl,numrad_urb), alb_wall_dif_in(ncells,numurbl,numrad_urb), &
+                alb_improad_dir_in(ncells,numurbl,numrad_urb), alb_improad_dif_in(ncells,numurbl,numrad_urb), &
+                alb_perroad_dir_in(ncells,numurbl,numrad_urb), alb_perroad_dif_in(ncells,numurbl,numrad_urb))
+       allocate(tk_roof_in(ncells,numurbl,nlevurb), tk_wall_in(ncells,numurbl,nlevurb), &
+                tk_improad_in(ncells,numurbl,nlevurb), cv_roof_in(ncells,numurbl,nlevurb), &
+                cv_wall_in(ncells,numurbl,nlevurb), cv_improad_in(ncells,numurbl,nlevurb))
+       call read_gc_real2d(ncid, fname, 'CANYON_HWR'     , ngrid, numurbl, cell_ids, canyon_hwr_in)
+       call read_gc_real2d(ncid, fname, 'HT_ROOF'        , ngrid, numurbl, cell_ids, ht_roof_in)
+       call read_gc_real2d(ncid, fname, 'WIND_HGT_CANYON', ngrid, numurbl, cell_ids, wind_hgt_canyon_in)
+       call read_gc_real2d(ncid, fname, 'EM_ROOF'        , ngrid, numurbl, cell_ids, em_roof_in)
+       call read_gc_real2d(ncid, fname, 'EM_WALL'        , ngrid, numurbl, cell_ids, em_wall_in)
+       call read_gc_real2d(ncid, fname, 'EM_IMPROAD'     , ngrid, numurbl, cell_ids, em_improad_in)
+       call read_gc_real2d(ncid, fname, 'EM_PERROAD'     , ngrid, numurbl, cell_ids, em_perroad_in)
+       call read_gc_real2d(ncid, fname, 'THICK_ROOF'     , ngrid, numurbl, cell_ids, thick_roof_in)
+       call read_gc_real2d(ncid, fname, 'THICK_WALL'     , ngrid, numurbl, cell_ids, thick_wall_in)
+       call read_gc_real2d(ncid, fname, 'T_BUILDING_MIN' , ngrid, numurbl, cell_ids, t_building_min_in)
+       call read_gc_real2d(ncid, fname, 'T_BUILDING_MAX' , ngrid, numurbl, cell_ids, t_building_max_in)
+       ! Integer on the file; netCDF converts on the read.
+       call read_gc_real2d(ncid, fname, 'NLEV_IMPROAD'   , ngrid, numurbl, cell_ids, nlev_improad_in)
+       call read_gc_real3d(ncid, fname, 'ALB_ROOF_DIR'   , ngrid, numurbl, numrad_urb, cell_ids, alb_roof_dir_in)
+       call read_gc_real3d(ncid, fname, 'ALB_ROOF_DIF'   , ngrid, numurbl, numrad_urb, cell_ids, alb_roof_dif_in)
+       call read_gc_real3d(ncid, fname, 'ALB_WALL_DIR'   , ngrid, numurbl, numrad_urb, cell_ids, alb_wall_dir_in)
+       call read_gc_real3d(ncid, fname, 'ALB_WALL_DIF'   , ngrid, numurbl, numrad_urb, cell_ids, alb_wall_dif_in)
+       call read_gc_real3d(ncid, fname, 'ALB_IMPROAD_DIR', ngrid, numurbl, numrad_urb, cell_ids, alb_improad_dir_in)
+       call read_gc_real3d(ncid, fname, 'ALB_IMPROAD_DIF', ngrid, numurbl, numrad_urb, cell_ids, alb_improad_dif_in)
+       call read_gc_real3d(ncid, fname, 'ALB_PERROAD_DIR', ngrid, numurbl, numrad_urb, cell_ids, alb_perroad_dir_in)
+       call read_gc_real3d(ncid, fname, 'ALB_PERROAD_DIF', ngrid, numurbl, numrad_urb, cell_ids, alb_perroad_dif_in)
+       call read_gc_real3d(ncid, fname, 'TK_ROOF'        , ngrid, numurbl, nlevurb, cell_ids, tk_roof_in)
+       call read_gc_real3d(ncid, fname, 'TK_WALL'        , ngrid, numurbl, nlevurb, cell_ids, tk_wall_in)
+       call read_gc_real3d(ncid, fname, 'TK_IMPROAD'     , ngrid, numurbl, nlevurb, cell_ids, tk_improad_in)
+       call read_gc_real3d(ncid, fname, 'CV_ROOF'        , ngrid, numurbl, nlevurb, cell_ids, cv_roof_in)
+       call read_gc_real3d(ncid, fname, 'CV_WALL'        , ngrid, numurbl, nlevurb, cell_ids, cv_wall_in)
+       call read_gc_real3d(ncid, fname, 'CV_IMPROAD'     , ngrid, numurbl, nlevurb, cell_ids, cv_improad_in)
+       urban_params_read = .true.
+    end if
+
     ! ---- satellite phenology ----
     call read_gc_real3d(ncid, fname, 'MONTHLY_LAI', ngrid, lsmpft, nmonths, &
                         cell_ids, monthly_lai)
@@ -274,6 +360,21 @@ contains
     has_dim = (status == PIO_NOERR)
 
   end function has_dim
+
+  !-----------------------------------------------------------------------
+  logical function has_var(ncid, varname)
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: varname
+    integer :: varid, status
+
+    call pio_seterrorhandling(ncid, PIO_BCAST_ERROR)
+    status  = pio_inq_varid(ncid, trim(varname), varid)
+    call pio_seterrorhandling(ncid, PIO_INTERNAL_ERROR)
+    has_var = (status == PIO_NOERR)
+
+  end function has_var
 
   !-----------------------------------------------------------------------
   integer function get_dimlen(ncid, fname, dimname)
@@ -538,6 +639,13 @@ contains
     if (associated(monthly_sai))        deallocate(monthly_sai)
     if (associated(monthly_height_top)) deallocate(monthly_height_top)
     if (associated(monthly_height_bot)) deallocate(monthly_height_bot)
+    if (associated(canyon_hwr_in))      deallocate(canyon_hwr_in, ht_roof_in, wind_hgt_canyon_in, &
+         em_roof_in, em_wall_in, em_improad_in, em_perroad_in, thick_roof_in, thick_wall_in, &
+         t_building_min_in, t_building_max_in, nlev_improad_in, &
+         alb_roof_dir_in, alb_roof_dif_in, alb_wall_dir_in, alb_wall_dif_in, &
+         alb_improad_dir_in, alb_improad_dif_in, alb_perroad_dir_in, alb_perroad_dif_in, &
+         tk_roof_in, tk_wall_in, tk_improad_in, cv_roof_in, cv_wall_in, cv_improad_in)
+    urban_params_read = .false.
 
     surfdata_read = .false.
 

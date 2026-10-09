@@ -102,6 +102,7 @@ module elmxxDiagnosticsMod
   public :: elmxx_diag_snapshot_postcanhydro
   public :: elmxx_diag_snapshot_postcanflux
   public :: elmxx_diag_write_maps
+  public :: elmxx_diag_flush
 
 contains
 
@@ -128,6 +129,12 @@ contains
     end if
     elmxx_diag_enabled = .false.
   end subroutine elmxx_diag_finalize
+
+  subroutine elmxx_diag_flush()
+    ! Push buffered records to disk. Called after the init-time dumps, so a
+    ! run that aborts at its first step still leaves them readable.
+    if (is_open) flush(dunit)
+  end subroutine elmxx_diag_flush
 
   subroutine elmxx_diag_new_timestep(nstep)
     ! Label records by the driver's nstep, matching what ElmDiagnostics now
