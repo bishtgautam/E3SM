@@ -65,13 +65,15 @@ module elmxxMod
                                    elmxx_diag_new_timestep,                &
                                    elmxx_diag_snapshot_state,              &
                                    elmxx_diag_snapshot_fluxes,             &
-                                   elmxx_diag_write_maps
+                                   elmxx_diag_write_maps, elmxx_diag_flush
   use elmxxRestMod           , only : elmxx_rest_read
   use elmxxHistMod           , only : elmxx_hist_init, elmxx_hist_step, &
                                       elmxx_hist_write_if_month_end, &
                                       elmxx_hist_final
   use elmxxLakeMod           , only : elmxx_lake_init, elmxx_lake_push_forcing, &
                                       elmxx_lake_clean, lake_built
+  use elmxxUrbanMod          , only : elmxx_urban_init, elmxx_urban_diag_dump, &
+                                      elmxx_urban_clean
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -566,6 +568,8 @@ contains
        ! The lake surface (plan Stage 6.5): after the soil grid, which it
        ! shares, and the packed natural maps, through which it reads forcing.
        call elmxx_lake_init(elmxx_state, logunit)
+       ! The urban surface's time-constant parameters (plan Stage 6.7, U1).
+       call elmxx_urban_init(elmxx_state, logunit)
 
        ! SNICAR lookup tables. Pushed once; nothing crosses per step. Both
        ! files must be given -- with either blank, snow albedo stays at the
@@ -648,6 +652,8 @@ contains
       if (dlen > 0) then
          call elmxx_diag_init(trim(diag_path), .true.)
          call elmxx_diag_write_maps()
+         call elmxx_urban_diag_dump()
+         call elmxx_diag_flush()
          if (masterproc) write(logunit,*) 'ELMxx: diagnostics -> ',trim(diag_path)
       end if
     end block
@@ -1245,6 +1251,7 @@ contains
        call elmxx_soil_kernel_clean()
        call elmxx_kokkos_state_clean()
        call elmxx_lake_clean()
+       call elmxx_urban_clean()
        call elmxx_soil_prop_clean()
        call elmxx_root_clean()
        call elmxx_pftcon_clean()
