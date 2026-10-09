@@ -36,6 +36,8 @@ module UrbanAlbedoMod
   private :: incident_direct  ! Direct beam solar rad incident on walls and road in urban canyon 
   private :: incident_diffuse ! Diffuse solar rad incident on walls and road in urban canyon
   private :: net_solar        ! Solar radiation absorbed by road and both walls in urban canyon 
+  private :: UrbanAlbedo_diag_inputs  ! ELMPy diagnostics
+  private :: UrbanAlbedo_diag_outputs ! ELMPy diagnostics
   !-----------------------------------------------------------------------
 
 contains
@@ -166,6 +168,11 @@ contains
          coszen(l) = surfalb_vars%coszen_col(coli(l))  ! Assumes coszen for each column are the same
          zen(l)    = acos(coszen(l))
       end do
+
+      ! ELMPy diagnostics: inputs, with the landunit coszen the kernel uses
+      call UrbanAlbedo_diag_inputs(bounds, num_urbanl, filter_urbanl, &
+           num_urbanc, filter_urbanc, num_urbanp, filter_urbanp, &
+           coszen(bounds%begl:bounds%endl), urbanparams_vars)
 
        ! Initialize output because solar radiation only done if coszen > 0
 
@@ -430,6 +437,9 @@ contains
             end do
          end do
       end if
+
+      ! ELMPy diagnostics: outputs
+      call UrbanAlbedo_diag_outputs(bounds, solarabs_vars, surfalb_vars)
 
     end associate
 
@@ -1241,6 +1251,146 @@ contains
     end associate
 
   end subroutine net_solar
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanAlbedo_diag_inputs(bounds, &
+       num_urbanl, filter_urbanl, num_urbanc, filter_urbanc, &
+       num_urbanp, filter_urbanp, coszen, urbanparams_vars)
+     !
+     ! !DESCRIPTION:
+     ! Write ELMPy diagnostic snapshots of UrbanAlbedo input variables.
+     ! Called with the inactive_and_active filters, as UrbanAlbedo is.
+     !
+     ! !USES:
+     use ElmDiagnostics, only : diag_snapshot_1d, diag_snapshot_2d, &
+                                 diag_snapshot_int_1d, diag_enabled
+     !
+     ! !ARGUMENTS:
+     type(bounds_type),      intent(in) :: bounds
+     integer,                intent(in) :: num_urbanl
+     integer,                intent(in) :: filter_urbanl(:)
+     integer,                intent(in) :: num_urbanc
+     integer,                intent(in) :: filter_urbanc(:)
+     integer,                intent(in) :: num_urbanp
+     integer,                intent(in) :: filter_urbanp(:)
+     real(r8),               intent(in) :: coszen(bounds%begl:)
+     type(urbanparams_type), intent(in) :: urbanparams_vars
+     !
+     ! !LOCAL VARIABLES:
+     integer :: nl, nc, np
+     !-----------------------------------------------------------------------
+
+     if (.not. diag_enabled) return
+
+     nl = bounds%endl - bounds%begl + 1
+     nc = bounds%endc - bounds%begc + 1
+     np = bounds%endp - bounds%begp + 1
+
+     call diag_snapshot_int_1d('urbanalb_in:filter_urbanl', &
+          filter_urbanl(1:num_urbanl), num_urbanl)
+     call diag_snapshot_int_1d('urbanalb_in:filter_urbanc', &
+          filter_urbanc(1:num_urbanc), num_urbanc)
+     call diag_snapshot_int_1d('urbanalb_in:filter_urbanp', &
+          filter_urbanp(1:num_urbanp), num_urbanp)
+
+     ! --- Landunit-level ---
+     call diag_snapshot_1d('urbanalb_in:coszen', coszen(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:canyon_hwr', &
+          lun_pp%canyon_hwr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:wtroad_perv', &
+          lun_pp%wtroad_perv(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:vf_sr', urbanparams_vars%vf_sr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:vf_wr', urbanparams_vars%vf_wr(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:vf_sw', urbanparams_vars%vf_sw(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:vf_rw', urbanparams_vars%vf_rw(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_1d('urbanalb_in:vf_ww', urbanparams_vars%vf_ww(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_2d('urbanalb_in:alb_roof_dir', &
+          urbanparams_vars%alb_roof_dir(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_roof_dif', &
+          urbanparams_vars%alb_roof_dif(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_improad_dir', &
+          urbanparams_vars%alb_improad_dir(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_improad_dif', &
+          urbanparams_vars%alb_improad_dif(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_perroad_dir', &
+          urbanparams_vars%alb_perroad_dir(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_perroad_dif', &
+          urbanparams_vars%alb_perroad_dif(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_wall_dir', &
+          urbanparams_vars%alb_wall_dir(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_in:alb_wall_dif', &
+          urbanparams_vars%alb_wall_dif(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_int_1d('urbanalb_in:lun_coli', lun_pp%coli(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_int_1d('urbanalb_in:lun_colf', lun_pp%colf(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_int_1d('urbanalb_in:lun_gridcell', lun_pp%gridcell(bounds%begl:bounds%endl), nl)
+     call diag_snapshot_int_1d('urbanalb_in:lun_itype', lun_pp%itype(bounds%begl:bounds%endl), nl)
+
+     ! --- Column-level ---
+     call diag_snapshot_int_1d('urbanalb_in:ctype', col_pp%itype(bounds%begc:bounds%endc), nc)
+     call diag_snapshot_int_1d('urbanalb_in:col_landunit', col_pp%landunit(bounds%begc:bounds%endc), nc)
+     call diag_snapshot_1d('urbanalb_in:frac_sno', col_ws%frac_sno(bounds%begc:bounds%endc), nc)
+     call diag_snapshot_1d('urbanalb_in:h2osno', col_ws%h2osno(bounds%begc:bounds%endc), nc)
+
+     ! --- Patch-level ---
+     call diag_snapshot_int_1d('urbanalb_in:patch_column', veg_pp%column(bounds%begp:bounds%endp), np)
+     call diag_snapshot_int_1d('urbanalb_in:patch_landunit', veg_pp%landunit(bounds%begp:bounds%endp), np)
+
+  end subroutine UrbanAlbedo_diag_inputs
+
+  !-----------------------------------------------------------------------
+  subroutine UrbanAlbedo_diag_outputs(bounds, solarabs_vars, surfalb_vars)
+     !
+     ! !DESCRIPTION:
+     ! Write ELMPy diagnostic snapshots of UrbanAlbedo output variables.
+     !
+     ! !USES:
+     use ElmDiagnostics, only : diag_snapshot_2d, diag_enabled
+     !
+     ! !ARGUMENTS:
+     type(bounds_type),   intent(in) :: bounds
+     type(solarabs_type), intent(in) :: solarabs_vars
+     type(surfalb_type),  intent(in) :: surfalb_vars
+     !
+     ! !LOCAL VARIABLES:
+     integer :: nl, nc, np
+     !-----------------------------------------------------------------------
+
+     if (.not. diag_enabled) return
+
+     nl = bounds%endl - bounds%begl + 1
+     nc = bounds%endc - bounds%begc + 1
+     np = bounds%endp - bounds%begp + 1
+
+     call diag_snapshot_2d('urbanalb_out:sabs_roof_dir', &
+          solarabs_vars%sabs_roof_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_roof_dif', &
+          solarabs_vars%sabs_roof_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_sunwall_dir', &
+          solarabs_vars%sabs_sunwall_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_sunwall_dif', &
+          solarabs_vars%sabs_sunwall_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_shadewall_dir', &
+          solarabs_vars%sabs_shadewall_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_shadewall_dif', &
+          solarabs_vars%sabs_shadewall_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_improad_dir', &
+          solarabs_vars%sabs_improad_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_improad_dif', &
+          solarabs_vars%sabs_improad_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_perroad_dir', &
+          solarabs_vars%sabs_perroad_dir_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:sabs_perroad_dif', &
+          solarabs_vars%sabs_perroad_dif_lun(bounds%begl:bounds%endl, 1:numrad), nl, numrad)
+     call diag_snapshot_2d('urbanalb_out:albgrd', &
+          surfalb_vars%albgrd_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+     call diag_snapshot_2d('urbanalb_out:albgri', &
+          surfalb_vars%albgri_col(bounds%begc:bounds%endc, 1:numrad), nc, numrad)
+     call diag_snapshot_2d('urbanalb_out:albd', &
+          surfalb_vars%albd_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+     call diag_snapshot_2d('urbanalb_out:albi', &
+          surfalb_vars%albi_patch(bounds%begp:bounds%endp, 1:numrad), np, numrad)
+
+  end subroutine UrbanAlbedo_diag_outputs
 
 end module UrbanAlbedoMod
 
