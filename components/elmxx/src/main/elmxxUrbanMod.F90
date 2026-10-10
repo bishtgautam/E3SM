@@ -247,11 +247,6 @@ contains
     call urb_set_1d(elm, 'urban:viewFactors.otherWallFromWall', vf_ww)
 
     ! Snow-free emissivity and albedo per surface; one wall value for both.
-    call urb_set_1d(elm, 'urban:roof.rad.emissivity'          , em_roof)
-    call urb_set_1d(elm, 'urban:sunlitWall.rad.emissivity'    , em_wall)
-    call urb_set_1d(elm, 'urban:shadedWall.rad.emissivity'    , em_wall)
-    call urb_set_1d(elm, 'urban:imperviousRoad.rad.emissivity', em_improad)
-    call urb_set_1d(elm, 'urban:perviousRoad.rad.emissivity'  , em_perroad)
     call urb_set_2d(elm, 'urban:roof.rad.baseAlbedoDir'          , alb_roof_dir)
     call urb_set_2d(elm, 'urban:roof.rad.baseAlbedoDif'          , alb_roof_dif)
     call urb_set_2d(elm, 'urban:sunlitWall.rad.baseAlbedoDir'    , alb_wall_dir)
@@ -591,7 +586,7 @@ contains
        r1(5*(k-1)+4) = em_improad(k)
        r1(5*(k-1)+5) = em_perroad(k)
     end do
-    call surf_set_1d(elm, 'emg', r1)
+    call surf_set_1d(elm, 'emg', r1)        ! the surface emissivity UrbanRadiation also reads
     r1 = spval
     do k = 1, n_kokkos_urb
        r1(5*(k-1)+5) = 4800._r8
