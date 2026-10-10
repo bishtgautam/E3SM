@@ -43,6 +43,7 @@ module elmxxMod
                                       ELMxxSetGroundHeatFluxSb, &
                                       ELMxxComputeSurfaceAlbedoNatural, &
                                       ELMxxComputeSurfaceAlbedoLake, &
+                                      ELMxxComputeSurfaceAlbedoUrban, &
                                       ELMxxComputeForcingDerivedNatural, &
                                       ELMxxComputePhotosynForcingNatural, &
                                       ELMxxComputeSatellitePhenologyNatural
@@ -73,7 +74,7 @@ module elmxxMod
   use elmxxLakeMod           , only : elmxx_lake_init, elmxx_lake_push_forcing, &
                                       elmxx_lake_clean, lake_built
   use elmxxUrbanMod          , only : elmxx_urban_init, elmxx_urban_diag_dump, &
-                                      elmxx_urban_clean
+                                      elmxx_urban_clean, urban_built
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -1081,6 +1082,12 @@ contains
              if (ierr_rs /= ELMXX_SUCCESS) &
                   call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoLake failed')
           end if
+          ! UrbanAlbedo, with the albedo pass's next-step coszen (Stage 6.7).
+          if (urban_built) then
+             call ELMxxComputeSurfaceAlbedoUrban(elmxx_state, ierr_rs)
+             if (ierr_rs /= ELMXX_SUCCESS) &
+                  call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoUrban failed')
+          end if
           if (nstep == 1 .or. mod(nstep, 24) == 0) then
              call elmxx_surface_albedo_report(logunit)
           end if
@@ -1169,6 +1176,11 @@ contains
        call ELMxxComputeSurfaceAlbedoLake(elmxx_state, ierr_ia)
        if (ierr_ia /= ELMXX_SUCCESS) &
             call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoLake failed')
+    end if
+    if (urban_built) then
+       call ELMxxComputeSurfaceAlbedoUrban(elmxx_state, ierr_ia)
+       if (ierr_ia /= ELMXX_SUCCESS) &
+            call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoUrban failed')
     end if
     if (masterproc) then
        write(logunit,*) 'ELMxx: initial SurfaceAlbedo pass complete'

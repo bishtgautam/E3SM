@@ -36,7 +36,7 @@ module elmxxSoilPropMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxSubgridMod , only : num_columns
+  use elmxxSubgridMod , only : num_columns, col_landunit, lun_itype, isturb_tbd, isturb_md
   use elmxxSurfaceStateMod, only : surface_state_built, col_pct_sand, &
                                    col_pct_clay, col_organic
 
@@ -188,6 +188,11 @@ contains
           ! influence on every hydraulic property in the top layers.
           ! (SoilStateType.F90, "om_frac = (organic3d/organic_max)**2").
           om_frac = min(col_organic(c, jsrc) / organic_max, 1.0_r8)**2.0_r8
+          ! ELM SoilStateType: "No organic matter for urban". The urban
+          ! roads take these properties (elmxxUrbanMod); natural columns are
+          ! untouched.
+          if (lun_itype(col_landunit(c)) >= isturb_tbd .and. &
+              lun_itype(col_landunit(c)) <= isturb_md) om_frac = 0.0_r8
 
           ! --- mineral soil, Cosby 1984 Table 5 (ipedof0) ---
           wsat_min = 0.489_r8 - 0.00126_r8*sand
