@@ -247,35 +247,35 @@ contains
     call urb_set_1d(elm, 'urban:viewFactors.otherWallFromWall', vf_ww)
 
     ! Snow-free emissivity and albedo per surface; one wall value for both.
-    call urb_set_1d(elm, 'urban:roof.emissivity'          , em_roof)
-    call urb_set_1d(elm, 'urban:sunlitWall.emissivity'    , em_wall)
-    call urb_set_1d(elm, 'urban:shadedWall.emissivity'    , em_wall)
-    call urb_set_1d(elm, 'urban:imperviousRoad.emissivity', em_improad)
-    call urb_set_1d(elm, 'urban:perviousRoad.emissivity'  , em_perroad)
-    call urb_set_2d(elm, 'urban:roof.baseAlbedoDir'          , alb_roof_dir)
-    call urb_set_2d(elm, 'urban:roof.baseAlbedoDif'          , alb_roof_dif)
-    call urb_set_2d(elm, 'urban:sunlitWall.baseAlbedoDir'    , alb_wall_dir)
-    call urb_set_2d(elm, 'urban:sunlitWall.baseAlbedoDif'    , alb_wall_dif)
-    call urb_set_2d(elm, 'urban:shadedWall.baseAlbedoDir'    , alb_wall_dir)
-    call urb_set_2d(elm, 'urban:shadedWall.baseAlbedoDif'    , alb_wall_dif)
-    call urb_set_2d(elm, 'urban:imperviousRoad.baseAlbedoDir', alb_improad_dir)
-    call urb_set_2d(elm, 'urban:imperviousRoad.baseAlbedoDif', alb_improad_dif)
-    call urb_set_2d(elm, 'urban:perviousRoad.baseAlbedoDir'  , alb_perroad_dir)
-    call urb_set_2d(elm, 'urban:perviousRoad.baseAlbedoDif'  , alb_perroad_dif)
+    call urb_set_1d(elm, 'urban:roof.rad.emissivity'          , em_roof)
+    call urb_set_1d(elm, 'urban:sunlitWall.rad.emissivity'    , em_wall)
+    call urb_set_1d(elm, 'urban:shadedWall.rad.emissivity'    , em_wall)
+    call urb_set_1d(elm, 'urban:imperviousRoad.rad.emissivity', em_improad)
+    call urb_set_1d(elm, 'urban:perviousRoad.rad.emissivity'  , em_perroad)
+    call urb_set_2d(elm, 'urban:roof.rad.baseAlbedoDir'          , alb_roof_dir)
+    call urb_set_2d(elm, 'urban:roof.rad.baseAlbedoDif'          , alb_roof_dif)
+    call urb_set_2d(elm, 'urban:sunlitWall.rad.baseAlbedoDir'    , alb_wall_dir)
+    call urb_set_2d(elm, 'urban:sunlitWall.rad.baseAlbedoDif'    , alb_wall_dif)
+    call urb_set_2d(elm, 'urban:shadedWall.rad.baseAlbedoDir'    , alb_wall_dir)
+    call urb_set_2d(elm, 'urban:shadedWall.rad.baseAlbedoDif'    , alb_wall_dif)
+    call urb_set_2d(elm, 'urban:imperviousRoad.rad.baseAlbedoDir', alb_improad_dir)
+    call urb_set_2d(elm, 'urban:imperviousRoad.rad.baseAlbedoDif', alb_improad_dif)
+    call urb_set_2d(elm, 'urban:perviousRoad.rad.baseAlbedoDir'  , alb_perroad_dir)
+    call urb_set_2d(elm, 'urban:perviousRoad.rad.baseAlbedoDif'  , alb_perroad_dif)
 
     ! Layer thermal properties. The pervious road takes the soil's, so its
     ! slot holds spval: anything that reads it is reading the wrong thing.
-    call urb_set_2d(elm, 'urban:roof.tkLayer'          , tk_roof)
-    call urb_set_2d(elm, 'urban:roof.cvLayer'          , cv_roof)
-    call urb_set_2d(elm, 'urban:sunlitWall.tkLayer'    , tk_wall)
-    call urb_set_2d(elm, 'urban:sunlitWall.cvLayer'    , cv_wall)
-    call urb_set_2d(elm, 'urban:shadedWall.tkLayer'    , tk_wall)
-    call urb_set_2d(elm, 'urban:shadedWall.cvLayer'    , cv_wall)
-    call urb_set_2d(elm, 'urban:imperviousRoad.tkLayer', tk_improad)
-    call urb_set_2d(elm, 'urban:imperviousRoad.cvLayer', cv_improad)
+    call urb_set_2d(elm, 'urban:roof.rad.tkLayer'          , tk_roof)
+    call urb_set_2d(elm, 'urban:roof.rad.cvLayer'          , cv_roof)
+    call urb_set_2d(elm, 'urban:sunlitWall.rad.tkLayer'    , tk_wall)
+    call urb_set_2d(elm, 'urban:sunlitWall.rad.cvLayer'    , cv_wall)
+    call urb_set_2d(elm, 'urban:shadedWall.rad.tkLayer'    , tk_wall)
+    call urb_set_2d(elm, 'urban:shadedWall.rad.cvLayer'    , cv_wall)
+    call urb_set_2d(elm, 'urban:imperviousRoad.rad.tkLayer', tk_improad)
+    call urb_set_2d(elm, 'urban:imperviousRoad.rad.cvLayer', cv_improad)
     allocate(spv(n_kokkos_urb, nlevurb)); spv = 1.e36_r8
-    call urb_set_2d(elm, 'urban:perviousRoad.tkLayer'  , spv)
-    call urb_set_2d(elm, 'urban:perviousRoad.cvLayer'  , spv)
+    call urb_set_2d(elm, 'urban:perviousRoad.rad.tkLayer'  , spv)
+    call urb_set_2d(elm, 'urban:perviousRoad.rad.cvLayer'  , spv)
 
   end subroutine seed_params
 
@@ -416,7 +416,7 @@ contains
     if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxAllocateUrbanSurface failed')
 
     allocate(ib(n_kokkos_urb), r1(n_kokkos_urb))
-    ! ---- landunit topology and the explicit column maps ----
+    ! ---- landunit topology ----
     do k = 1, n_kokkos_urb
        l = lun_of_kurb(k)
        ib(k) = merge(1, 0, lun_wtgcell(l) > 0._r8)   ! ELM: active iff weight > 0
@@ -431,72 +431,28 @@ contains
        ib(k) = lun_gridcell(lun_of_kurb(k)) - 1
     end do
     call urb_set_1d(elm, 'urban:gridcell', real(ib, r8))
-    do s = 1, 5
-       do k = 1, n_kokkos_urb
-          ib(k) = 5*(k-1) + s - 1
-       end do
-       select case (s)
-       case (1); call urb_set_1d(elm, 'urban:colRoof'     , real(ib, r8))
-       case (2); call urb_set_1d(elm, 'urban:colSunwall'  , real(ib, r8))
-       case (3); call urb_set_1d(elm, 'urban:colShadewall', real(ib, r8))
-       case (4); call urb_set_1d(elm, 'urban:colImproad'  , real(ib, r8))
-       case (5); call urb_set_1d(elm, 'urban:colPerroad'  , real(ib, r8))
-       end select
+    do k = 1, n_kokkos_urb
+       ib(k) = lun_itype(lun_of_kurb(k))
     end do
+    call urb_set_1d(elm, 'urban:itype', real(ib, r8))
+    call urb_set_1d(elm, 'urban:nlevbed', spread(real(nlevsoi, r8), 1, n_kokkos_urb))
     call urb_set_1d(elm, 'urban:taf', spread(283._r8, 1, n_kokkos_urb))
     call urb_set_1d(elm, 'urban:qaf', spread(1.e-4_r8, 1, n_kokkos_urb))
     call urb_set_1d(elm, 'urban:tBuilding', spread(spval, 1, n_kokkos_urb))
     deallocate(ib, r1)
 
-    ! ---- column topology ----
+    ! ---- the surfaces are in ELM's column order (roof .. pervious road);
+    !      column type, activity and the column/patch/landunit maps are the
+    !      record's own, constant (urbanAux) ----
     allocate(ib(nc), ib2(nc), r1(nc))
     do k = 1, n_kokkos_urb
        call landunit_columns(lun_of_kurb(k), subcol)
        do s = 1, 5
-          kc = 5*(k-1) + s
           c = subcol(s)
-          ib(kc) = col_itype(c)
-          if (ib(kc) /= icol_roof + s - 1) call shr_sys_abort(subname// &
+          if (col_itype(c) /= icol_roof + s - 1) call shr_sys_abort(subname// &
                'ERROR: urban columns are not in ELM''s column order')
        end do
     end do
-    call urb_set_1d(elm, 'urbcol:col_itype', real(ib, r8))
-    do kc = 1, nc
-       k = (kc - 1)/5 + 1
-       ib2(kc) = lun_itype(lun_of_kurb(k))
-    end do
-    call urb_set_1d(elm, 'urbcol:lun_itype', real(ib2, r8))
-    call urb_set_1d(elm, 'urbcol:lun_urbpoi', spread(1._r8, 1, nc))
-    call urb_set_1d(elm, 'urbcol:col_is_soil', spread(0._r8, 1, nc))
-    call urb_set_1d(elm, 'urbcol:col_is_crop', spread(0._r8, 1, nc))
-    do kc = 1, nc
-       k = (kc - 1)/5 + 1
-       ib2(kc) = merge(1, 0, lun_wtgcell(lun_of_kurb(k)) > 0._r8)
-    end do
-    call urb_set_1d(elm, 'urbcol:col_active', real(ib2, r8))
-    call urb_set_1d(elm, 'urbpatch:patch_active', real(ib2, r8))
-    do kc = 1, nc
-       k = (kc - 1)/5 + 1
-       ib2(kc) = lun_gridcell(lun_of_kurb(k)) - 1
-    end do
-    call urb_set_1d(elm, 'urbcol:col_gridcell', real(ib2, r8))
-    call urb_set_1d(elm, 'urbcol:col_topounit', real(ib2, r8))
-    do kc = 1, nc
-       ib2(kc) = (kc - 1)/5
-    end do
-    call urb_set_1d(elm, 'urbcol:col_landunit', real(ib2, r8))
-    call urb_set_1d(elm, 'urbpatch:patch_landunit', real(ib2, r8))
-    do kc = 1, nc
-       ib2(kc) = kc - 1
-    end do
-    call urb_set_1d(elm, 'urbcol:col_pfti', real(ib2, r8))
-    call urb_set_1d(elm, 'urbpatch:patch_column', real(ib2, r8))
-    call urb_set_1d(elm, 'urbcol:col_npfts', spread(1._r8, 1, nc))
-    call urb_set_1d(elm, 'urbcol:nlevbed', spread(real(nlevsoi, r8), 1, nc))
-    call urb_set_1d(elm, 'urbpatch:wtcol', spread(1._r8, 1, nc))
-    call urb_set_1d(elm, 'urbpatch:frac_veg_nosno', spread(0._r8, 1, nc))
-    call urb_set_1d(elm, 'urbpatch:is_on_soil_col', spread(0._r8, 1, nc))
-    call urb_set_1d(elm, 'urbpatch:is_on_crop_col', spread(0._r8, 1, nc))
 
     ! ---- geometry ----
     allocate(dz(nc,nlevgrnd), z(nc,nlevgrnd), zi(nc,0:nlevgrnd))
@@ -531,38 +487,38 @@ contains
           end if
        end do
     end do
-    call urb_set_2d(elm, 'urbcol:thermal.dz_soi', dz)
-    call urb_set_2d(elm, 'urbcol:thermal.zc_soi', z)
-    call urb_set_2d(elm, 'urbcol:thermal.zi_soi', zi)
+    call surf_set_2d(elm, 'thermal.dz_soi', dz)
+    call surf_set_2d(elm, 'thermal.zc_soi', z)
+    call surf_set_2d(elm, 'thermal.zi_soi', zi)
     ! The combined (ELM-ordered) and SoilTemperature (_p1) layouts: snow
     ! slots empty at a cold start; _p1 carries the standing-water node.
     allocate(rt(nc,nlevtot), rt1(nc,nlevtot+1))
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = dz
-    call urb_set_2d(elm, 'urbcol:dz', rt)
+    call surf_set_2d(elm, 'dz', rt)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = z
-    call urb_set_2d(elm, 'urbcol:snowsoil.z', rt)
+    call surf_set_2d(elm, 'snowsoil.z', rt)
     rt1 = 0._r8; rt1(:, nlevsno+1:nlevtot+1) = zi
-    call urb_set_2d(elm, 'urbcol:snowsoil.zi', rt1)
+    call surf_set_2d(elm, 'snowsoil.zi', rt1)
     allocate(rp1(nc,nlevsno+1+nlevgrnd), rp2(nc,nlevsno+2+nlevgrnd))
     rp1 = 0._r8; rp1(:, nlevsno+2:) = dz
-    call urb_set_2d(elm, 'urbcol:dz_p1', rp1)
+    call surf_set_2d(elm, 'dz_p1', rp1)
     rp1 = 0._r8; rp1(:, nlevsno+2:) = z
-    call urb_set_2d(elm, 'urbcol:z_p1', rp1)
+    call surf_set_2d(elm, 'z_p1', rp1)
     rp2 = 0._r8; rp2(:, nlevsno+2:) = zi
-    call urb_set_2d(elm, 'urbcol:zi_p1', rp2)
+    call surf_set_2d(elm, 'zi_p1', rp2)
 
     ! ---- soil properties: roads natural (no organic), roof/walls spval ----
     allocate(rg(nc,nlevgrnd), rg2(nc,nlevgrnd))
-    call seed_prop('urbcol:watsat', sp_watsat)
-    call seed_prop('urbcol:watsat_soi', sp_watsat)
-    call seed_prop('urbcol:bsw', sp_bsw)
-    call seed_prop('urbcol:sucsat', sp_sucsat)
-    call seed_prop('urbcol:hksat', sp_hksat)
-    call seed_prop('urbcol:watfc', sp_watfc)
-    call seed_prop('urbcol:tkmg', sp_tkmg)
-    call seed_prop('urbcol:tkdry', sp_tkdry)
-    call seed_prop('urbcol:tksatu', sp_tksatu)
-    call seed_prop('urbcol:csol', sp_csol)
+    call seed_prop('watsat', sp_watsat)
+    call seed_prop('watsat_soi', sp_watsat)
+    call seed_prop('bsw', sp_bsw)
+    call seed_prop('sucsat', sp_sucsat)
+    call seed_prop('hksat', sp_hksat)
+    call seed_prop('watfc', sp_watfc)
+    call seed_prop('tkmg', sp_tkmg)
+    call seed_prop('tkdry', sp_tkdry)
+    call seed_prop('tksatu', sp_tksatu)
+    call seed_prop('csol', sp_csol)
     ! watdry / watopt (ELM SoilStateType), roads; the impervious road's
     ! are spval in ELM, harmless since only the pervious road reads them.
     rg = spval; rg2 = spval
@@ -575,13 +531,13 @@ contains
           rg2(kc,j) = sp_watsat(c,j) * (158490._r8/sp_sucsat(c,j)) ** (-1._r8/sp_bsw(c,j))
        end do
     end do
-    call urb_set_2d(elm, 'urbcol:watdry', rg)
-    call urb_set_2d(elm, 'urbcol:watopt', rg2)
+    call surf_set_2d(elm, 'watdry', rg)
+    call surf_set_2d(elm, 'watopt', rg2)
     rg = 0._r8
     do k = 1, n_kokkos_urb
        rg(5*(k-1)+5, 1:nlevsoi) = 0.1_r8
     end do
-    call urb_set_2d(elm, 'urbcol:rootfr_road_perv', rg)
+    call surf_set_2d(elm, 'rootfr_road_perv', rg)
 
     ! ---- cold start ----
     allocate(tsoi(nc,nlevgrnd), liq(nc,nlevgrnd), ice(nc,nlevgrnd), vol(nc,nlevgrnd))
@@ -615,19 +571,19 @@ contains
           end do
        end do
     end do
-    call urb_set_2d(elm, 'urbcol:thermal.t_soisno_soi', tsoi)
-    call urb_set_2d(elm, 'urbcol:snowsoil.h2osoi_liq_soi', liq)
-    call urb_set_2d(elm, 'urbcol:snowsoil.h2osoi_ice_soi', ice)
-    call urb_set_2d(elm, 'urbcol:h2osoi_vol', vol)
+    call surf_set_2d(elm, 'thermal.t_soisno_soi', tsoi)
+    call surf_set_2d(elm, 'snowsoil.h2osoi_liq_soi', liq)
+    call surf_set_2d(elm, 'snowsoil.h2osoi_ice_soi', ice)
+    call surf_set_2d(elm, 'h2osoi_vol', vol)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = tsoi
-    call urb_set_2d(elm, 'urbcol:t_soisno', rt)
+    call surf_set_2d(elm, 't_soisno', rt)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = liq
-    call urb_set_2d(elm, 'urbcol:h2osoi_liq', rt)
+    call surf_set_2d(elm, 'h2osoi_liq', rt)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = ice
-    call urb_set_2d(elm, 'urbcol:h2osoi_ice', rt)
+    call surf_set_2d(elm, 'h2osoi_ice', rt)
     r1 = tsoi(:,1)
-    call urb_set_1d(elm, 'urbcol:t_grnd', r1)
-    call urb_set_1d(elm, 'urbcol:t_h2osfc', spread(274._r8, 1, nc))
+    call surf_set_1d(elm, 't_grnd', r1)
+    call surf_set_1d(elm, 't_h2osfc', spread(274._r8, 1, nc))
     do k = 1, n_kokkos_urb
        r1(5*(k-1)+1) = em_roof(k)
        r1(5*(k-1)+2) = em_wall(k)
@@ -635,20 +591,20 @@ contains
        r1(5*(k-1)+4) = em_improad(k)
        r1(5*(k-1)+5) = em_perroad(k)
     end do
-    call urb_set_1d(elm, 'urbcol:emg', r1)
+    call surf_set_1d(elm, 'emg', r1)
     r1 = spval
     do k = 1, n_kokkos_urb
        r1(5*(k-1)+5) = 4800._r8
     end do
-    call urb_set_1d(elm, 'urbcol:wa', r1)
+    call surf_set_1d(elm, 'wa', r1)
     r1 = spval
     do k = 1, n_kokkos_urb
        r1(5*(k-1)+5) = (25._r8 + zisoi(nlevsoi)) - 4800._r8/0.2_r8/1000._r8
     end do
-    call urb_set_1d(elm, 'urbcol:zwt', r1)
-    call urb_set_1d(elm, 'urbcol:zwt_perched', spread(spval, 1, nc))
-    call urb_set_1d(elm, 'urbcol:frost_table', spread(spval, 1, nc))
-    call urb_set_1d(elm, 'urbcol:h2osfc_thresh', spread(0._r8, 1, nc))
+    call surf_set_1d(elm, 'zwt', r1)
+    call surf_set_1d(elm, 'zwt_perched', spread(spval, 1, nc))
+    call surf_set_1d(elm, 'frost_table', spread(spval, 1, nc))
+    call surf_set_1d(elm, 'h2osfc_thresh', spread(0._r8, 1, nc))
 
     call ELMxxUrbanBuildFilters(elm, ierr)
     if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxUrbanBuildFilters failed')
@@ -675,7 +631,7 @@ contains
             rg(5*(kk-1)+ss, :) = src(cc, 1:nlevgrnd)
          end do
       end do
-      call urb_set_2d(elm, name, rg)
+      call surf_set_2d(elm, name, rg)
     end subroutine seed_prop
 
   end subroutine seed_surface
@@ -775,45 +731,200 @@ contains
     if (.not. elmxx_diag_enabled .or. .not. urban_built) return
     allocate(v(n_urb_col), v2(n_urb_col, nlevgrnd))
     do j = 1, 4
-       call urb_get_1d(elm, 'urbcol:'//trim(regname(cols(j))), v)
+       call surf_get_1d(elm, trim(regname(cols(j))), v)
        call elmxx_diag_1d(trim(tag)//':'//trim(cols(j)), v, n_urb_col)
     end do
-    call urb_get_1d(elm, 'urbcol:snowsoil.snl', v)
+    call surf_get_1d(elm, 'snowsoil.snl', v)
     call elmxx_diag_1d(trim(tag)//':snl', v, n_urb_col)
     do j = 5, 6
-       call urb_get_2d(elm, 'urbcol:'//trim(regname(cols(j))), v2)
+       call surf_get_2d(elm, trim(regname(cols(j))), v2)
        call elmxx_diag_2d(trim(tag)//':'//trim(cols(j)), v2, n_urb_col, nlevgrnd)
     end do
     do j = 1, 7
-       call urb_get_1d(elm, 'urbpatch:'//trim(pchs(j)), v)
+       call surf_get_1d(elm, trim(pchs(j)), v)
        call elmxx_diag_1d(trim(tag)//':'//trim(pchs(j)), v, n_urb_col)
     end do
-    call urb_get_1d(elm, 'urbpatch:cgrnds', v); call elmxx_diag_1d(trim(tag)//':cgrnds', v, n_urb_col)
-    call urb_get_1d(elm, 'urbpatch:cgrndl', v); call elmxx_diag_1d(trim(tag)//':cgrndl', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:htvp', v);     call elmxx_diag_1d(trim(tag)//':htvp', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qg', v);       call elmxx_diag_1d(trim(tag)//':qg', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:dqgdT', v);    call elmxx_diag_1d(trim(tag)//':dqgdT', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow_col', v, n_urb_col)
-    call urb_get_1d(elm, 'urbpatch:qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_evap_grnd_col', v); call elmxx_diag_1d(trim(tag)//':qflx_evap_grnd', v, n_urb_col)
-    call urb_get_2d(elm, 'urbcol:snowsoil.h2osoi_ice_soi', v2)
+    call surf_get_1d(elm, 'cgrnds', v); call elmxx_diag_1d(trim(tag)//':cgrnds', v, n_urb_col)
+    call surf_get_1d(elm, 'cgrndl', v); call elmxx_diag_1d(trim(tag)//':cgrndl', v, n_urb_col)
+    call surf_get_1d(elm, 'htvp', v);     call elmxx_diag_1d(trim(tag)//':htvp', v, n_urb_col)
+    call surf_get_1d(elm, 'qg', v);       call elmxx_diag_1d(trim(tag)//':qg', v, n_urb_col)
+    call surf_get_1d(elm, 'dqgdT', v);    call elmxx_diag_1d(trim(tag)//':dqgdT', v, n_urb_col)
+    call surf_get_1d(elm, 'snowsoil.qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow_col', v, n_urb_col)
+    call surf_get_1d(elm, 'qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow', v, n_urb_col)
+    call surf_get_1d(elm, 'snowsoil.qflx_evap_grnd_col', v); call elmxx_diag_1d(trim(tag)//':qflx_evap_grnd', v, n_urb_col)
+    call surf_get_2d(elm, 'snowsoil.h2osoi_ice_soi', v2)
     call elmxx_diag_2d(trim(tag)//':h2osoi_ice_soi', v2, n_urb_col, nlevgrnd)
-    call urb_get_1d(elm, 'urbcol:qflx_infl', v); call elmxx_diag_1d(trim(tag)//':qflx_infl', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qflx_surf', v); call elmxx_diag_1d(trim(tag)//':qflx_surf', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qflx_drain', v); call elmxx_diag_1d(trim(tag)//':qflx_drain', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_top_soil', v); call elmxx_diag_1d(trim(tag)//':qflx_top_soil', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:zwt', v); call elmxx_diag_1d(trim(tag)//':zwt', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:hs_top_snow', v); call elmxx_diag_1d(trim(tag)//':hs_top_snow', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:dhsdT', v);       call elmxx_diag_1d(trim(tag)//':dhsdT', v, n_urb_col)
+    call surf_get_1d(elm, 'qflx_infl', v); call elmxx_diag_1d(trim(tag)//':qflx_infl', v, n_urb_col)
+    call surf_get_1d(elm, 'qflx_surf', v); call elmxx_diag_1d(trim(tag)//':qflx_surf', v, n_urb_col)
+    call surf_get_1d(elm, 'qflx_drain', v); call elmxx_diag_1d(trim(tag)//':qflx_drain', v, n_urb_col)
+    call surf_get_1d(elm, 'snowsoil.qflx_top_soil', v); call elmxx_diag_1d(trim(tag)//':qflx_top_soil', v, n_urb_col)
+    call surf_get_1d(elm, 'zwt', v); call elmxx_diag_1d(trim(tag)//':zwt', v, n_urb_col)
+    call surf_get_1d(elm, 'hs_top_snow', v); call elmxx_diag_1d(trim(tag)//':hs_top_snow', v, n_urb_col)
+    call surf_get_1d(elm, 'dhsdT', v);       call elmxx_diag_1d(trim(tag)//':dhsdT', v, n_urb_col)
     deallocate(v2); allocate(v2(n_urb_col, nlevsno))
-    call urb_get_2d(elm, 'urbcol:snowsoil.t_soisno_sno', v2)
+    call surf_get_2d(elm, 'snowsoil.t_soisno_sno', v2)
     call elmxx_diag_2d(trim(tag)//':t_soisno_sno', v2, n_urb_col, nlevsno)
-    call urb_get_2d(elm, 'urbcol:snowsoil.dz_sno', v2)
+    call surf_get_2d(elm, 'snowsoil.dz_sno', v2)
     call elmxx_diag_2d(trim(tag)//':dz_sno', v2, n_urb_col, nlevsno)
-    call urb_get_2d(elm, 'urbcol:snowsoil.h2osoi_ice_sno', v2)
+    call surf_get_2d(elm, 'snowsoil.h2osoi_ice_sno', v2)
     call elmxx_diag_2d(trim(tag)//':h2osoi_ice_sno', v2, n_urb_col, nlevsno)
     deallocate(v, v2)
   end subroutine elmxx_urban_diag_step
+
+  !-----------------------------------------------------------------------
+  function surf_path(s, f) result(r)
+    !
+    ! The registry path, under 'urban:', of column/patch field f on urban
+    ! surface s (1 roof, 2 sunlit wall, 3 shaded wall, 4 impervious road,
+    ! 5 pervious road), or '' where the surface does not carry it: walls hold
+    ! no snow or water, the roof and walls no road soil, and the topology is
+    ! constant (data_structures.md section 7). Generated from the C++ record
+    ! layout (UrbanData.h); f is the natural-layout name, with its shared
+    ! struct prefix (thermal., snowsoil.) where it has one.
+    !
+    implicit none
+    integer, intent(in) :: s
+    character(len=*), intent(in) :: f
+    character(len=96) :: r
+    character(len=*), parameter :: sname(5) = (/ 'roof          ', 'sunlitWall    ', &
+         'shadedWall    ', 'imperviousRoad', 'perviousRoad  ' /)
+    logical :: wet
+    wet = (s == 1 .or. s >= 4)
+    r = ''
+    if (f(1:min(len(f),8)) == 'thermal.') then
+       r = trim(sname(s))//'.'//f
+       return
+    end if
+    if (f(1:min(len(f),9)) == 'snowsoil.') then
+       if (wet) r = trim(sname(s))//'.'//f
+       return
+    end if
+    select case (f)
+       case ('t_grnd', 't_h2osfc', 't_h2osfc_bef', 'emg', 'htvp', 'z0mg', 'z0hg', 'z0qg', 'zii', &
+            'thv', 'qg', 'qg_snow', 'qg_soil', 'qg_h2osfc', 'dqgdT', 't_ssbef', 't_soisno', 'dz', &
+            'dz_p1', 'z_p1', 'zi_p1', 't_soisno_p1', 'fact', 'hs_soil', 'hs_top_snow', 'hs_h2osfc', &
+            'dhsdT', 'sabg_lyr_col', 'eflx_bot', 't_building', 'thk_urban', 'cv_urban', 'xmf', &
+            'eflx_building_heat', 'eflx_urban_ac', 'eflx_urban_heat', 'errsoi_col', 'albgrd', &
+            'albgri', 'dz_h2osfc', 'c_h2osfc', 'xmf_h2osfc', 'eflx_h2osfc_to_snow', &
+            'qflx_snofrz_lyr', 'qflx_h2osfc_to_ice', 'albd', 'albi', 'cgrnd', 'cgrndl', 'cgrnds', &
+            'dgnetdT', 'dlrad', 'ulrad', 'eflx_anthro', 'eflx_gnet', 'eflx_heat_from_ac', &
+            'eflx_wasteheat', 'eflx_traffic', 'eflx_lh_grnd', 'eflx_lh_tot', 'eflx_lh_tot_r', &
+            'eflx_lh_tot_u', 'eflx_lh_vege', 'eflx_lh_vegt', 'eflx_lwrad_net', 'eflx_lwrad_net_r', &
+            'eflx_lwrad_net_u', 'eflx_lwrad_out', 'eflx_lwrad_out_r', 'eflx_lwrad_out_u', &
+            'eflx_sh_grnd', 'eflx_sh_h2osfc', 'eflx_sh_snow', 'eflx_sh_soil', 'eflx_sh_tot', &
+            'eflx_sh_tot_r', 'eflx_sh_tot_u', 'eflx_sh_veg', 'eflx_soil_grnd', 'eflx_soil_grnd_r', &
+            'eflx_soil_grnd_u', 'errlon', 'errseb', 'errsoi_patch', 'errsol', 'fsa', 'fsa_u', &
+            'fsr', 'fsr_nir_d', 'fsr_nir_i', 'fsr_vis_d', 'fsr_vis_i', 'netrad', 'q_ref2m', 'ram1', &
+            'rh_ref2m', 'rh_ref2m_u', 'sabg', 'sabg_chk', 'sabg_snow', 'sabg_soil', 'sabv', &
+            't_ref2m', 't_ref2m_u', 't_veg', 'taux', 'tauy', 'thm')
+       r = trim(sname(s))//'.energy.'//f
+       case ('h2osno_old', 'h2osfc', 'frac_h2osfc', 'frac_h2osfc_act', 'h2osfc_thresh', &
+            'h2osoi_liq', 'h2osoi_ice', 'h2osoi_liq_p1', 'h2osoi_ice_p1', 'h2osoi_vol', 'begwb', &
+            'endwb', 'errh2o', 'dwb', 'wbal_inv', 'errh2osno', 'snow_sources', 'snow_sinks', &
+            'h2ocan_col', 'qflx_floodc', 'qflx_snow_h2osfc', 'qflx_prec_grnd_col', &
+            'qflx_ev_soil_col', 'qflx_ev_h2osfc_col', 'qflx_surf', 'qflx_infl', 'qflx_h2osfc_surf', &
+            'qflx_gross_infl_soil', 'qflx_gross_evap_soil', 'qflx_tran_veg_col', &
+            'qflx_evap_tot_col', 'qflx_snwcp_ice_col', 'qflx_snwcp_liq_col', 'qflx_irrig', &
+            'f_surf_col', 'h2osoi_liq_depth_intg', 'h2osoi_ice_depth_intg', 'qflx_drain', &
+            'qflx_drain_perched', 'qflx_rsub_sat', 'qflx_lnd2ocn', 'qflx_qrgwl', 'qflx_runoff', &
+            'qflx_runoff_u', 'qflx_runoff_r', 'qflx_glcice_frz', 'qflx_irr_demand', &
+            'total_plant_stored_h2o', 'fsat', 'fcov', 'qflx_evap_soi', 'qflx_tran_veg', &
+            'qflx_sub_snow', 'qflx_dew_grnd', 'qflx_dew_snow', 'qflx_ev_snow', 'qflx_ev_soil', &
+            'qflx_ev_h2osfc', 'qflx_evap_grnd', 'qflx_evap_tot', 'qflx_evap_veg', 'qflx_evap_can', &
+            'qflx_snwcp_ice', 'qflx_snwcp_liq', 'qflx_prec_grnd', 'qflx_prec_intr', &
+            'qflx_rain_grnd_patch', 'qflx_snow_grnd_patch', 'h2ocan', 'fwet', 'fdry', 'rootr_patch')
+       if (wet) r = trim(sname(s))//'.water.'//f
+       case ('watsat', 'watsat_soi', 'bsw', 'sucsat', 'hksat', 'watfc', 'tkmg', 'tkdry', 'tksatu', &
+            'csol', 'watdry', 'watopt', 'smpmin', 'hkdepth', 'wtfact', 'topo_slope', &
+            'eff_porosity', 'icefrac', 'fracice', 'rootfr_road_perv', 'rootr_road_perv', &
+            'soilalpha_u', 'wa', 'zwt', 'zwt_perched', 'frost_table', 'qcharge', 'jwt', 'hk', &
+            'smp', 'sw_amx', 'sw_bmx', 'sw_cmx', 'sw_rmx', 'sw_dwat', 'qflx_deficit', &
+            'qflx_rootsoi', 'rootr_col')
+       if (s == 4) r = 'imperviousRoadSoil.'//f
+       if (s == 5) r = 'perviousRoadSoil.'//f
+    case default
+       r = ''
+    end select
+  end function surf_path
+
+  !-----------------------------------------------------------------------
+  ! A packed 5k+s column/patch array (ELM's urban column order within each
+  ! landunit) to and from the five surface records, through surf_path.
+  ! Fields a surface does not carry are skipped on set and read as spval.
+  !-----------------------------------------------------------------------
+  subroutine surf_set_1d(elm, f, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: f
+    real(r8), intent(in) :: v(:)
+    integer :: s, n
+    character(len=96) :: pth
+    n = size(v)/5
+    do s = 1, 5
+       pth = surf_path(s, f)
+       if (len_trim(pth) == 0) cycle
+       call urb_set_1d(elm, 'urban:'//trim(pth), v(s:5*n:5))
+    end do
+  end subroutine surf_set_1d
+
+  subroutine surf_set_2d(elm, f, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: f
+    real(r8), intent(in) :: v(:,:)
+    integer :: s, n
+    character(len=96) :: pth
+    n = size(v,1)/5
+    do s = 1, 5
+       pth = surf_path(s, f)
+       if (len_trim(pth) == 0) cycle
+       call urb_set_2d(elm, 'urban:'//trim(pth), v(s:5*n:5, :))
+    end do
+  end subroutine surf_set_2d
+
+  subroutine surf_get_1d(elm, f, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: f
+    real(r8), intent(inout) :: v(:)
+    real(r8), allocatable :: w(:)
+    integer :: s, n
+    character(len=96) :: pth
+    n = size(v)/5
+    allocate(w(n))
+    do s = 1, 5
+       pth = surf_path(s, f)
+       if (len_trim(pth) == 0) then
+          v(s:5*n:5) = spval
+          cycle
+       end if
+       call urb_get_1d(elm, 'urban:'//trim(pth), w)
+       v(s:5*n:5) = w
+    end do
+    deallocate(w)
+  end subroutine surf_get_1d
+
+  subroutine surf_get_2d(elm, f, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: f
+    real(r8), intent(inout) :: v(:,:)
+    real(r8), allocatable :: w(:,:)
+    integer :: s, n
+    character(len=96) :: pth
+    n = size(v,1)/5
+    allocate(w(n, size(v,2)))
+    do s = 1, 5
+       pth = surf_path(s, f)
+       if (len_trim(pth) == 0) then
+          v(s:5*n:5, :) = spval
+          cycle
+       end if
+       call urb_get_2d(elm, 'urban:'//trim(pth), w)
+       v(s:5*n:5, :) = w
+    end do
+    deallocate(w)
+  end subroutine surf_get_2d
 
   pure function regname(f) result(r)
     ! The registry path of a trace column field: the snow/water and layer

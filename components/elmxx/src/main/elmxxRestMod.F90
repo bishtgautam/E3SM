@@ -53,7 +53,6 @@ module elmxxRestMod
   use elmxxHistMod , only : elmxx_hist_get_restart_state, elmxx_hist_set_restart_state
   use elmxxSubgridMod     , only : lun_gridcell, col_landunit, patch_column
   use elmxxLakeMod        , only : n_lake, cell_of_klake
-  use elmxxUrbanMod       , only : n_urb_col
   use elmxxKokkosStateMod , only : n_kokkos_col, n_kokkos_patch, n_kokkos_urb, &
                                    col_of_kcol, patch_of_kpatch, lun_of_kurb
   use elmxx_mod    , only : ELMxxType, ELMXX_SUCCESS, &
@@ -73,7 +72,8 @@ module elmxxRestMod
 
   integer, parameter :: NAMELEN = 128
 
-  ! ELMxxRestartKind (ELMxx.h).
+  ! ELMxxRestartKind (ELMxx.h). URBCOL/URBPATCH are retired: every urban
+  ! surface record is indexed by landunit (URBLUN) since plan B.
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
                         KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_URBCOL = 5, &
                         KIND_URBPATCH = 6, KIND_LAKECOL = 7, &
@@ -408,7 +408,6 @@ contains
     case (KIND_NATCOL);   local_count = n_kokkos_col
     case (KIND_NATPATCH); local_count = n_kokkos_patch
     case (KIND_URBLUN);   local_count = n_kokkos_urb
-    case (KIND_URBCOL, KIND_URBPATCH); local_count = n_urb_col   ! 5 per landunit, p = c
     case (KIND_LAKECOL);  local_count = n_lake
     case (KIND_LAKEPATCH); local_count = n_lake   ! one patch per lake column
     case default
@@ -439,10 +438,6 @@ contains
        case (KIND_NATCOL);   cell(e) = lun_gridcell(col_landunit(col_of_kcol(e)))
        case (KIND_NATPATCH); cell(e) = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);   cell(e) = lun_gridcell(lun_of_kurb(e))
-       ! Urban column/patch e is column (e-1) mod 5 of packed landunit
-       ! (e-1)/5+1 (elmxxUrbanMod); within a cell the order is density
-       ! class, then ELM's column order, the same on every layout.
-       case (KIND_URBCOL, KIND_URBPATCH); cell(e) = lun_gridcell(lun_of_kurb((e-1)/5 + 1))
        case (KIND_LAKECOL, KIND_LAKEPATCH); cell(e) = cell_of_klake(e)
        end select
        if (cell(e) < 1 .or. cell(e) > ncell) call shr_sys_abort(subname// &
