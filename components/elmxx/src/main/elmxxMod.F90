@@ -74,7 +74,7 @@ module elmxxMod
   use elmxxLakeMod           , only : elmxx_lake_init, elmxx_lake_push_forcing, &
                                       elmxx_lake_clean, lake_built
   use elmxxUrbanMod          , only : elmxx_urban_init, elmxx_urban_diag_dump, &
-                                      elmxx_urban_clean, urban_built
+                                      elmxx_urban_clean, urban_built, elmxx_urban_diag_step
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -1013,7 +1013,9 @@ contains
        ! anchor is canhydro_in: -- its first kernel -- so these line up.
        call elmxx_diag_snapshot_state(elmxx_state, nlevtot, nlevgrnd, 'elmxx_in')
 
+       call elmxx_urban_diag_step(elmxx_state, 'elmxx_urbin')
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 1)
+       call elmxx_urban_diag_step(elmxx_state, 'elmxx_urbflx')
 
        if (soil_kernel_built) then
           ! Ground surface energy balance and the three quantities that used
@@ -1029,6 +1031,7 @@ contains
        end if
 
        call elmxx_kernels_run(elmxx_state, real(coupling_dt_in_sec, r8), logunit, 2)
+       call elmxx_urban_diag_step(elmxx_state, 'elmxx_urbout')
 
        call elmxx_diag_snapshot_fluxes(elmxx_state, 'elmxx_out')
 

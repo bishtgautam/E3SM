@@ -61,7 +61,7 @@ module elmxxUrbanMod
                                   elmxx_diag_2d, elmxx_diag_int_1d
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxRestartFieldFind, ELMxxRestartFieldSet, &
-                               ELMxxRestartFieldInfo, &
+                               ELMxxRestartFieldInfo, ELMxxRestartFieldGet, &
                                ELMxxHistorySetLandunitWeights, ELMxxHistorySetUrbanWeights, &
                                ELMxxAllocateUrbanSurface, ELMxxUrbanBuildFilters
 
@@ -94,6 +94,7 @@ module elmxxUrbanMod
 
   public :: elmxx_urban_init
   public :: elmxx_urban_diag_dump
+  public :: elmxx_urban_diag_step
   public :: elmxx_urban_clean
 
 contains
@@ -750,6 +751,89 @@ contains
     call elmxx_diag_2d('elmxxurb:alb_perroad_dir', alb_perroad_dir, n, numrad)
     call elmxx_diag_2d('elmxxurb:alb_perroad_dif', alb_perroad_dif, n, numrad)
   end subroutine elmxx_urban_diag_dump
+
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_urban_diag_step(elm, tag)
+    !
+    ! Per-step urban column/patch state into the ELMXX_DIAG trace, packed
+    ! order (urban column c is ELM column c+1 on a one-cell domain whose
+    ! natural column comes first). tag: 'elmxx_urbin' at the top of the step
+    ! (pairs with ELM canhydro_in), 'elmxx_urbflx' after phase 1 (pairs with
+    ! urbanflux_out), 'elmxx_urbout' at the end of the step.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: tag
+    real(r8), allocatable :: v(:), v2(:,:)
+    integer :: j
+    character(len=16), parameter :: cols(6) = (/ 't_grnd          ', 'h2osno          ', &
+         'frac_sno        ', 'snow_depth      ', 't_soisno_soi    ', 'h2osoi_liq_soi  ' /)
+    character(len=16), parameter :: pchs(7) = (/ 'eflx_sh_grnd    ', 'qflx_evap_soi   ', &
+         'sabg            ', 'eflx_lwrad_net  ', 'eflx_soil_grnd  ', 't_ref2m         ', &
+         'cgrnd           ' /)
+    if (.not. elmxx_diag_enabled .or. .not. urban_built) return
+    allocate(v(n_urb_col), v2(n_urb_col, nlevgrnd))
+    do j = 1, 4
+       call urb_get_1d(elm, 'urbcol:'//trim(cols(j)), v)
+       call elmxx_diag_1d(trim(tag)//':'//trim(cols(j)), v, n_urb_col)
+    end do
+    call urb_get_1d(elm, 'urbcol:snl', v)
+    call elmxx_diag_1d(trim(tag)//':snl', v, n_urb_col)
+    do j = 5, 6
+       call urb_get_2d(elm, 'urbcol:'//trim(cols(j)), v2)
+       call elmxx_diag_2d(trim(tag)//':'//trim(cols(j)), v2, n_urb_col, nlevgrnd)
+    end do
+    do j = 1, 7
+       call urb_get_1d(elm, 'urbpatch:'//trim(pchs(j)), v)
+       call elmxx_diag_1d(trim(tag)//':'//trim(pchs(j)), v, n_urb_col)
+    end do
+    call urb_get_1d(elm, 'urbpatch:cgrnds', v); call elmxx_diag_1d(trim(tag)//':cgrnds', v, n_urb_col)
+    call urb_get_1d(elm, 'urbpatch:cgrndl', v); call elmxx_diag_1d(trim(tag)//':cgrndl', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:htvp', v);     call elmxx_diag_1d(trim(tag)//':htvp', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:qg', v);       call elmxx_diag_1d(trim(tag)//':qg', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:dqgdT', v);    call elmxx_diag_1d(trim(tag)//':dqgdT', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow_col', v, n_urb_col)
+    call urb_get_1d(elm, 'urbpatch:qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:qflx_evap_grnd_col', v); call elmxx_diag_1d(trim(tag)//':qflx_evap_grnd', v, n_urb_col)
+    call urb_get_2d(elm, 'urbcol:h2osoi_ice_soi', v2)
+    call elmxx_diag_2d(trim(tag)//':h2osoi_ice_soi', v2, n_urb_col, nlevgrnd)
+    call urb_get_1d(elm, 'urbcol:hs_top_snow', v); call elmxx_diag_1d(trim(tag)//':hs_top_snow', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:dhsdT', v);       call elmxx_diag_1d(trim(tag)//':dhsdT', v, n_urb_col)
+    deallocate(v2); allocate(v2(n_urb_col, nlevsno))
+    call urb_get_2d(elm, 'urbcol:t_soisno_sno', v2)
+    call elmxx_diag_2d(trim(tag)//':t_soisno_sno', v2, n_urb_col, nlevsno)
+    call urb_get_2d(elm, 'urbcol:dz_sno', v2)
+    call elmxx_diag_2d(trim(tag)//':dz_sno', v2, n_urb_col, nlevsno)
+    call urb_get_2d(elm, 'urbcol:h2osoi_ice_sno', v2)
+    call elmxx_diag_2d(trim(tag)//':h2osoi_ice_sno', v2, n_urb_col, nlevsno)
+    deallocate(v, v2)
+  end subroutine elmxx_urban_diag_step
+
+  subroutine urb_get_1d(elm, name, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    real(r8), intent(inout) :: v(:)
+    integer :: i, ierr
+    i = field_index(elm, name, size(v), 0)
+    call ELMxxRestartFieldGet(elm, i, v, size(v), ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_urban) ERROR: get '//trim(name))
+  end subroutine urb_get_1d
+
+  subroutine urb_get_2d(elm, name, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    real(r8), intent(inout) :: v(:,:)
+    real(r8), allocatable :: flat(:)
+    integer :: i, ierr
+    i = field_index(elm, name, size(v,1), size(v,2))
+    allocate(flat(size(v)))
+    call ELMxxRestartFieldGet(elm, i, flat, size(flat), ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_urban) ERROR: get '//trim(name))
+    v = transpose(reshape(flat, (/ size(v,2), size(v,1) /)))
+  end subroutine urb_get_2d
 
   !-----------------------------------------------------------------------
   ! Name-addressed seeding through the restart registry (elmxxLakeMod's
