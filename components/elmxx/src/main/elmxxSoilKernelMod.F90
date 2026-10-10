@@ -81,13 +81,12 @@ module elmxxSoilKernelMod
                                    ELMxxSetSharedFilterNolakec, &
                                    ELMxxSetSharedFilterNolakep, &
                                    ELMxxSetSharedFilterHydrologyc, &
-                                   ELMxxSetSharedFilterUrbanc, &
-                                   ELMxxSetSharedUrbpoi, ELMxxSetSharedFover, &
+                                   ELMxxSetSharedFover, &
                                    ELMxxSetSharedForcRain, ELMxxSetSharedForcSnow, &
                                    ELMxxSetSharedQflxFloodg, &
                                    ELMxxSetColItype, ELMxxSetColIsSoil, &
                                    ELMxxSetColIsCrop, ELMxxSetColActive, &
-                                   ELMxxSetLunItype, ELMxxSetLunUrbpoi, &
+                                   ELMxxSetLunItype, &
                                    ELMxxSetColTopounit, ELMxxSetColGridcell, &
                                    ELMxxSetColNpfts, ELMxxSetColPfti, &
                                    ELMxxSetNlevbed, ELMxxSetZP1, ELMxxSetZiP1, &
@@ -188,7 +187,7 @@ contains
     ! per topounit, and a single topounit per RANK gave every cell on the
     ! rank the first cell's precipitation (BalanceCheck's errh2o read it).
     call ELMxxInitSharedMetadata(elm, num_gridcells_local(), num_gridcells_local(), &
-         n_kokkos_col, n_kokkos_patch, n_kokkos_col, 0, dtime, ierr)
+         n_kokkos_col, n_kokkos_patch, n_kokkos_col, dtime, ierr)
     call check(ierr, subname, 'InitSharedMetadata')
 
     ! Filters are 0-based indices into the packed spaces.
@@ -206,10 +205,8 @@ contains
     call ELMxxSetSharedFilterNolakep(elm, ipatch, n_kokkos_patch, ierr)
     call check(ierr, subname, 'FilterNolakep')
 
-    ! urbanc is empty; the call is still made so the count is explicit rather
-    ! than left to whatever InitSharedMetadata defaulted to.
-    call ELMxxSetSharedFilterUrbanc(elm, filt, 0, ierr)
-    call check(ierr, subname, 'FilterUrbanc')
+    ! The natural surface holds no urban columns, so it has no urban filter
+    ! or urban flags; the urban surface has its own (elmxxUrbanMod).
 
     ! fover: ELM's runoff decay factor, 0.5 m-1 (SurfaceRunoffMod / hydrology
     ! namelist default). One value per gridcell.
@@ -248,10 +245,6 @@ contains
        icol(kc) = lun_itype(col_landunit(col_of_kcol(kc)))
     end do
     call ELMxxSetLunItype(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'LunItype')
-
-    ! No urban among the packed columns, by construction.
-    icol = 0
-    call ELMxxSetLunUrbpoi(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'LunUrbpoi')
 
     ! Gridcell index, 0-based, for the per-gridcell shared forcing; the
     ! topounit is the same index (one topounit per gridcell).
