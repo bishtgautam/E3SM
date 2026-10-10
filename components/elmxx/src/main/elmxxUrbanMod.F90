@@ -419,10 +419,6 @@ contains
     call urb_set_1d(elm, 'urban:active', real(ib, r8))
     call urb_set_1d(elm, 'urban:urbpoi', spread(1._r8, 1, n_kokkos_urb))
     do k = 1, n_kokkos_urb
-       ib(k) = natcol_of_cell(lun_gridcell(lun_of_kurb(k)))
-    end do
-    call urb_set_1d(elm, 'urban:natcol', real(ib, r8))
-    do k = 1, n_kokkos_urb
        ib(k) = lun_gridcell(lun_of_kurb(k)) - 1
     end do
     call urb_set_1d(elm, 'urban:gridcell', real(ib, r8))
@@ -648,21 +644,6 @@ contains
     if (s /= 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit without five columns')
   end subroutine landunit_columns
 
-  !-----------------------------------------------------------------------
-  integer function natcol_of_cell(g)
-    ! The packed (0-based) natural column of local cell g: every cell has one.
-    implicit none
-    integer, intent(in) :: g
-    integer :: kc
-    natcol_of_cell = -1
-    do kc = 1, n_kokkos_col
-       if (lun_gridcell(col_landunit(col_of_kcol(kc))) == g) then
-          natcol_of_cell = kc - 1
-          return
-       end if
-    end do
-    call shr_sys_abort('(elmxx_urban_init) ERROR: an urban cell has no natural column')
-  end function natcol_of_cell
 
   !-----------------------------------------------------------------------
   subroutine elmxx_urban_diag_dump()

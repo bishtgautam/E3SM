@@ -201,8 +201,11 @@ the C++ layout). Stepped from `src/main/ELMxxUrban.cpp` by the
 - On urban columns `frac_sno` (Bonan, set after LakeHydrology) and
   `frac_sno_eff` (= 1) differ; ELM's SoilTemperature, compaction and divide
   read `frac_sno_eff` through associate aliases. Check the associate block.
-- Natural column statics are seeded at the first run step, after urban
+- The cell statics (`cell`) are pushed at the first run step, after urban
   init; urban copies them lazily (`UrbanCopyCellStatics`).
+- Forcing, derived air density/zenith angle and statics are pushed once per
+  cell into `cell` (registry names `cell:*`); `ELMxxAllocateCells` follows
+  `ELMxxCreate`. Natural gathers its per-column copies from it.
 - `ELMXX_DIAG` writes a per-step urban trace (`elmxx_urbin/urbflx/urbout`),
   still packed 5k+s: entry c is ELM column c+1, patch 17+c on a one-cell
   domain (natural first, lake last). Wall entries of snow/water fields are
@@ -224,8 +227,9 @@ Lake is its own surface, a peer of natural and urban: `lakeCol`/`lakePatch`
   `zi_lt`, refreshed from `zi` each step. Never hand it `zi` directly.
 - **One patch per lake column, packed alike** (LakeHydrology indexes
   p = c); `ELMxxAllocateLakeSurface` refuses anything else.
-- **Forcing comes from the cell's natural column** (`col_natcol`), which
-  every cell has: ELM allocates the natural landunit whatever its weight.
+- **Forcing comes from the cell** (`cell`, `CellData`), by the lake
+  column's `col_gridcell`, as for every surface; no surface reads another's
+  container.
 - **History is the natural+lake landunit mean**, per field by `LakeRule`
   (`HistData.h`), each rule read off ELM's own h0 over a 100% lake cell
   (`brazil_lake100`), not guessed. The h0 guard is natural + lake weight = 1.

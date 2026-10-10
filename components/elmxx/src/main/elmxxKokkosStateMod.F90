@@ -85,8 +85,12 @@ module elmxxKokkosStateMod
                                ELMxxSetMonthlySai, ELMxxSetMonthlyHtop, &
                                ELMxxSetWoody, &
                                ELMxxSetMonthlyHbot, &
-                               ELMxxSetColLatRad, ELMxxSetColLonRad, &
-                               ELMxxComputeForcingDerivedNatural, &
+                               ELMxxSetCellLatRad, ELMxxSetCellLonRad, &
+                               ELMxxSetColGridcell, &
+                               ELMxxGatherNaturalForcing, ELMxxGatherNaturalStatics, &
+                               ELMxxRestartFieldFind, ELMxxRestartFieldInfo, &
+                               ELMxxRestartFieldSet, &
+                               ELMxxComputeForcingDerived, &
                                ELMxxSetTaul, ELMxxSetTaus, ELMxxSetXl, &
                                ELMxxSetForcTCol, ELMxxSetForcPbotCol, &
                                ELMxxSetForcQCol, ELMxxSetForcLwradCol, &
@@ -179,7 +183,6 @@ module elmxxKokkosStateMod
   public :: elmxx_kokkos_push_latlon
   public :: elmxx_push_monthly_phenology
   public :: elmxx_kokkos_push_forcing
-  public :: elmxx_kokkos_push_shared_precip
   public :: elmxx_kokkos_push_root_statics
   public :: elmxx_kokkos_push_snicar_tables
   public :: elmxx_kokkos_push_finidat
@@ -640,8 +643,8 @@ contains
     ! does. Seeding those would have been wasted work at best and a
     ! disagreement with the kernel at worst.
     allocate(rcol1(n_kokkos_col))
-    rcol1 = smpmin_const
-    call ELMxxSetSmpmin(elm, rcol1, n_kokkos_col, ierr);  call check(ierr, subname, 'Smpmin')
+    call cell_set_1d(elm, 'cell:smpmin', spread(smpmin_const, 1, ncells_local()))
+    call ELMxxGatherNaturalStatics(elm, ierr);            call check(ierr, subname, 'GatherNaturalStatics')
     rcol1 = t_h2osfc_cold
     call ELMxxSetTH2osfc(elm, rcol1, n_kokkos_col, ierr); call check(ierr, subname, 'TH2osfc')
     deallocate(rcol1)
@@ -813,7 +816,7 @@ contains
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
     integer :: kc, kp, g, ierr
-    real(r8), allocatable :: rcol(:), rpatch(:)
+    real(r8), allocatable :: rcol(:), rpatch(:), rcell(:)
     integer , allocatable :: icol(:), ipatch(:)
     character(len=*), parameter :: subname = '(elmxx_kokkos_seed_canopy_hydrology) '
     real(r8), parameter :: dewmx_const = 0.1_r8    ! ELM CanopyHydrologyMod
@@ -827,18 +830,18 @@ contains
     allocate(rcol(n_kokkos_col), icol(n_kokkos_col), &
              rpatch(n_kokkos_patch), ipatch(n_kokkos_patch))
 
-    ! ---- derived microtopography, per natural column ----
-    do kc = 1, n_kokkos_col
-       g = cell_of_kcol(kc)
-       rcol(kc) = 200.0_r8 / max(10.0_r8, topo_std(g))
+    ! ---- derived microtopography, per cell (`cell`), then the natural copies ----
+    allocate(rcell(ncells_local()))
+    do g = 1, size(rcell)
+       rcell(g) = 200.0_r8 / max(10.0_r8, topo_std(g))
     end do
-    call ELMxxSetNMelt(elm, rcol, n_kokkos_col, ierr);      call check(ierr, subname, 'NMelt')
-
-    do kc = 1, n_kokkos_col
-       g = cell_of_kcol(kc)
-       rcol(kc) = (topo_slope(g) + slope0)**(-slopebeta)
+    call cell_set_1d(elm, 'cell:n_melt', rcell)
+    do g = 1, size(rcell)
+       rcell(g) = (topo_slope(g) + slope0)**(-slopebeta)
     end do
-    call ELMxxSetMicroSigma(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'MicroSigma')
+    call cell_set_1d(elm, 'cell:micro_sigma', rcell)
+    deallocate(rcell)
+    call ELMxxGatherNaturalStatics(elm, ierr); call check(ierr, subname, 'GatherNaturalStatics')
 
     ! ---- cold start: no surface water, no snow beyond what seed_state set ----
     rcol = 0.0_r8
@@ -1208,9 +1211,10 @@ contains
 
   subroutine elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
     !
-    ! Column latitude and longitude in radians, pushed once. They never
-    ! change, and with them on the device the cosine of the solar zenith
-    ! angle can be derived there instead of crossing every step.
+    ! Cell latitude and longitude in radians, pushed once, and the natural
+    ! columns' cell index. They never change, and with them on the device the
+    ! cosine of the solar zenith angle is derived there (on the cell) instead
+    ! of crossing every step.
     !
     ! Both elmxx_kokkos_push_forcing and elmxx_init_albedo call this; the
     ! module-level guard makes the second call a no-op, whichever runs first.
@@ -1219,26 +1223,38 @@ contains
     type(ELMxxType), intent(in) :: elm
     real(r8), intent(in) :: lat(:), lon(:)   ! per gridcell [degrees]
     integer, intent(in) :: logunit
-    integer :: kc, ierr
-    real(r8), allocatable :: rcol(:)
+    integer :: kc, g, ncell, ierr
+    real(r8), allocatable :: rcell(:)
+    integer , allocatable :: icol(:)
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_latlon) '
 
     if (latlon_pushed) return
     call require_built(subname)
     if (n_kokkos_col <= 0) return
 
-    allocate(rcol(n_kokkos_col))
-    do kc = 1, n_kokkos_col
-       rcol(kc) = lat(cell_of_kcol(kc)) * SHR_CONST_PI / 180.0_r8
+    ! The cell's position (`cell`, which every surface reads), and the
+    ! natural columns' cell, which they gather it by.
+    ncell = ncells_local()
+    allocate(rcell(ncell), icol(n_kokkos_col))
+    do g = 1, ncell
+       rcell(g) = lat(g) * SHR_CONST_PI / 180.0_r8
     end do
-    call ELMxxSetColLatRad(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ColLatRad')
-    do kc = 1, n_kokkos_col
-       rcol(kc) = lon(cell_of_kcol(kc)) * SHR_CONST_PI / 180.0_r8
+    call ELMxxSetCellLatRad(elm, rcell, ncell, ierr); call check(ierr, subname, 'CellLatRad')
+    do g = 1, ncell
+       rcell(g) = lon(g) * SHR_CONST_PI / 180.0_r8
     end do
-    call ELMxxSetColLonRad(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ColLonRad')
-    deallocate(rcol)
+    call ELMxxSetCellLonRad(elm, rcell, ncell, ierr); call check(ierr, subname, 'CellLonRad')
+    do kc = 1, n_kokkos_col
+       icol(kc) = cell_of_kcol(kc) - 1
+    end do
+    call ELMxxSetColGridcell(elm, icol, n_kokkos_col, ierr); call check(ierr, subname, 'ColGridcell')
+    deallocate(rcell, icol)
 
     latlon_pushed = .true.
+    if (masterproc) then
+       write(logunit,*) subname,'cell lat/lon pushed (',ncell,' cells)'
+       call shr_sys_flush(logunit)
+    end if
 
   end subroutine elmxx_kokkos_push_latlon
 
@@ -1249,16 +1265,17 @@ contains
     ! plan allows. Everything here genuinely changes every coupling interval;
     ! anything that does not belongs in elmxx_kokkos_seed_state.
     !
-    ! Forcing arrives per gridcell, so it is broadcast down to the columns and
-    ! patches through the packed maps rather than by loop position. Column c
-    ! belongs to gridcell lun_gridcell(col_landunit(c)); that is the only
-    ! defensible route from one level to the other.
+    ! Forcing arrives per gridcell and crosses ONCE, into the cell-level
+    ! container (`cell`, by registry name), which every surface reads by its
+    ! own gridcell index. The natural columns and patches then take their
+    ! copies from it on the device (ELMxxGatherNaturalForcing); lake and urban
+    ! gather theirs in their own steps. Air density and the next radiation
+    ! step's zenith angle are derived on the cell (ELMxxComputeForcingDerived).
     !
-    ! ALL FORCING IS NOW ACROSS. The two that lagged are both here:
-    ! ForcRhoCol, derived from vapor pressure as ELM's import derives it, and
-    ! ForcSolad / ForcSolai, 2-D over the radiation bands. The latter waited on
-    ! the LayoutLeft question, which elmxx_kokkos_state_init settles at startup
-    ! by querying ELMxxKokkosIsLayoutRight and aborting on a LayoutRight build.
+    ! Band order is ELM's lnd_import_export: solad(g,1) = swvdr,
+    ! solad(g,2) = swndr, solai(g,1) = swvdf, solai(g,2) = swndf. Aerosol
+    ! order is the contract AerosolFluxes indexes by number. Precipitation is
+    ! convective + large-scale, summed as ELM's import does.
     !
     implicit none
     type(ELMxxType), intent(in) :: elm
@@ -1266,160 +1283,63 @@ contains
     real(r8), intent(in) :: declin        ! solar declination [radians]
     real(r8), intent(in) :: lat(:), lon(:) ! per gridcell [degrees]
     integer, intent(in) :: logunit
-    integer :: kc, kp, g, ierr
-    integer :: szp(2), szaer(2)
-    real(r8), allocatable :: rcol(:), rpatch(:)
-    real(r8), allocatable :: rsol(:,:), raer(:,:)
+    integer :: g, ncell, ierr
+    real(r8), allocatable :: rcell(:), rsol(:,:)
     logical, save :: reported = .false.
     integer, parameter :: numrad = 2   ! 1 = visible, 2 = near-IR
     character(len=*), parameter :: subname = '(elmxx_kokkos_push_forcing) '
 
     call require_built(subname)
-    allocate(rcol(n_kokkos_col), rpatch(n_kokkos_patch), &
-             rsol(n_kokkos_patch, numrad), raer(n_kokkos_col, nforcaer))
+    ncell = ncells_local()
+    allocate(rcell(ncell), rsol(ncell, numrad))
 
-    ! ---- column-level ----
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_tbot(cell_of_kcol(kc))
+    call cell_set_1d(elm, 'cell:forc_t'    , forc_tbot(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_pbot' , forc_pbot(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_q'    , forc_shum(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_lwrad', forc_lwrad(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_u'    , forc_u(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_v'    , forc_v(1:ncell))
+    call cell_set_1d(elm, 'cell:forc_th'   , forc_ptem(1:ncell))
+    ! The atmospheric reference height: CanopyTemperature adds roughness and
+    ! displacement to it, and BareGroundFluxes takes log(zldis/z0mg), so a
+    ! zero here is a division by zero, not a small error.
+    call cell_set_1d(elm, 'cell:forc_hgt'  , forc_z(1:ncell))
+    do g = 1, ncell
+       rcell(g) = forc_rainc(g) + forc_rainl(g)
     end do
-    call ELMxxSetForcTCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcTCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_pbot(cell_of_kcol(kc))
+    call cell_set_1d(elm, 'cell:forc_rain', rcell)
+    do g = 1, ncell
+       rcell(g) = forc_snowc(g) + forc_snowl(g)
     end do
-    call ELMxxSetForcPbotCol(elm, rcol, n_kokkos_col, ierr);  call check(ierr, subname, 'ForcPbotCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_shum(cell_of_kcol(kc))
+    call cell_set_1d(elm, 'cell:forc_snow', rcell)
+    do g = 1, ncell
+       rsol(g,1) = forc_swvdr(g)
+       rsol(g,2) = forc_swndr(g)
     end do
-    call ELMxxSetForcQCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcQCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_lwrad(cell_of_kcol(kc))
+    call cell_set_2d(elm, 'cell:forc_solad', rsol)
+    do g = 1, ncell
+       rsol(g,1) = forc_swvdf(g)
+       rsol(g,2) = forc_swndf(g)
     end do
-    call ELMxxSetForcLwradCol(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'ForcLwradCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_u(cell_of_kcol(kc))
-    end do
-    call ELMxxSetForcUCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcUCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_v(cell_of_kcol(kc))
-    end do
-    call ELMxxSetForcVCol(elm, rcol, n_kokkos_col, ierr);     call check(ierr, subname, 'ForcVCol')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = forc_ptem(cell_of_kcol(kc))
-    end do
-    call ELMxxSetForcThCol(elm, rcol, n_kokkos_col, ierr);    call check(ierr, subname, 'ForcThCol')
-
-    ! Air density. ELM derives this in its coupler import rather than
-    ! receiving it, so ELMxx has to derive it too, from the same three fields
-    ! and the same two-step form -- vapor pressure first, then density with
-    ! the 0.378 moist-air correction. Writing it as one expression would
-    ! change the rounding and make a future comparison against ELM harder to
-    ! read than it needs to be.
-    ! Air density and cosine solar zenith are DERIVED ON THE DEVICE now, by
-    ! ELMxxComputeForcingDerivedNatural at the end of this routine. Both used
-    ! to cross: air density as a fifteenth forcing field, zenith as a whole
-    ! second per-step crossing (elmxx_push_coszen). Neither depends on
-    ! anything the host owns beyond the scalars in this call.
-
-    ! ---- patch-level ----
-    do kp = 1, n_kokkos_patch
-       rpatch(kp) = forc_tbot(cell_of_kpatch(kp))
-    end do
-    call ELMxxSetForcT(elm, rpatch, n_kokkos_patch, ierr);    call check(ierr, subname, 'ForcT')
-
-    ! Convective and large-scale are separate on the coupler side and summed
-    ! here, which is what ELM's import does.
-    do kp = 1, n_kokkos_patch
-       g = cell_of_kpatch(kp)
-       rpatch(kp) = forc_rainc(g) + forc_rainl(g)
-    end do
-    call ELMxxSetForcRain(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'ForcRain')
-
-    do kp = 1, n_kokkos_patch
-       g = cell_of_kpatch(kp)
-       rpatch(kp) = forc_snowc(g) + forc_snowl(g)
-    end do
-    call ELMxxSetForcSnow(elm, rpatch, n_kokkos_patch, ierr); call check(ierr, subname, 'ForcSnow')
-
-    ! The atmospheric reference height. This is forcing, not init state:
-    ! CanopyTemperature adds roughness and displacement to it to get the
-    ! per-patch heights, and BareGroundFluxes then takes log(zldis/z0mg), so a
-    ! zero here is not a small error -- it is a division by zero.
-    do kp = 1, n_kokkos_patch
-       rpatch(kp) = forc_z(cell_of_kpatch(kp))
-    end do
-    call ELMxxSetForcHgtPatch(elm, rpatch, n_kokkos_patch, ierr)
-    call check(ierr, subname, 'ForcHgtPatch')
-
-    ! Incident shortwave, the only 2-D forcing. Direct and diffuse are separate
-    ! views, and the band index is ELM's: 1 is visible, 2 is near-IR. That is
-    ! lnd_import_export's assignment, not a convention chosen here --
-    !     forc_solad(g,1) = swvdr    forc_solad(g,2) = swndr
-    !     forc_solai(g,1) = swvdf    forc_solai(g,2) = swndf
-    ! -- and getting it backwards would swap the bands against albedos that
-    ! genuinely differ between them (0.2 is the cold-start constant in both,
-    ! so this would hide today and surface the moment SurfaceAlbedo lands).
-    !
-    ! LAYOUT: rsol is (patch, band) and crosses under LayoutLeft, which is the
-    ! Fortran-native order SetView2D wraps without transposing. A LayoutRight
-    ! build would transpose here AND REPORT SUCCESS; that is why startup
-    ! aborts on one rather than trusting this comment.
-    do kp = 1, n_kokkos_patch
-       g = cell_of_kpatch(kp)
-       rsol(kp,1) = forc_swvdr(g)
-       rsol(kp,2) = forc_swndr(g)
-    end do
-    szp = (/ n_kokkos_patch, numrad /)
-    call ELMxxSetForcSolad(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolad')
-
-    do kp = 1, n_kokkos_patch
-       g = cell_of_kpatch(kp)
-       rsol(kp,1) = forc_swvdf(g)
-       rsol(kp,2) = forc_swndf(g)
-    end do
-    call ELMxxSetForcSolai(elm, rsol, szp, ierr); call check(ierr, subname, 'ForcSolai')
-
-    ! Aerosol deposition, (column, 14). Pushed per column rather than per
-    ! gridcell because ELMxx has no gridcell-level store; ELM's AerosolFluxes
-    ! reads forc_aer(col_gridcell(c), :), so this is the same gather done once
-    ! here instead of once per column inside the kernel.
-    !
-    ! LAYOUT: same rule as rsol above -- (column, species) is Fortran-native
-    ! and SetView2D wraps it under LayoutLeft without transposing.
-    !
-    ! ORDER IS THE CONTRACT. AerosolFluxesColumn indexes these by number, so
-    ! a permutation here does not fail, it just puts dust where black carbon
-    ! belongs. Dust and BC differ by ~3 orders of magnitude in mass and by
-    ! their spectral absorption, so the result would be wrong in a way that
-    ! still looks like a plausible snowpack.
-    do kc = 1, n_kokkos_col
-       raer(kc, :) = forc_aer(cell_of_kcol(kc), :)
-    end do
-    szaer = (/ n_kokkos_col, nforcaer /)
-    call ELMxxSetForcAer(elm, raer, szaer, ierr); call check(ierr, subname, 'ForcAer')
+    call cell_set_2d(elm, 'cell:forc_solai', rsol)
+    call cell_set_2d(elm, 'cell:forc_aer', forc_aer(1:ncell, :))
 
     ! ---- static geometry, once ----
     call elmxx_kokkos_push_latlon(elm, lat, lon, logunit)
 
-    ! ---- device-side derivation ----
-    call ELMxxComputeForcingDerivedNatural(elm, nextsw_cday, declin, 1, ierr)
-    call check(ierr, subname, 'ComputeForcingDerivedNatural')
+    ! ---- the natural surface's copies, then the device-side derivation ----
+    call ELMxxGatherNaturalForcing(elm, ierr)
+    call check(ierr, subname, 'GatherNaturalForcing')
+    call ELMxxComputeForcingDerived(elm, nextsw_cday, declin, 1, ierr)
+    call check(ierr, subname, 'ComputeForcingDerived')
 
-    if (.not. reported) then
-       write(logunit,*) subname,'rank ',iam,' forc_z range ', &
-            minval(forc_z(1:size(forc_z))),' .. ',maxval(forc_z(1:size(forc_z))),' m'
-    end if
-
-    deallocate(rcol, rpatch, rsol)
+    deallocate(rcell, rsol)
 
     if (.not. reported) then
        write(logunit,*) subname,'rank ',iam,' pushing forcing each step to ', &
-                        n_kokkos_col,' columns ',n_kokkos_patch,' patches'
+                        ncell,' cells'
+       write(logunit,*) subname,'rank ',iam,' forc_z range ', &
+            minval(forc_z(1:ncell)),' .. ',maxval(forc_z(1:ncell)),' m'
        call shr_sys_flush(logunit)
        reported = .true.
     end if
@@ -1435,62 +1355,6 @@ contains
   end function cell_of_kcol
 
   !-----------------------------------------------------------------------
-  !-----------------------------------------------------------------------
-  subroutine elmxx_kokkos_push_shared_precip(elm, logunit)
-    !
-    ! Push precipitation into the SHARED, topounit-indexed views.
-    !
-    ! Separate from elmxx_kokkos_push_forcing for one reason: the shared views
-    ! are allocated by ELMxxInitSharedMetadata, which elmxx_soil_kernel_init
-    ! calls lazily on elmxx_run's FIRST step -- after push_forcing has already
-    ! run. Doing it there aborted step 1 with a size mismatch. This is called
-    ! instead from elmxx_run after the soil-kernel bring-up block and before
-    ! the kernels dispatch, so it is correct on every step including the
-    ! first. Same lazy-init ordering that once moved elmxx_hist_init.
-    !
-    ! One topounit per local gridcell (ELMxxInitSharedMetadata, and
-    ! ELMxxSetColTopounit = the column's 0-based cell), so one value per
-    ! cell. Until 2026-10-04 there was ONE topounit per rank, filled from
-    ! the first patch's cell: every other cell on a multi-cell rank got that
-    ! cell's precipitation in its water balance. Invisible on 1x1 grids.
-    !
-    ! These setters were imported but never called until 2026-09-02, leaving
-    ! shared%forc_rain/forc_snow identically zero. Nothing noticed, because
-    ! their only consumer was HydrologyDrainage's wetland qflx_qrgwl branch,
-    ! which no natural column takes -- until the water balance check went in
-    ! and reported an error that turned out to be exactly the missing
-    ! precipitation.
-    !
-    implicit none
-    type(ELMxxType), intent(in) :: elm
-    integer, intent(in) :: logunit
-
-    integer  :: g, kc, ncell, ierr
-    real(r8), allocatable :: rtopo(:)
-    character(len=*), parameter :: subname = '(elmxx_kokkos_push_shared_precip) '
-
-    if (n_kokkos_col <= 0) return
-
-    ! Every cell has a natural column, so this is the local cell count.
-    ncell = 0
-    do kc = 1, n_kokkos_col
-       ncell = max(ncell, cell_of_kcol(kc))
-    end do
-    allocate(rtopo(ncell))
-
-    do g = 1, ncell
-       rtopo(g) = forc_rainc(g) + forc_rainl(g)
-    end do
-    call ELMxxSetSharedForcRain(elm, rtopo, ncell, ierr)
-    call check(ierr, subname, 'SharedForcRain')
-
-    do g = 1, ncell
-       rtopo(g) = forc_snowc(g) + forc_snowl(g)
-    end do
-    call ELMxxSetSharedForcSnow(elm, rtopo, ncell, ierr)
-    call check(ierr, subname, 'SharedForcSnow')
-
-  end subroutine elmxx_kokkos_push_shared_precip
 
   !-----------------------------------------------------------------------
   integer function cell_of_kpatch(kp)
@@ -2196,5 +2060,63 @@ contains
     end if
 
   end subroutine elmxx_kokkos_reseed_finidat_snow
+
+  !-----------------------------------------------------------------------
+  integer function ncells_local()
+    ! This rank's gridcell count: every cell has a natural column.
+    implicit none
+    integer :: kc
+    ncells_local = 0
+    do kc = 1, n_kokkos_col
+       ncells_local = max(ncells_local, cell_of_kcol(kc))
+    end do
+  end function ncells_local
+
+  !-----------------------------------------------------------------------
+  ! Name-addressed pushes into the cell-level container through the
+  ! registry (elmxxLakeMod's pattern): a flat ROW-major buffer,
+  ! buf((i-1)*n2 + j) = v(i,j).
+  !-----------------------------------------------------------------------
+  integer function cell_field(elm, name, n1, n2)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n1, n2
+    integer :: i, m1, m2, kind, ierr
+    character(len=128) :: got
+    call ELMxxRestartFieldFind(elm, name, i, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_kokkos) ERROR: no registry field '//trim(name))
+    call ELMxxRestartFieldInfo(elm, i, got, m1, m2, kind, ierr)
+    if (m1 /= n1 .or. m2 /= n2) then
+       write(*,*) '(elmxx_kokkos) ',trim(name),' registry extents ',m1,m2,' given ',n1,n2
+       call shr_sys_abort('(elmxx_kokkos) ERROR: extent mismatch on '//trim(name))
+    end if
+    cell_field = i
+  end function cell_field
+
+  subroutine cell_set_1d(elm, name, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    real(r8), intent(in) :: v(:)
+    integer :: i, ierr
+    i = cell_field(elm, name, size(v), 0)
+    call ELMxxRestartFieldSet(elm, i, v, size(v), ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_kokkos) ERROR: set '//trim(name))
+  end subroutine cell_set_1d
+
+  subroutine cell_set_2d(elm, name, v)
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    real(r8), intent(in) :: v(:,:)
+    real(r8), allocatable :: flat(:)
+    integer :: i, ierr
+    i = cell_field(elm, name, size(v,1), size(v,2))
+    flat = reshape(transpose(v), (/ size(v) /))
+    call ELMxxRestartFieldSet(elm, i, flat, size(flat), ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_kokkos) ERROR: set '//trim(name))
+  end subroutine cell_set_2d
+
 
 end module elmxxKokkosStateMod

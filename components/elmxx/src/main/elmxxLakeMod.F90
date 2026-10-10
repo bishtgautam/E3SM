@@ -136,22 +136,6 @@ contains
 
   end subroutine build_maps
 
-  !-----------------------------------------------------------------------
-  integer function natcol_of_cell(g)
-    ! The packed (0-based) natural column of local cell g. Every cell has one:
-    ! ELM allocates the natural landunit whatever its weight.
-    implicit none
-    integer, intent(in) :: g
-    integer :: kc
-    natcol_of_cell = -1
-    do kc = 1, n_kokkos_col
-       if (lun_gridcell(col_landunit(col_of_kcol(kc))) == g) then
-          natcol_of_cell = kc - 1
-          return
-       end if
-    end do
-    call shr_sys_abort('(elmxx_lake_init) ERROR: a lake cell has no natural column')
-  end function natcol_of_cell
 
   !-----------------------------------------------------------------------
   subroutine seed_topology(elm)
@@ -165,10 +149,6 @@ contains
        ibuf(k) = cell_of_klake(k) - 1
     end do
     call lake_set(elm, 'lakecol:col_gridcell', ibuf)
-    do k = 1, n_lake
-       ibuf(k) = natcol_of_cell(cell_of_klake(k))
-    end do
-    call lake_set(elm, 'lakecol:col_natcol', ibuf)
     do k = 1, n_lake
        ibuf(k) = k - 1
     end do
