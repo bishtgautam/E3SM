@@ -180,7 +180,7 @@ surface record is indexed by landunit).
 One container, `urban`, indexed by packed urban landunit k. Each of ELM's
 five urban columns (roof, sunlit wall, shaded wall, impervious road,
 pervious road) and its patch is a record: `urban.roof`, ... (plan B,
-`external_models/elmxx/docs/data_structures.md` §4.2, §7).
+`external_models/elmxx/docs/data_structures.md` §4).
 - Roof and roads hold `rad`, `thermal`, `snowsoil`, `energy` and `water`.
 - Walls hold `rad`, `thermal` and `energy`: no snow, no water.
 - Road soil is `urban.imperviousRoadSoil` / `perviousRoadSoil`.
