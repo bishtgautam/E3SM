@@ -45,7 +45,6 @@ module elmxxFilterMod
   type(elmxx_filter_type), public :: filter_allc, filter_activec
   type(elmxx_filter_type), public :: filter_lakec, filter_nolakec
   type(elmxx_filter_type), public :: filter_soilc, filter_hydrologyc
-  type(elmxx_filter_type), public :: filter_urbanc, filter_nourbanc
 
   ! Patch filters.
   type(elmxx_filter_type), public :: filter_allp, filter_activep
@@ -108,9 +107,6 @@ contains
     call set_filter(filter_soilc, mask)
     mask = (lun_itype(col_landunit) == istsoil) .or. col_itype == icol_road_perv
     call set_filter(filter_hydrologyc, mask)
-    mask = is_urban_landunit(lun_itype(col_landunit))
-    call set_filter(filter_urbanc, mask)
-    call set_filter(filter_nourbanc, .not. mask)
     deallocate(mask)
 
     allocate(mask(num_patches))
@@ -180,8 +176,6 @@ contains
                          filter_urbanl, filter_nourbanl)
     call check_partition(logunit, 'column lake/non-lake', num_columns, &
                          filter_lakec, filter_nolakec)
-    call check_partition(logunit, 'column urban/non-urban', num_columns, &
-                         filter_urbanc, filter_nourbanc)
     call check_partition(logunit, 'patch lake/non-lake', num_patches, &
                          filter_lakep, filter_nolakep)
     call check_partition(logunit, 'patch urban/non-urban', num_patches, &
@@ -224,7 +218,6 @@ contains
     call clean_filter(filter_allc); call clean_filter(filter_activec)
     call clean_filter(filter_lakec); call clean_filter(filter_nolakec)
     call clean_filter(filter_soilc); call clean_filter(filter_hydrologyc)
-    call clean_filter(filter_urbanc); call clean_filter(filter_nourbanc)
     call clean_filter(filter_allp); call clean_filter(filter_activep)
     call clean_filter(filter_lakep); call clean_filter(filter_nolakep)
     call clean_filter(filter_soilp); call clean_filter(filter_natvegp)
