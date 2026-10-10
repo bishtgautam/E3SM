@@ -171,9 +171,38 @@ cases -- use a standard grid.
 
 Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
 driver, `RUN_TYPE=hybrid` (it cold-starts ELMxx: `finidat` reads ELM files,
-not ELMxx restarts), and restarting urban-column / urban-patch state
-(never allocated on the coupled path; `elmxxRestMod` aborts naming the field
-if one ever is). Lake state restarts (`LAKECOL`/`LAKEPATCH`, since Stage 6.5).
+not ELMxx restarts). Lake state restarts (`LAKECOL`/`LAKEPATCH`, since
+Stage 6.5); urban state restarts (`URBLUN`, since Stage 6.7; every urban
+surface record is indexed by landunit).
+
+## The urban surface
+
+One container, `urban`, indexed by packed urban landunit k. Each of ELM's
+five urban columns (roof, sunlit wall, shaded wall, impervious road,
+pervious road) and its patch is a record: `urban.roof`, ... (plan B,
+`external_models/elmxx/docs/data_structures.md` §4.2, §7).
+- Roof and roads hold `rad`, `thermal`, `snowsoil`, `energy` and `water`.
+- Walls hold `rad`, `thermal` and `energy`: no snow, no water.
+- Road soil is `urban.imperviousRoadSoil` / `perviousRoadSoil`.
+
+Seeded by name from `elmxxUrbanMod` (`surf_set_*` splits a 5k+s array
+into `urban:<surface>.<member>.<field>` through `surf_path`, generated from
+the C++ layout). Stepped from `src/main/ELMxxUrban.cpp` by the
+`urbanrad,urbanflux` tokens. Durable facts:
+- Column kernels run once per surface. `UrbanSurfaceRef(e, s)` hands the
+  unchanged builders that record's views (column = patch = landunit).
+  Members a surface lacks come from zero/spval stand-ins in `urbanAux`,
+  never restarted. Per-call scratch (`fact_out`, ...) is shared by the
+  surfaces, so a surface's solve must collapse before the next one runs.
+- On urban columns `frac_sno` (Bonan, set after LakeHydrology) and
+  `frac_sno_eff` (= 1) differ; ELM's SoilTemperature, compaction and divide
+  read `frac_sno_eff` through associate aliases. Check the associate block.
+- Natural column statics are seeded at the first run step, after urban
+  init; urban copies them lazily (`UrbanCopyCellStatics`).
+- `ELMXX_DIAG` writes a per-step urban trace (`elmxx_urbin/urbflx/urbout`),
+  still packed 5k+s: entry c is ELM column c+1, patch 17+c on a one-cell
+  domain (natural first, lake last). Wall entries of snow/water fields are
+  spval (the wall record has none).
 
 ## The lake surface
 
