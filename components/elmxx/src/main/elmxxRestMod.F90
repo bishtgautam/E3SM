@@ -29,10 +29,11 @@ module elmxxRestMod
   ! indices (col_gridcell, filters): they are rebuilt at init from the
   ! subgrid and are neither written nor read.
   !
-  ! KINDS NOT MAPPED YET. Urban columns/patches and shared:urbpoi are never
-  ! allocated on the coupled path; if one ever is, write/read abort naming
-  ! it rather than guess its entity-to-cell map. Lake columns and patches
-  ! are mapped (Stage 6.5, L6): one of each per lake cell (elmxxLakeMod).
+  ! KINDS NOT MAPPED. shared:urbpoi is never allocated on the coupled path;
+  ! if it ever is, write/read abort naming it rather than guess its
+  ! entity-to-cell map. Lake columns and patches are mapped (Stage 6.5, L6):
+  ! one of each per lake cell (elmxxLakeMod). Urban columns and patches are
+  ! mapped (Stage 6.7, U7): five of each per urban landunit (elmxxUrbanMod).
   !
   ! A BRANCH STARTS HISTORY FRESH, as ELM's does (hist_restart_ncd zeroes
   ! every tape's ntimes and reads no history buffers on nsrBranch): the
@@ -52,6 +53,7 @@ module elmxxRestMod
   use elmxxHistMod , only : elmxx_hist_get_restart_state, elmxx_hist_set_restart_state
   use elmxxSubgridMod     , only : lun_gridcell, col_landunit, patch_column
   use elmxxLakeMod        , only : n_lake, cell_of_klake
+  use elmxxUrbanMod       , only : n_urb_col
   use elmxxKokkosStateMod , only : n_kokkos_col, n_kokkos_patch, n_kokkos_urb, &
                                    col_of_kcol, patch_of_kpatch, lun_of_kurb
   use elmxx_mod    , only : ELMxxType, ELMXX_SUCCESS, &
@@ -73,7 +75,8 @@ module elmxxRestMod
 
   ! ELMxxRestartKind (ELMxx.h).
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
-                        KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_LAKECOL = 7, &
+                        KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_URBCOL = 5, &
+                        KIND_URBPATCH = 6, KIND_LAKECOL = 7, &
                         KIND_LAKEPATCH = 8, NKIND = 9
   character(len=10), parameter :: kind_name(0:NKIND) = (/ &
        'topo      ', 'cell      ', 'natcol    ', 'natpatch  ', 'urblun    ', &
@@ -98,7 +101,7 @@ module elmxxRestMod
   end type kindmap_t
   type(kindmap_t) :: kmap(0:NKIND)
 
-  integer, parameter :: MAXDEC = 32
+  integer, parameter :: MAXDEC = 64
   integer :: ndec = 0
   integer :: dec_kind(MAXDEC), dec_n2(MAXDEC)
   type(io_desc_t) :: dec_iodesc(MAXDEC)
@@ -405,6 +408,7 @@ contains
     case (KIND_NATCOL);   local_count = n_kokkos_col
     case (KIND_NATPATCH); local_count = n_kokkos_patch
     case (KIND_URBLUN);   local_count = n_kokkos_urb
+    case (KIND_URBCOL, KIND_URBPATCH); local_count = n_urb_col   ! 5 per landunit, p = c
     case (KIND_LAKECOL);  local_count = n_lake
     case (KIND_LAKEPATCH); local_count = n_lake   ! one patch per lake column
     case default
@@ -435,6 +439,10 @@ contains
        case (KIND_NATCOL);   cell(e) = lun_gridcell(col_landunit(col_of_kcol(e)))
        case (KIND_NATPATCH); cell(e) = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);   cell(e) = lun_gridcell(lun_of_kurb(e))
+       ! Urban column/patch e is column (e-1) mod 5 of packed landunit
+       ! (e-1)/5+1 (elmxxUrbanMod); within a cell the order is density
+       ! class, then ELM's column order, the same on every layout.
+       case (KIND_URBCOL, KIND_URBPATCH); cell(e) = lun_gridcell(lun_of_kurb((e-1)/5 + 1))
        case (KIND_LAKECOL, KIND_LAKEPATCH); cell(e) = cell_of_klake(e)
        end select
        if (cell(e) < 1 .or. cell(e) > ncell) call shr_sys_abort(subname// &

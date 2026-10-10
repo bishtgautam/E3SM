@@ -29,6 +29,7 @@ module elmxxKernelMod
   use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux, elmxx_diag_snapshot_snowstate
   use elmxxKokkosStateMod , only : n_kokkos_col
   use elmxxLakeMod       , only : lake_built
+  use elmxxUrbanMod      , only : urban_built
   use elmxxSoilPropMod   , only : nlevgrnd, nlevsno
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxComputeSurfaceRadiation, &
@@ -37,8 +38,21 @@ module elmxxKernelMod
                                ELMxxComputeCanopyTemperature, &
                                ELMxxComputeBareGroundFluxes, &
                                ELMxxComputeCanopyFluxes, &
-                               ELMxxComputeUrbanRadiation, &
-                               ELMxxComputeUrbanFluxes, &
+                               ELMxxUrbanGatherForcing, &
+                               ELMxxComputeBeginWaterBalanceUrban, &
+                               ELMxxComputeCanopyHydrologyUrban, &
+                               ELMxxComputeUrbanRadiationUrban, &
+                               ELMxxComputeCanopyTemperatureUrban, &
+                               ELMxxComputeUrbanFluxesUrban, &
+                               ELMxxComputeSoilTemperatureUrban, &
+                               ELMxxComputeSoilFluxesUrban, &
+                               ELMxxComputeSnowWaterUrban, &
+                               ELMxxComputeSurfaceRunoffInfiltrationUrban, &
+                               ELMxxComputeSoilWaterUrban, &
+                               ELMxxComputeWaterTableUrban, &
+                               ELMxxComputeSnowLayersUrban, &
+                               ELMxxComputeHydrologyDrainageUrban, &
+                               ELMxxComputeWaterBalanceCheckUrban, &
                                ELMxxComputeLakeFluxesLake, &
                                ELMxxLakeGatherForcing, &
                                ELMxxComputeSurfaceRadiationLake, &
@@ -288,6 +302,16 @@ contains
   end subroutine elmxx_wbal_report
 
   !-----------------------------------------------------------------------
+  logical function urban_on()
+    ! The urban step runs on the urban surface once it exists and its two
+    ! tokens are on. Every urban stage runs whenever it does -- the snow and
+    ! hydrology stages too, which produce qflx_top_soil and the runoff on
+    ! every urban column, snow or none -- so the natural snow tokens do not
+    ! gate them.
+    urban_on = urban_built .and. kernel_active(K_URBANRAD) .and. kernel_active(K_URBANFLUX)
+  end function urban_on
+
+  !-----------------------------------------------------------------------
   function blocked_reason(k) result(why)
     !
     ! Why kernel k cannot run yet, or ' ' if it can.
@@ -473,8 +497,15 @@ contains
        why = ' '
 
     case (K_URBANRAD, K_URBANFLUX)
-       why = 'needs UrbanAlbedo for sabs_dir/sabs_dif, which is part of the ' // &
-             'Stage 5 albedo port'
+       ! Runnable since Stage 6.7 (U4), on the urban surface (urban /
+       ! urbanCol / urbanPatch, elmxxUrbanMod). UrbanAlbedo -- the old
+       ! blocker, it produces sabs_dir/sabs_dif -- is ported and runs at the
+       ! end of each albedo step. The two tokens switch on the whole urban
+       ! step: every urban module's branch runs at its ELM driver position
+       ! beside the natural kernel, as a set and only with soiltemp, whose
+       ! shared metadata carries the per-cell precipitation urban reads
+       ! (both enforced in elmxx_kernels_parse).
+       why = ' '
 
     case (K_LAKEFLUX, K_LAKETEMP, K_LAKEHYDRO)
        ! Runnable since Stage 6.5, on the lake surface (lakeCol/lakePatch,
@@ -587,6 +618,17 @@ contains
                  '(its shared metadata carries the precipitation the lake reads)')
     end if
 
+    ! The urban step is one state: urbanrad and urbanflux switch it on
+    ! together, and it reads the shared per-cell precipitation.
+    if (any(kernel_active((/K_URBANRAD, K_URBANFLUX/)))) then
+       if (.not. all(kernel_active((/K_URBANRAD, K_URBANFLUX/)))) &
+            call shr_sys_abort(subname//'ERROR: urbanrad and urbanflux '// &
+                 'must be activated together')
+       if (.not. kernel_active(K_SOILTEMP)) &
+            call shr_sys_abort(subname//'ERROR: the urban kernels need soiltemp '// &
+                 '(its shared metadata carries the precipitation urban reads)')
+    end if
+
     if (masterproc) then
        write(logunit,*) subname,'active kernels, in driver order:'
        do k = 1, NKERNEL
@@ -654,6 +696,15 @@ contains
        call ELMxxComputeBeginWaterBalanceNatural(elm, ierr)
        call check(ierr, logunit, K_BEGWATERBAL)
     end if
+
+    ! The urban surface's start of step: its forcing, gathered on the device
+    ! from the cell's natural column, then its water inventory.
+    if (urban_on()) then
+       call ELMxxUrbanGatherForcing(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+       call ELMxxComputeBeginWaterBalanceUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+    end if
     call wbal_mark(elm, K_BEGWATERBAL)
 
     call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_pre')
@@ -661,6 +712,10 @@ contains
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
        call check(ierr, logunit, K_CANHYDRO)
+       if (urban_on()) then
+          call ELMxxComputeCanopyHydrologyUrban(elm, dtime, ierr)
+          call check(ierr, logunit, K_URBANRAD)
+       end if
        call elmxx_diag_snapshot_postcanhydro(elm, 'elmxx_ch')
        call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_post')
     end if
@@ -678,8 +733,8 @@ contains
     end if
     call wbal_mark(elm, K_SURFRAD)
 
-    if (kernel_active(K_URBANRAD)) then
-       call ELMxxComputeUrbanRadiation(elm, ierr)
+    if (urban_on()) then
+       call ELMxxComputeUrbanRadiationUrban(elm, ierr)
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_URBANRAD)
@@ -687,6 +742,10 @@ contains
     if (kernel_active(K_CANTEMP)) then
        call ELMxxComputeCanopyTemperature(elm, ierr)
        call check(ierr, logunit, K_CANTEMP)
+    end if
+    if (urban_on()) then
+       call ELMxxComputeCanopyTemperatureUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_CANTEMP)
 
@@ -703,8 +762,8 @@ contains
     end if
     call wbal_mark(elm, K_CANFLUX)
 
-    if (kernel_active(K_URBANFLUX)) then
-       call ELMxxComputeUrbanFluxes(elm, ierr)
+    if (urban_on()) then
+       call ELMxxComputeUrbanFluxesUrban(elm, ierr)
        call check(ierr, logunit, K_URBANFLUX)
     end if
     call wbal_mark(elm, K_URBANFLUX)
@@ -731,6 +790,11 @@ contains
        call ELMxxComputeSoilTemperatureNatural(elm, ierr)
        call check(ierr, logunit, K_SOILTEMP)
     end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSoilTemperatureUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+    end if
     call wbal_mark(elm, K_SOILTEMP)
 
     call elmxx_diag_snapshot_presoilflux(elm, nlevsno + nlevgrnd, 'elmxx_sf')
@@ -738,6 +802,11 @@ contains
     if (kernel_active(K_SOILFLUX)) then
        call ELMxxComputeSoilFluxesNatural(elm, ierr)
        call check(ierr, logunit, K_SOILFLUX)
+    end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSoilFluxesUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_SOILFLUX)
 
@@ -747,6 +816,11 @@ contains
        call ELMxxComputeSnowWater(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWWATER)
     end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSnowWaterUrban(elm, dtime, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+    end if
     call wbal_mark(elm, K_SNOWWATER)
 
     call elmxx_diag_snapshot_preinfil(elm, 'elmxx_ri')
@@ -754,6 +828,11 @@ contains
     if (kernel_active(K_SURFRUNOFF)) then
        call ELMxxComputeSurfaceRunoffInfiltration(elm, ierr)
        call check(ierr, logunit, K_SURFRUNOFF)
+    end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSurfaceRunoffInfiltrationUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_SURFRUNOFF)
 
@@ -767,6 +846,11 @@ contains
        call ELMxxComputeSoilWaterNatural(elm, dtime, ierr)
        call check(ierr, logunit, K_SOILWATER)
     end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSoilWaterUrban(elm, dtime, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+    end if
     call wbal_mark(elm, K_SOILWATER)
 
     ! ELM calls WaterTable here, right after the Richards solve and before
@@ -775,6 +859,11 @@ contains
     if (kernel_active(K_WATERTABLE)) then
        call ELMxxComputeWaterTableNatural(elm, ierr)
        call check(ierr, logunit, K_WATERTABLE)
+    end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeWaterTableUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_WATERTABLE)
 
@@ -804,6 +893,11 @@ contains
        call check(ierr, logunit, K_SNOWLAYERS)
        call ELMxxComputeSnowLayers(elm, dtime, ierr)
        call check(ierr, logunit, K_SNOWLAYERS)
+    end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeSnowLayersUrban(elm, dtime, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_SNOWLAYERS)
 
@@ -836,6 +930,11 @@ contains
        call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
        call check(ierr, logunit, K_HYDRODRAIN)
     end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeHydrologyDrainageUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
+    end if
     call wbal_mark(elm, K_HYDRODRAIN)
 
     ! Grain aging LAST among the snow kernels: it must see the layers
@@ -854,6 +953,11 @@ contains
     if (kernel_active(K_BALANCECHK)) then
        call ELMxxComputeWaterBalanceCheckNatural(elm, ierr)
        call check(ierr, logunit, K_BALANCECHK)
+    end if
+    ! The urban surface's branch, at the same driver position (Stage 6.7).
+    if (urban_on()) then
+       call ELMxxComputeWaterBalanceCheckUrban(elm, ierr)
+       call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_BALANCECHK)
 

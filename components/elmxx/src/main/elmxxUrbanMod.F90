@@ -37,7 +37,12 @@ module elmxxUrbanMod
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxSubgridMod , only : lun_gridcell, lun_itype, isturb_tbd, lun_wtgcell, &
                                num_landunits, num_columns, col_landunit, col_wtlunit, &
-                               istsoil
+                               istsoil, col_itype, icol_roof, icol_sunwall, icol_shadewall, &
+                               icol_road_imperv, icol_road_perv
+  use elmxxSoilPropMod, only : nlevsoi, nlevgrnd, nlevsno, nlevtot, zsoi, dzsoi, zisoi, &
+                               sp_watsat => watsat, sp_bsw => bsw, sp_sucsat => sucsat, &
+                               sp_hksat => hksat, sp_watfc => watfc, sp_tkmg => tkmg, &
+                               sp_tkdry => tkdry, sp_tksatu => tksatu, sp_csol => csol
   use elmxxSurfdataMod, only : urban_params_read, nlevurb, numrad_urb, &
                                canyon_hwr_in, ht_roof_in, wind_hgt_canyon_in, &
                                em_roof_in, em_wall_in, em_improad_in, em_perroad_in, &
@@ -57,7 +62,8 @@ module elmxxUrbanMod
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxRestartFieldFind, ELMxxRestartFieldSet, &
                                ELMxxRestartFieldInfo, &
-                               ELMxxHistorySetLandunitWeights, ELMxxHistorySetUrbanWeights
+                               ELMxxHistorySetLandunitWeights, ELMxxHistorySetUrbanWeights, &
+                               ELMxxAllocateUrbanSurface, ELMxxUrbanBuildFilters
 
   implicit none
   save
@@ -67,6 +73,10 @@ module elmxxUrbanMod
   integer, parameter :: nlevurb_x = 5      ! ELMxx NLEVURB
 
   logical, public :: urban_params_built = .false.
+  logical, public :: urban_built = .false.       ! the urban surface is allocated and seeded
+  integer, public :: n_urb_col = 0                ! packed urban columns = patches (5 per landunit)
+  integer, parameter :: nlevurb_c = 5             ! ELM nlevurb
+  real(r8), parameter :: spval = 1.e36_r8
 
   ! Per packed urban landunit (1:n_kokkos_urb), as seeded.
   real(r8), allocatable :: canyon_hwr(:), wtroad_prv(:), ht_roof(:), wtlun_roof(:)
@@ -113,6 +123,8 @@ contains
     call seed_params(elm)
     call push_history_weights(elm, logunit)
     urban_params_built = .true.
+    call seed_surface(elm, logunit)
+    urban_built = .true.
 
     write(logunit,*) subname,'rank ',iam,' seeded ',n_kokkos_urb,' urban landunits'
     call shr_sys_flush(logunit)
@@ -355,6 +367,351 @@ contains
 
   end subroutine push_history_weights
 
+
+  !-----------------------------------------------------------------------
+  subroutine seed_surface(elm, logunit)
+    !
+    ! The urban surface's columns and patches (U1/U2): allocate urbanCol/
+    ! urbanPatch, five columns per packed landunit k (packed column
+    ! 5(k-1)+s, s in ELM's column order, which is the subgrid's), one patch
+    ! each; seed their topology and ELM's urban geometry, road soil
+    ! properties and cold start by NAME through the registry; then let the
+    ! library build its active-only filters.
+    !
+    !   geometry    ELM initVerticalMod, urban branch (use_vancouver and
+    !               use_mexicocity off): roof and walls on nlevurb = 5 layers
+    !               from THICK_ROOF/THICK_WALL, deeper slots spval; roads on
+    !               the soil grid. nlevbed = nlevsoi for every column
+    !               (use_var_soil_thick = .false., as ELM falls back to).
+    !   properties  ELM SoilStateType: roads take the natural pedotransfer
+    !               with no organic matter (elmxxSoilPropMod zeroes om_frac
+    !               on urban columns); roof and walls spval. watdry/watopt
+    !               from the same; the pervious road's root fraction is ELM's
+    !               uniform 0.1 over nlevsoi.
+    !   cold start  ELM ColumnDataType/LandunitDataType/SoilHydrologyType
+    !               InitCold, urban branches: roads 274 K over nlevgrnd, roof
+    !               and walls 292 K over nlevurb; pervious road 0.3 v/v above
+    !               bedrock (capped at porosity), impervious road and roof/
+    !               walls dry; t_grnd from layer 1; emg the snow-free surface
+    !               emissivity; taf 283 K, qaf 1e-4; pervious road wa 4800,
+    !               zwt = zi(nlevsoi) + 1; zwt_perched/frost_table spval.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer  :: k, l, c, s, kc, j, nc, ierr
+    integer , allocatable :: ib(:), ib2(:)
+    real(r8), allocatable :: r1(:), dz(:,:), z(:,:), zi(:,:)
+    real(r8), allocatable :: rg(:,:), rg2(:,:), rt(:,:), rt1(:,:), rp1(:,:), rp2(:,:)
+    real(r8), allocatable :: tsoi(:,:), liq(:,:), ice(:,:), vol(:,:)
+    real(r8) :: zu(nlevurb_c), dzu(nlevurb_c), ziu(0:nlevurb_c), thick
+    integer  :: subcol(5)
+    real(r8), parameter :: denh2o = 1000._r8, tkfrz = 273.15_r8
+    character(len=*), parameter :: subname = '(elmxx_urban_init) '
+
+    nc = 5 * n_kokkos_urb
+    n_urb_col = nc
+    call ELMxxAllocateUrbanSurface(elm, nc, nc, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxAllocateUrbanSurface failed')
+
+    allocate(ib(n_kokkos_urb), r1(n_kokkos_urb))
+    ! ---- landunit topology and the explicit column maps ----
+    do k = 1, n_kokkos_urb
+       l = lun_of_kurb(k)
+       ib(k) = merge(1, 0, lun_wtgcell(l) > 0._r8)   ! ELM: active iff weight > 0
+    end do
+    call urb_set_1d(elm, 'urban:active', real(ib, r8))
+    call urb_set_1d(elm, 'urban:urbpoi', spread(1._r8, 1, n_kokkos_urb))
+    do k = 1, n_kokkos_urb
+       ib(k) = natcol_of_cell(lun_gridcell(lun_of_kurb(k)))
+    end do
+    call urb_set_1d(elm, 'urban:natcol', real(ib, r8))
+    do k = 1, n_kokkos_urb
+       ib(k) = lun_gridcell(lun_of_kurb(k)) - 1
+    end do
+    call urb_set_1d(elm, 'urban:gridcell', real(ib, r8))
+    do s = 1, 5
+       do k = 1, n_kokkos_urb
+          ib(k) = 5*(k-1) + s - 1
+       end do
+       select case (s)
+       case (1); call urb_set_1d(elm, 'urban:colRoof'     , real(ib, r8))
+       case (2); call urb_set_1d(elm, 'urban:colSunwall'  , real(ib, r8))
+       case (3); call urb_set_1d(elm, 'urban:colShadewall', real(ib, r8))
+       case (4); call urb_set_1d(elm, 'urban:colImproad'  , real(ib, r8))
+       case (5); call urb_set_1d(elm, 'urban:colPerroad'  , real(ib, r8))
+       end select
+    end do
+    call urb_set_1d(elm, 'urban:taf', spread(283._r8, 1, n_kokkos_urb))
+    call urb_set_1d(elm, 'urban:qaf', spread(1.e-4_r8, 1, n_kokkos_urb))
+    call urb_set_1d(elm, 'urban:tBuilding', spread(spval, 1, n_kokkos_urb))
+    deallocate(ib, r1)
+
+    ! ---- column topology ----
+    allocate(ib(nc), ib2(nc), r1(nc))
+    do k = 1, n_kokkos_urb
+       call landunit_columns(lun_of_kurb(k), subcol)
+       do s = 1, 5
+          kc = 5*(k-1) + s
+          c = subcol(s)
+          ib(kc) = col_itype(c)
+          if (ib(kc) /= icol_roof + s - 1) call shr_sys_abort(subname// &
+               'ERROR: urban columns are not in ELM''s column order')
+       end do
+    end do
+    call urb_set_1d(elm, 'urbcol:col_itype', real(ib, r8))
+    do kc = 1, nc
+       k = (kc - 1)/5 + 1
+       ib2(kc) = lun_itype(lun_of_kurb(k))
+    end do
+    call urb_set_1d(elm, 'urbcol:lun_itype', real(ib2, r8))
+    call urb_set_1d(elm, 'urbcol:lun_urbpoi', spread(1._r8, 1, nc))
+    call urb_set_1d(elm, 'urbcol:col_is_soil', spread(0._r8, 1, nc))
+    call urb_set_1d(elm, 'urbcol:col_is_crop', spread(0._r8, 1, nc))
+    do kc = 1, nc
+       k = (kc - 1)/5 + 1
+       ib2(kc) = merge(1, 0, lun_wtgcell(lun_of_kurb(k)) > 0._r8)
+    end do
+    call urb_set_1d(elm, 'urbcol:col_active', real(ib2, r8))
+    call urb_set_1d(elm, 'urbpatch:patch_active', real(ib2, r8))
+    do kc = 1, nc
+       k = (kc - 1)/5 + 1
+       ib2(kc) = lun_gridcell(lun_of_kurb(k)) - 1
+    end do
+    call urb_set_1d(elm, 'urbcol:col_gridcell', real(ib2, r8))
+    call urb_set_1d(elm, 'urbcol:col_topounit', real(ib2, r8))
+    do kc = 1, nc
+       ib2(kc) = (kc - 1)/5
+    end do
+    call urb_set_1d(elm, 'urbcol:col_landunit', real(ib2, r8))
+    call urb_set_1d(elm, 'urbpatch:patch_landunit', real(ib2, r8))
+    do kc = 1, nc
+       ib2(kc) = kc - 1
+    end do
+    call urb_set_1d(elm, 'urbcol:col_pfti', real(ib2, r8))
+    call urb_set_1d(elm, 'urbpatch:patch_column', real(ib2, r8))
+    call urb_set_1d(elm, 'urbcol:col_npfts', spread(1._r8, 1, nc))
+    call urb_set_1d(elm, 'urbcol:nlevbed', spread(real(nlevsoi, r8), 1, nc))
+    call urb_set_1d(elm, 'urbpatch:wtcol', spread(1._r8, 1, nc))
+    call urb_set_1d(elm, 'urbpatch:frac_veg_nosno', spread(0._r8, 1, nc))
+    call urb_set_1d(elm, 'urbpatch:is_on_soil_col', spread(0._r8, 1, nc))
+    call urb_set_1d(elm, 'urbpatch:is_on_crop_col', spread(0._r8, 1, nc))
+
+    ! ---- geometry ----
+    allocate(dz(nc,nlevgrnd), z(nc,nlevgrnd), zi(nc,0:nlevgrnd))
+    do k = 1, n_kokkos_urb
+       do s = 1, 5
+          kc = 5*(k-1) + s
+          if (s <= 3) then
+             ! ELM initVerticalMod: node depths evenly spaced over the
+             ! thickness, layer thicknesses and interfaces from them.
+             if (s == 1) then; thick = thick_roof(k); else; thick = thick_wall(k); end if
+             do j = 1, nlevurb_c
+                zu(j) = (j - 0.5_r8)*(thick/real(nlevurb_c, r8))
+             end do
+             dzu(1) = 0.5_r8*(zu(1) + zu(2))
+             do j = 2, nlevurb_c - 1
+                dzu(j) = 0.5_r8*(zu(j+1) - zu(j-1))
+             end do
+             dzu(nlevurb_c) = zu(nlevurb_c) - zu(nlevurb_c-1)
+             ziu(0) = 0._r8
+             do j = 1, nlevurb_c - 1
+                ziu(j) = 0.5_r8*(zu(j) + zu(j+1))
+             end do
+             ziu(nlevurb_c) = zu(nlevurb_c) + 0.5_r8*dzu(nlevurb_c)
+             dz(kc,:) = spval; z(kc,:) = spval; zi(kc,:) = spval
+             dz(kc,1:nlevurb_c) = dzu
+             z (kc,1:nlevurb_c) = zu
+             zi(kc,0:nlevurb_c) = ziu
+          else
+             dz(kc,:) = dzsoi
+             z (kc,:) = zsoi
+             zi(kc,:) = zisoi
+          end if
+       end do
+    end do
+    call urb_set_2d(elm, 'urbcol:dz_soi', dz)
+    call urb_set_2d(elm, 'urbcol:zc_soi', z)
+    call urb_set_2d(elm, 'urbcol:zi_soi', zi)
+    ! The combined (ELM-ordered) and SoilTemperature (_p1) layouts: snow
+    ! slots empty at a cold start; _p1 carries the standing-water node.
+    allocate(rt(nc,nlevtot), rt1(nc,nlevtot+1))
+    rt = 0._r8; rt(:, nlevsno+1:nlevtot) = dz
+    call urb_set_2d(elm, 'urbcol:dz', rt)
+    rt = 0._r8; rt(:, nlevsno+1:nlevtot) = z
+    call urb_set_2d(elm, 'urbcol:z', rt)
+    rt1 = 0._r8; rt1(:, nlevsno+1:nlevtot+1) = zi
+    call urb_set_2d(elm, 'urbcol:zi', rt1)
+    allocate(rp1(nc,nlevsno+1+nlevgrnd), rp2(nc,nlevsno+2+nlevgrnd))
+    rp1 = 0._r8; rp1(:, nlevsno+2:) = dz
+    call urb_set_2d(elm, 'urbcol:dz_p1', rp1)
+    rp1 = 0._r8; rp1(:, nlevsno+2:) = z
+    call urb_set_2d(elm, 'urbcol:z_p1', rp1)
+    rp2 = 0._r8; rp2(:, nlevsno+2:) = zi
+    call urb_set_2d(elm, 'urbcol:zi_p1', rp2)
+
+    ! ---- soil properties: roads natural (no organic), roof/walls spval ----
+    allocate(rg(nc,nlevgrnd), rg2(nc,nlevgrnd))
+    call seed_prop('urbcol:watsat', sp_watsat)
+    call seed_prop('urbcol:watsat_soi', sp_watsat)
+    call seed_prop('urbcol:bsw', sp_bsw)
+    call seed_prop('urbcol:sucsat', sp_sucsat)
+    call seed_prop('urbcol:hksat', sp_hksat)
+    call seed_prop('urbcol:watfc', sp_watfc)
+    call seed_prop('urbcol:tkmg', sp_tkmg)
+    call seed_prop('urbcol:tkdry', sp_tkdry)
+    call seed_prop('urbcol:tksatu', sp_tksatu)
+    call seed_prop('urbcol:csol', sp_csol)
+    ! watdry / watopt (ELM SoilStateType), roads; the impervious road's
+    ! are spval in ELM, harmless since only the pervious road reads them.
+    rg = spval; rg2 = spval
+    do k = 1, n_kokkos_urb
+       call landunit_columns(lun_of_kurb(k), subcol)
+       kc = 5*(k-1) + 5
+       c = subcol(5)
+       do j = 1, nlevgrnd
+          rg(kc,j)  = sp_watsat(c,j) * (316230._r8/sp_sucsat(c,j)) ** (-1._r8/sp_bsw(c,j))
+          rg2(kc,j) = sp_watsat(c,j) * (158490._r8/sp_sucsat(c,j)) ** (-1._r8/sp_bsw(c,j))
+       end do
+    end do
+    call urb_set_2d(elm, 'urbcol:watdry', rg)
+    call urb_set_2d(elm, 'urbcol:watopt', rg2)
+    rg = 0._r8
+    do k = 1, n_kokkos_urb
+       rg(5*(k-1)+5, 1:nlevsoi) = 0.1_r8
+    end do
+    call urb_set_2d(elm, 'urbcol:rootfr_road_perv', rg)
+
+    ! ---- cold start ----
+    allocate(tsoi(nc,nlevgrnd), liq(nc,nlevgrnd), ice(nc,nlevgrnd), vol(nc,nlevgrnd))
+    tsoi = spval; liq = spval; ice = spval; vol = spval
+    do k = 1, n_kokkos_urb
+       call landunit_columns(lun_of_kurb(k), subcol)
+       do s = 1, 5
+          kc = 5*(k-1) + s
+          c = subcol(s)
+          if (s <= 3) then
+             tsoi(kc,1:nlevurb_c) = 292._r8
+             vol (kc,1:nlevurb_c) = 0._r8
+          else
+             tsoi(kc,:) = 274._r8
+             vol(kc,:) = 0._r8
+             if (s == 5) then
+                do j = 1, nlevsoi                       ! above bedrock
+                   vol(kc,j) = 0.3_r8
+                end do
+             end if
+             do j = 1, nlevgrnd
+                vol(kc,j) = min(vol(kc,j), sp_watsat(c,j))
+             end do
+          end if
+          do j = 1, merge(nlevurb_c, nlevgrnd, s <= 3)
+             if (tsoi(kc,j) <= tkfrz) then
+                ice(kc,j) = dz(kc,j)*917._r8*vol(kc,j); liq(kc,j) = 0._r8
+             else
+                liq(kc,j) = dz(kc,j)*denh2o*vol(kc,j); ice(kc,j) = 0._r8
+             end if
+          end do
+       end do
+    end do
+    call urb_set_2d(elm, 'urbcol:t_soisno_soi', tsoi)
+    call urb_set_2d(elm, 'urbcol:h2osoi_liq_soi', liq)
+    call urb_set_2d(elm, 'urbcol:h2osoi_ice_soi', ice)
+    call urb_set_2d(elm, 'urbcol:h2osoi_vol', vol)
+    rt = 0._r8; rt(:, nlevsno+1:nlevtot) = tsoi
+    call urb_set_2d(elm, 'urbcol:t_soisno', rt)
+    rt = 0._r8; rt(:, nlevsno+1:nlevtot) = liq
+    call urb_set_2d(elm, 'urbcol:h2osoi_liq', rt)
+    rt = 0._r8; rt(:, nlevsno+1:nlevtot) = ice
+    call urb_set_2d(elm, 'urbcol:h2osoi_ice', rt)
+    r1 = tsoi(:,1)
+    call urb_set_1d(elm, 'urbcol:t_grnd', r1)
+    call urb_set_1d(elm, 'urbcol:t_h2osfc', spread(274._r8, 1, nc))
+    do k = 1, n_kokkos_urb
+       r1(5*(k-1)+1) = em_roof(k)
+       r1(5*(k-1)+2) = em_wall(k)
+       r1(5*(k-1)+3) = em_wall(k)
+       r1(5*(k-1)+4) = em_improad(k)
+       r1(5*(k-1)+5) = em_perroad(k)
+    end do
+    call urb_set_1d(elm, 'urbcol:emg', r1)
+    r1 = spval
+    do k = 1, n_kokkos_urb
+       r1(5*(k-1)+5) = 4800._r8
+    end do
+    call urb_set_1d(elm, 'urbcol:wa', r1)
+    r1 = spval
+    do k = 1, n_kokkos_urb
+       r1(5*(k-1)+5) = (25._r8 + zisoi(nlevsoi)) - 4800._r8/0.2_r8/1000._r8
+    end do
+    call urb_set_1d(elm, 'urbcol:zwt', r1)
+    call urb_set_1d(elm, 'urbcol:zwt_perched', spread(spval, 1, nc))
+    call urb_set_1d(elm, 'urbcol:frost_table', spread(spval, 1, nc))
+    call urb_set_1d(elm, 'urbcol:h2osfc_thresh', spread(0._r8, 1, nc))
+
+    call ELMxxUrbanBuildFilters(elm, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxUrbanBuildFilters failed')
+
+    if (masterproc) then
+       write(logunit,*) subname,'urban surface: ',nc,' columns; roof dz ',dz(1,1:nlevurb_c)
+       write(logunit,*) subname,'urban cold start: roads 274 K, roof/walls 292 K, ', &
+            'pervious-road h2osoi_vol(1) ',vol(5,1)
+       call shr_sys_flush(logunit)
+    end if
+    deallocate(ib, ib2, r1, dz, z, zi, rt, rt1, rp1, rp2, rg, rg2, tsoi, liq, ice, vol)
+
+  contains
+
+    subroutine seed_prop(name, src)
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, ss, cc
+      rg = spval
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 4, 5                                 ! roads
+            cc = subcol(ss)
+            rg(5*(kk-1)+ss, :) = src(cc, 1:nlevgrnd)
+         end do
+      end do
+      call urb_set_2d(elm, name, rg)
+    end subroutine seed_prop
+
+  end subroutine seed_surface
+
+  !-----------------------------------------------------------------------
+  subroutine landunit_columns(l, cols)
+    ! The five subgrid columns of urban landunit l, in subgrid (ELM) order.
+    implicit none
+    integer, intent(in)  :: l
+    integer, intent(out) :: cols(5)
+    integer :: c, s
+    s = 0
+    do c = 1, num_columns
+       if (col_landunit(c) /= l) cycle
+       s = s + 1
+       if (s > 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit with more than five columns')
+       cols(s) = c
+    end do
+    if (s /= 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit without five columns')
+  end subroutine landunit_columns
+
+  !-----------------------------------------------------------------------
+  integer function natcol_of_cell(g)
+    ! The packed (0-based) natural column of local cell g: every cell has one.
+    implicit none
+    integer, intent(in) :: g
+    integer :: kc
+    natcol_of_cell = -1
+    do kc = 1, n_kokkos_col
+       if (lun_gridcell(col_landunit(col_of_kcol(kc))) == g) then
+          natcol_of_cell = kc - 1
+          return
+       end if
+    end do
+    call shr_sys_abort('(elmxx_urban_init) ERROR: an urban cell has no natural column')
+  end function natcol_of_cell
+
   !-----------------------------------------------------------------------
   subroutine elmxx_urban_diag_dump()
     !
@@ -452,6 +809,8 @@ contains
             cv_roof, cv_wall, cv_improad)
     end if
     urban_params_built = .false.
+    urban_built = .false.
+    n_urb_col = 0
   end subroutine elmxx_urban_clean
 
 end module elmxxUrbanMod
