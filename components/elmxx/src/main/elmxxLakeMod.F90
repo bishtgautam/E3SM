@@ -30,7 +30,8 @@ module elmxxLakeMod
   use elmxxSpmdMod    , only : masterproc, iam
   use elmxxSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, lun_wtgcell, &
-                               col_landunit, patch_column, istsoil, istdlak
+                               col_landunit, patch_column, istsoil, istdlak, &
+                               isturb_tbd, isturb_md
   use elmxxSurfdataMod, only : lakedepth_in, etalake_in, lakefetch_in, lake_spval
   use elmxxSurfaceStateMod, only : col_pct_sand, col_pct_clay, col_organic
   use elmxxSoilPropMod, only : nlevsoi, nlevgrnd, nlevsno, nlevtot, &
@@ -401,9 +402,10 @@ contains
     !
     ! Per packed natural column (one per cell): the cell's lake column and the
     ! natural and lake landunit weights. The cell mean history forms is over
-    ! those two landunits only, so any other landunit with weight -- urban,
-    ! wetland, glacier, none of which ELMxx models -- would make it wrong;
-    ! refuse that rather than write a mislabelled h0.
+    ! natural, lake and urban (elmxxUrbanMod pushes urban's), so any other
+    ! landunit with weight -- wetland, glacier, crop, none of which ELMxx
+    ! models -- would make it wrong; refuse that rather than write a
+    ! mislabelled h0.
     !
     implicit none
     type(ELMxxType), intent(in) :: elm
@@ -426,6 +428,9 @@ contains
              wn(kc) = lun_wtgcell(l)
           case (istdlak)
              wl(kc) = lun_wtgcell(l)
+          case (isturb_tbd:isturb_md)
+             ! Urban joins the mean through ELMxxHistorySetUrbanWeights
+             ! (elmxxUrbanMod, Stage 6.7).
           case default
              wother(kc) = wother(kc) + lun_wtgcell(l)
           end select
@@ -436,7 +441,7 @@ contains
     end do
     if (any(wother > tol)) then
        call shr_sys_abort(subname//'ERROR: a lake cell has weight on a landunit '// &
-            'other than natural and lake, which ELMxx history cannot represent')
+            'other than natural, lake and urban, which ELMxx history cannot represent')
     end if
 
     call ELMxxHistorySetLandunitWeights(elm, lake_of, wn, wl, n_kokkos_col, ierr)

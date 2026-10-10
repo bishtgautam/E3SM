@@ -35,7 +35,9 @@ module elmxxUrbanMod
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_const_mod   , only : SHR_CONST_KARMAN
   use elmxxSpmdMod    , only : masterproc, iam
-  use elmxxSubgridMod , only : lun_gridcell, lun_itype, isturb_tbd
+  use elmxxSubgridMod , only : lun_gridcell, lun_itype, isturb_tbd, lun_wtgcell, &
+                               num_landunits, num_columns, col_landunit, col_wtlunit, &
+                               istsoil
   use elmxxSurfdataMod, only : urban_params_read, nlevurb, numrad_urb, &
                                canyon_hwr_in, ht_roof_in, wind_hgt_canyon_in, &
                                em_roof_in, em_wall_in, em_improad_in, em_perroad_in, &
@@ -48,12 +50,14 @@ module elmxxUrbanMod
                                tk_roof_in, tk_wall_in, tk_improad_in, &
                                cv_roof_in, cv_wall_in, cv_improad_in, &
                                wtlunit_roof, wtroad_perv
-  use elmxxKokkosStateMod, only : n_kokkos_urb, lun_of_kurb
+  use elmxxKokkosStateMod, only : n_kokkos_urb, lun_of_kurb, n_kokkos_col, col_of_kcol
+  use elmxxLakeMod    , only : lake_built
   use elmxxDiagnosticsMod, only : elmxx_diag_enabled, elmxx_diag_1d, &
                                   elmxx_diag_2d, elmxx_diag_int_1d
   use elmxx_mod       , only : ELMxxType, ELMXX_SUCCESS, &
                                ELMxxRestartFieldFind, ELMxxRestartFieldSet, &
-                               ELMxxRestartFieldInfo
+                               ELMxxRestartFieldInfo, &
+                               ELMxxHistorySetLandunitWeights, ELMxxHistorySetUrbanWeights
 
   implicit none
   save
@@ -107,6 +111,7 @@ contains
 
     call compute_params(logunit)
     call seed_params(elm)
+    call push_history_weights(elm, logunit)
     urban_params_built = .true.
 
     write(logunit,*) subname,'rank ',iam,' seeded ',n_kokkos_urb,' urban landunits'
@@ -260,6 +265,95 @@ contains
     call urb_set_2d(elm, 'urban:perviousRoad.cvLayer'  , spv)
 
   end subroutine seed_params
+
+  !-----------------------------------------------------------------------
+  subroutine push_history_weights(elm, logunit)
+    !
+    ! History's urban half of the cell mean (U6): per packed natural column
+    ! (one per cell) the cell's packed urban landunits; per landunit its
+    ! weight on the cell; per urban column (5k+s, s in ELM's column order)
+    ! its weight on the landunit and ELM's urbanf/urbans c2l scale factors
+    ! (subgridAveMod create_scale_c2l). Without lake, the natural weights are
+    ! pushed here too (elmxxLakeMod pushes them when lake exists).
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: kc, k, l, c, s, n, nidx, ierr
+    integer , allocatable :: ptr(:), idx(:), cell_of_kc(:), lake_of(:)
+    real(r8), allocatable :: wlun(:), cwt(:), csf(:), css(:), wn(:), wl(:)
+    real(r8) :: hwr
+    character(len=*), parameter :: subname = '(elmxx_urban_init) '
+
+    n = n_kokkos_urb
+    allocate(ptr(n_kokkos_col+1), idx(max(n,1)), cell_of_kc(n_kokkos_col), &
+             wlun(n), cwt(5*n), csf(5*n), css(5*n))
+    do kc = 1, n_kokkos_col
+       cell_of_kc(kc) = lun_gridcell(col_landunit(col_of_kcol(kc)))
+    end do
+
+    ! CSR: urban landunits per natural column, in packed order.
+    nidx = 0
+    ptr(1) = 0
+    do kc = 1, n_kokkos_col
+       do k = 1, n
+          if (lun_gridcell(lun_of_kurb(k)) == cell_of_kc(kc)) then
+             nidx = nidx + 1
+             idx(nidx) = k - 1
+          end if
+       end do
+       ptr(kc+1) = nidx
+    end do
+    if (nidx /= n) call shr_sys_abort(subname//'ERROR: an urban landunit has no natural column in its cell')
+
+    do k = 1, n
+       l = lun_of_kurb(k)
+       wlun(k) = lun_wtgcell(l)
+       hwr = canyon_hwr(k)
+       s = 0
+       do c = 1, num_columns
+          if (col_landunit(c) /= l) cycle
+          s = s + 1
+          if (s > 5) call shr_sys_abort(subname//'ERROR: an urban landunit has more than five columns')
+          cwt(5*(k-1)+s) = col_wtlunit(c)
+          select case (s)
+          case (1)         ! roof
+             csf(5*(k-1)+s) = 1._r8
+             css(5*(k-1)+s) = 1._r8
+          case (2, 3)      ! sunlit, shaded wall
+             csf(5*(k-1)+s) = 3.0_r8 * hwr
+             css(5*(k-1)+s) = (3.0_r8 * hwr) / (2._r8*hwr + 1._r8)
+          case (4, 5)      ! impervious, pervious road
+             csf(5*(k-1)+s) = 3.0_r8
+             css(5*(k-1)+s) = 3.0_r8 / (2._r8*hwr + 1._r8)
+          end select
+       end do
+       if (s /= 5) call shr_sys_abort(subname//'ERROR: an urban landunit does not have five columns')
+    end do
+
+    if (.not. lake_built) then
+       allocate(lake_of(n_kokkos_col), wn(n_kokkos_col), wl(n_kokkos_col))
+       lake_of = -1; wn = 0._r8; wl = 0._r8
+       do kc = 1, n_kokkos_col
+          do l = 1, num_landunits
+             if (lun_gridcell(l) == cell_of_kc(kc) .and. lun_itype(l) == istsoil) wn(kc) = lun_wtgcell(l)
+          end do
+       end do
+       call ELMxxHistorySetLandunitWeights(elm, lake_of, wn, wl, n_kokkos_col, ierr)
+       if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistorySetLandunitWeights failed')
+       deallocate(lake_of, wn, wl)
+    end if
+
+    call ELMxxHistorySetUrbanWeights(elm, ptr, idx, nidx, wlun, cwt, csf, css, n, &
+         n_kokkos_col, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistorySetUrbanWeights failed')
+    if (masterproc) then
+       write(logunit,*) subname,'history urban landunit weights ',wlun
+       call shr_sys_flush(logunit)
+    end if
+    deallocate(ptr, idx, cell_of_kc, wlun, cwt, csf, css)
+
+  end subroutine push_history_weights
 
   !-----------------------------------------------------------------------
   subroutine elmxx_urban_diag_dump()
