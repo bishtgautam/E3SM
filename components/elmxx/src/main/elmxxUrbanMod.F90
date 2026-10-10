@@ -531,18 +531,18 @@ contains
           end if
        end do
     end do
-    call urb_set_2d(elm, 'urbcol:dz_soi', dz)
-    call urb_set_2d(elm, 'urbcol:zc_soi', z)
-    call urb_set_2d(elm, 'urbcol:zi_soi', zi)
+    call urb_set_2d(elm, 'urbcol:thermal.dz_soi', dz)
+    call urb_set_2d(elm, 'urbcol:thermal.zc_soi', z)
+    call urb_set_2d(elm, 'urbcol:thermal.zi_soi', zi)
     ! The combined (ELM-ordered) and SoilTemperature (_p1) layouts: snow
     ! slots empty at a cold start; _p1 carries the standing-water node.
     allocate(rt(nc,nlevtot), rt1(nc,nlevtot+1))
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = dz
     call urb_set_2d(elm, 'urbcol:dz', rt)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = z
-    call urb_set_2d(elm, 'urbcol:z', rt)
+    call urb_set_2d(elm, 'urbcol:snowsoil.z', rt)
     rt1 = 0._r8; rt1(:, nlevsno+1:nlevtot+1) = zi
-    call urb_set_2d(elm, 'urbcol:zi', rt1)
+    call urb_set_2d(elm, 'urbcol:snowsoil.zi', rt1)
     allocate(rp1(nc,nlevsno+1+nlevgrnd), rp2(nc,nlevsno+2+nlevgrnd))
     rp1 = 0._r8; rp1(:, nlevsno+2:) = dz
     call urb_set_2d(elm, 'urbcol:dz_p1', rp1)
@@ -615,9 +615,9 @@ contains
           end do
        end do
     end do
-    call urb_set_2d(elm, 'urbcol:t_soisno_soi', tsoi)
-    call urb_set_2d(elm, 'urbcol:h2osoi_liq_soi', liq)
-    call urb_set_2d(elm, 'urbcol:h2osoi_ice_soi', ice)
+    call urb_set_2d(elm, 'urbcol:thermal.t_soisno_soi', tsoi)
+    call urb_set_2d(elm, 'urbcol:snowsoil.h2osoi_liq_soi', liq)
+    call urb_set_2d(elm, 'urbcol:snowsoil.h2osoi_ice_soi', ice)
     call urb_set_2d(elm, 'urbcol:h2osoi_vol', vol)
     rt = 0._r8; rt(:, nlevsno+1:nlevtot) = tsoi
     call urb_set_2d(elm, 'urbcol:t_soisno', rt)
@@ -775,13 +775,13 @@ contains
     if (.not. elmxx_diag_enabled .or. .not. urban_built) return
     allocate(v(n_urb_col), v2(n_urb_col, nlevgrnd))
     do j = 1, 4
-       call urb_get_1d(elm, 'urbcol:'//trim(cols(j)), v)
+       call urb_get_1d(elm, 'urbcol:'//trim(regname(cols(j))), v)
        call elmxx_diag_1d(trim(tag)//':'//trim(cols(j)), v, n_urb_col)
     end do
-    call urb_get_1d(elm, 'urbcol:snl', v)
+    call urb_get_1d(elm, 'urbcol:snowsoil.snl', v)
     call elmxx_diag_1d(trim(tag)//':snl', v, n_urb_col)
     do j = 5, 6
-       call urb_get_2d(elm, 'urbcol:'//trim(cols(j)), v2)
+       call urb_get_2d(elm, 'urbcol:'//trim(regname(cols(j))), v2)
        call elmxx_diag_2d(trim(tag)//':'//trim(cols(j)), v2, n_urb_col, nlevgrnd)
     end do
     do j = 1, 7
@@ -793,27 +793,40 @@ contains
     call urb_get_1d(elm, 'urbcol:htvp', v);     call elmxx_diag_1d(trim(tag)//':htvp', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:qg', v);       call elmxx_diag_1d(trim(tag)//':qg', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:dqgdT', v);    call elmxx_diag_1d(trim(tag)//':dqgdT', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow_col', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow_col', v, n_urb_col)
     call urb_get_1d(elm, 'urbpatch:qflx_sub_snow', v); call elmxx_diag_1d(trim(tag)//':qflx_sub_snow', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qflx_evap_grnd_col', v); call elmxx_diag_1d(trim(tag)//':qflx_evap_grnd', v, n_urb_col)
-    call urb_get_2d(elm, 'urbcol:h2osoi_ice_soi', v2)
+    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_evap_grnd_col', v); call elmxx_diag_1d(trim(tag)//':qflx_evap_grnd', v, n_urb_col)
+    call urb_get_2d(elm, 'urbcol:snowsoil.h2osoi_ice_soi', v2)
     call elmxx_diag_2d(trim(tag)//':h2osoi_ice_soi', v2, n_urb_col, nlevgrnd)
     call urb_get_1d(elm, 'urbcol:qflx_infl', v); call elmxx_diag_1d(trim(tag)//':qflx_infl', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:qflx_surf', v); call elmxx_diag_1d(trim(tag)//':qflx_surf', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:qflx_drain', v); call elmxx_diag_1d(trim(tag)//':qflx_drain', v, n_urb_col)
-    call urb_get_1d(elm, 'urbcol:qflx_top_soil', v); call elmxx_diag_1d(trim(tag)//':qflx_top_soil', v, n_urb_col)
+    call urb_get_1d(elm, 'urbcol:snowsoil.qflx_top_soil', v); call elmxx_diag_1d(trim(tag)//':qflx_top_soil', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:zwt', v); call elmxx_diag_1d(trim(tag)//':zwt', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:hs_top_snow', v); call elmxx_diag_1d(trim(tag)//':hs_top_snow', v, n_urb_col)
     call urb_get_1d(elm, 'urbcol:dhsdT', v);       call elmxx_diag_1d(trim(tag)//':dhsdT', v, n_urb_col)
     deallocate(v2); allocate(v2(n_urb_col, nlevsno))
-    call urb_get_2d(elm, 'urbcol:t_soisno_sno', v2)
+    call urb_get_2d(elm, 'urbcol:snowsoil.t_soisno_sno', v2)
     call elmxx_diag_2d(trim(tag)//':t_soisno_sno', v2, n_urb_col, nlevsno)
-    call urb_get_2d(elm, 'urbcol:dz_sno', v2)
+    call urb_get_2d(elm, 'urbcol:snowsoil.dz_sno', v2)
     call elmxx_diag_2d(trim(tag)//':dz_sno', v2, n_urb_col, nlevsno)
-    call urb_get_2d(elm, 'urbcol:h2osoi_ice_sno', v2)
+    call urb_get_2d(elm, 'urbcol:snowsoil.h2osoi_ice_sno', v2)
     call elmxx_diag_2d(trim(tag)//':h2osoi_ice_sno', v2, n_urb_col, nlevsno)
     deallocate(v, v2)
   end subroutine elmxx_urban_diag_step
+
+  pure function regname(f) result(r)
+    ! The registry path of a trace column field: the snow/water and layer
+    ! fields sit in the shared structs (snowsoil, thermal).
+    implicit none
+    character(len=*), intent(in) :: f
+    character(len=48) :: r
+    select case (trim(f))
+    case ('h2osno', 'frac_sno', 'snow_depth', 'h2osoi_liq_soi'); r = 'snowsoil.'//trim(f)
+    case ('t_soisno_soi'); r = 'thermal.'//trim(f)
+    case default; r = trim(f)
+    end select
+  end function regname
 
   subroutine urb_get_1d(elm, name, v)
     implicit none
