@@ -452,8 +452,9 @@ contains
     ! InitCold (SoilHydrologyType.F90:581-594), literals kept as ELM has them
     ! -- sqrt(2.0) is default-real there, and matching it matters at 4e-9.
     ! pc is ELM's gridcell pc, read from surfdata 'pc' or defaulted to 0.4
-    ! (:567-569); no ELMxx surfdata carries it. It is NOT the 0.5 that
-    ! Infiltration's frac_infclust uses. This was hardcoded 0 while its
+    ! (:567-569); no ELMxx surfdata carries it. Infiltration's frac_infclust
+    ! uses the same pc (SoilHydrologyMod.F90:451; the C++ default in
+    ! ELMImpl.h must match pc_thresh). This was hardcoded 0 while its
     ! comment described the relation, which made h2osfc runoff
     ! (proportional to h2osfc - h2osfc_thresh) 4% high on 1x1_glc's April
     ! ponds, where ELM's threshold is 0.1156 mm.
