@@ -44,7 +44,7 @@ module elmxxMod
                                       ELMxxComputeSurfaceAlbedoNatural, &
                                       ELMxxComputeSurfaceAlbedoLake, &
                                       ELMxxComputeSurfaceAlbedoUrban, &
-                                      ELMxxComputeForcingDerivedNatural, &
+                                      ELMxxComputeForcingDerived, ELMxxAllocateCells, &
                                       ELMxxComputePhotosynForcingNatural, &
                                       ELMxxComputeSatellitePhenologyNatural
   use elmxxSoilPropMod       , only : elmxx_soil_prop_init, elmxx_soil_prop_clean, &
@@ -92,7 +92,6 @@ module elmxxMod
                                       elmxx_kokkos_seed_stomata_closed, &
                                       elmxx_kokkos_seed_soil_properties, &
                                       elmxx_kokkos_push_forcing, &
-                                      elmxx_kokkos_push_shared_precip, &
                                       elmxx_kokkos_push_latlon, &
                                       elmxx_push_monthly_phenology, &
                                       elmxx_kokkos_push_root_statics, &
@@ -503,6 +502,10 @@ contains
        call shr_sys_abort(subname//' ERROR: ELMxxCreate failed')
     end if
     elmxx_state_created = .true.
+    ! The cell-level container (forcing, derived quantities, statics) that
+    ! every surface reads, before any surface is seeded.
+    call ELMxxAllocateCells(elmxx_state, num_cells_owned, ierr_elmxx)
+    if (ierr_elmxx /= ELMXX_SUCCESS) call shr_sys_abort(subname//' ERROR: ELMxxAllocateCells failed')
 
     write(logunit,*) subname,'rank ',iam,' created ELMxx object: natural ', &
                      n_nat_col,' columns ',n_nat_patch,' patches, urban ', &
@@ -961,16 +964,6 @@ contains
        hist_state_init_done = .true.
     end if
 
-    ! Shared topounit-indexed precipitation. It has to be here rather than in
-    ! elmxx_kokkos_push_forcing above: the views it writes are allocated by
-    ! elmxx_soil_kernel_init, which runs lazily in the block just above on the
-    ! first step, so pushing earlier aborts step 1. Still ahead of the kernel
-    ! dispatch below, so it is current on every step. Feeds the water balance
-    ! check's precipitation term.
-    if (kokkos_state_built .and. soil_kernel_built) then
-       call elmxx_kokkos_push_shared_precip(elmxx_state, logunit)
-    end if
-
     if (kokkos_state_built .and. any_kernel_active) then
        ! The ground surface energy balance has to be formed AFTER the canopy
        ! and radiation kernels of this step have run and BEFORE
@@ -1169,9 +1162,9 @@ contains
     ! Zenith only: this runs before the first forcing push, so air density
     ! has nothing to be derived from yet and the flag skips it.
     call elmxx_kokkos_push_latlon(elmxx_state, cell_lat, cell_lon, logunit)
-    call ELMxxComputeForcingDerivedNatural(elmxx_state, nextsw_cday, declinp1, 0, ierr_ia)
+    call ELMxxComputeForcingDerived(elmxx_state, nextsw_cday, declinp1, 0, ierr_ia)
     if (ierr_ia /= ELMXX_SUCCESS) &
-         call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeForcingDerivedNatural failed')
+         call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeForcingDerived failed')
     call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_ia)
     if (ierr_ia /= ELMXX_SUCCESS) &
          call shr_sys_abort('(elmxx_init_albedo) ERROR: ComputeSurfaceAlbedoNatural failed')

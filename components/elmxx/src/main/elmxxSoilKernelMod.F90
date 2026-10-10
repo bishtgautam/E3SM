@@ -82,6 +82,9 @@ module elmxxSoilKernelMod
                                    ELMxxSetSharedFilterNolakep, &
                                    ELMxxSetSharedFilterHydrologyc, &
                                    ELMxxSetSharedFover, &
+                                   ELMxxGatherNaturalStatics, &
+                                   ELMxxRestartFieldFind, ELMxxRestartFieldInfo, &
+                                   ELMxxRestartFieldSet, &
                                    ELMxxSetSharedForcRain, ELMxxSetSharedForcSnow, &
                                    ELMxxSetSharedQflxFloodg, &
                                    ELMxxSetColItype, ELMxxSetColIsSoil, &
@@ -420,15 +423,10 @@ contains
     ! the water table. fmax comes from surfdata (FMAX), defaulting to 0.38
     ! where the field is absent.
     !-----------------------------------------------------------------
-    do kc = 1, n_kokkos_col
-       rcol(kc) = fmax(lun_gridcell(col_landunit(col_of_kcol(kc))))
-    end do
-    call ELMxxSetWtfact(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'Wtfact')
-
-    do kc = 1, n_kokkos_col
-       rcol(kc) = topo_slope(lun_gridcell(col_landunit(col_of_kcol(kc))))
-    end do
-    call ELMxxSetTopoSlope(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'TopoSlope')
+    ! Per cell (`cell`), then the natural columns' copies.
+    call cell_statics_push(elm, 'cell:wtfact', fmax(1:num_gridcells_local()))
+    call cell_statics_push(elm, 'cell:topo_slope', topo_slope(1:num_gridcells_local()))
+    call ELMxxGatherNaturalStatics(elm, ierr); call check(ierr, subname, 'GatherNaturalStatics')
 
     ! ELM, SoilHydrologyType InitCold, non-urban branch with
     ! use_var_soil_thick = .false. (the default):
@@ -619,5 +617,23 @@ contains
     if (allocated(kcol_npfts)) deallocate(kcol_npfts)
     soil_kernel_built = .false.
   end subroutine elmxx_soil_kernel_clean
+
+  !-----------------------------------------------------------------------
+  subroutine cell_statics_push(elm, name, v)
+    ! One cell-level static by registry name (row-major, 1-D).
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    real(r8), intent(in) :: v(:)
+    integer :: i, m1, m2, kind, ierr
+    character(len=128) :: got
+    call ELMxxRestartFieldFind(elm, name, i, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_soil_kernel) ERROR: no registry field '//trim(name))
+    call ELMxxRestartFieldInfo(elm, i, got, m1, m2, kind, ierr)
+    if (m1 /= size(v)) call shr_sys_abort('(elmxx_soil_kernel) ERROR: extent mismatch on '//trim(name))
+    call ELMxxRestartFieldSet(elm, i, v, size(v), ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_soil_kernel) ERROR: set '//trim(name))
+  end subroutine cell_statics_push
+
 
 end module elmxxSoilKernelMod
