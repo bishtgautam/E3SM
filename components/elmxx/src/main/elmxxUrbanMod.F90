@@ -803,15 +803,15 @@ contains
             'albgri', 'dz_h2osfc', 'c_h2osfc', 'xmf_h2osfc', 'eflx_h2osfc_to_snow', &
             'qflx_snofrz_lyr', 'qflx_h2osfc_to_ice', 'albd', 'albi', 'cgrnd', 'cgrndl', 'cgrnds', &
             'dgnetdT', 'dlrad', 'ulrad', 'eflx_anthro', 'eflx_gnet', 'eflx_heat_from_ac', &
-            'eflx_wasteheat', 'eflx_traffic', 'eflx_lh_grnd', 'eflx_lh_tot', 'eflx_lh_tot_r', &
-            'eflx_lh_tot_u', 'eflx_lh_vege', 'eflx_lh_vegt', 'eflx_lwrad_net', 'eflx_lwrad_net_r', &
-            'eflx_lwrad_net_u', 'eflx_lwrad_out', 'eflx_lwrad_out_r', 'eflx_lwrad_out_u', &
+            'eflx_wasteheat', 'eflx_traffic', 'eflx_lh_grnd', 'eflx_lh_tot', &
+            'eflx_lh_vege', 'eflx_lh_vegt', 'eflx_lwrad_net', &
+            'eflx_lwrad_out', &
             'eflx_sh_grnd', 'eflx_sh_h2osfc', 'eflx_sh_snow', 'eflx_sh_soil', 'eflx_sh_tot', &
-            'eflx_sh_tot_r', 'eflx_sh_tot_u', 'eflx_sh_veg', 'eflx_soil_grnd', 'eflx_soil_grnd_r', &
-            'eflx_soil_grnd_u', 'errlon', 'errseb', 'errsoi_patch', 'errsol', 'fsa', 'fsa_u', &
+            'eflx_sh_veg', 'eflx_soil_grnd', &
+            'errlon', 'errseb', 'errsoi_patch', 'errsol', 'fsa', &
             'fsr', 'fsr_nir_d', 'fsr_nir_i', 'fsr_vis_d', 'fsr_vis_i', 'netrad', 'q_ref2m', 'ram1', &
-            'rh_ref2m', 'rh_ref2m_u', 'sabg', 'sabg_chk', 'sabg_snow', 'sabg_soil', 'sabv', &
-            't_ref2m', 't_ref2m_u', 't_veg', 'taux', 'tauy', 'thm')
+            'rh_ref2m', 'sabg', 'sabg_chk', 'sabg_snow', 'sabg_soil', 'sabv', &
+            't_ref2m', 't_veg', 'taux', 'tauy', 'thm')
        r = trim(sname(s))//'.energy.'//f
        case ('h2osno_old', 'h2osfc', 'frac_h2osfc', 'frac_h2osfc_act', 'h2osfc_thresh', &
             'h2osoi_liq', 'h2osoi_ice', 'h2osoi_liq_p1', 'h2osoi_ice_p1', 'h2osoi_vol', 'begwb', &
@@ -822,7 +822,7 @@ contains
             'qflx_evap_tot_col', 'qflx_snwcp_ice_col', 'qflx_snwcp_liq_col', 'qflx_irrig', &
             'f_surf_col', 'h2osoi_liq_depth_intg', 'h2osoi_ice_depth_intg', 'qflx_drain', &
             'qflx_drain_perched', 'qflx_rsub_sat', 'qflx_lnd2ocn', 'qflx_qrgwl', 'qflx_runoff', &
-            'qflx_runoff_u', 'qflx_runoff_r', 'qflx_glcice_frz', 'qflx_irr_demand', &
+            'qflx_glcice_frz', 'qflx_irr_demand', &
             'total_plant_stored_h2o', 'fsat', 'fcov', 'qflx_evap_soi', 'qflx_tran_veg', &
             'qflx_sub_snow', 'qflx_dew_grnd', 'qflx_dew_snow', 'qflx_ev_snow', 'qflx_ev_soil', &
             'qflx_ev_h2osfc', 'qflx_evap_grnd', 'qflx_evap_tot', 'qflx_evap_veg', 'qflx_evap_can', &
