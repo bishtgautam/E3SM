@@ -872,13 +872,16 @@ contains
     type(ELMxxType), intent(in) :: elm
     character(len=*), intent(in) :: f
     real(r8), intent(in) :: v(:,:)
-    integer :: s, n
+    integer :: s, n, m2
     character(len=96) :: pth
+    ! A layered field takes the surface's own layer count (its registry
+    ! extent): the roof and walls have nlevurb of the driver's nlevgrnd.
     n = size(v,1)/5
     do s = 1, 5
        pth = surf_path(s, f)
        if (len_trim(pth) == 0) cycle
-       call urb_set_2d(elm, 'urban:'//trim(pth), v(s:5*n:5, :))
+       m2 = min(field_n2(elm, 'urban:'//trim(pth)), size(v,2))
+       call urb_set_2d(elm, 'urban:'//trim(pth), v(s:5*n:5, 1:m2))
     end do
   end subroutine surf_set_2d
 
@@ -912,19 +915,35 @@ contains
     real(r8), allocatable :: w(:,:)
     integer :: s, n
     character(len=96) :: pth
+    integer :: m2
     n = size(v,1)/5
-    allocate(w(n, size(v,2)))
     do s = 1, 5
        pth = surf_path(s, f)
        if (len_trim(pth) == 0) then
           v(s:5*n:5, :) = spval
           cycle
        end if
+       m2 = min(field_n2(elm, 'urban:'//trim(pth)), size(v,2))
+       allocate(w(n, m2))
        call urb_get_2d(elm, 'urban:'//trim(pth), w)
-       v(s:5*n:5, :) = w
+       v(s:5*n:5, 1:m2) = w
+       v(s:5*n:5, m2+1:) = spval               ! below the surface's layers
+       deallocate(w)
     end do
-    deallocate(w)
   end subroutine surf_get_2d
+
+  integer function field_n2(elm, name)
+    ! The second extent of registry field `name` on this rank.
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    character(len=*), intent(in) :: name
+    integer :: i, m1, m2, kind, ierr
+    character(len=128) :: got
+    call ELMxxRestartFieldFind(elm, name, i, ierr)
+    if (ierr /= ELMXX_SUCCESS) call shr_sys_abort('(elmxx_urban) ERROR: no registry field '//trim(name))
+    call ELMxxRestartFieldInfo(elm, i, got, m1, m2, kind, ierr)
+    field_n2 = m2
+  end function field_n2
 
   pure function regname(f) result(r)
     ! The registry path of a trace column field: the snow/water and layer
