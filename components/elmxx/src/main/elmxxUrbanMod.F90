@@ -367,12 +367,12 @@ contains
   !-----------------------------------------------------------------------
   subroutine seed_surface(elm, logunit)
     !
-    ! The urban surface's columns and patches (U1/U2): allocate urbanCol/
-    ! urbanPatch, five columns per packed landunit k (packed column
-    ! 5(k-1)+s, s in ELM's column order, which is the subgrid's), one patch
-    ! each; seed their topology and ELM's urban geometry, road soil
-    ! properties and cold start by NAME through the registry; then let the
-    ! library build its active-only filters.
+    ! The urban surface records (plan B): ELM's five urban columns per packed
+    ! landunit k, in ELM's column order (roof, sunlit wall, shaded wall,
+    ! impervious road, pervious road), each with one patch. The geometry,
+    ! road soil properties and cold start are built here as 5k+s packed
+    ! arrays and seeded by NAME through the registry into each surface's
+    ! record (surf_set_*); then the library builds its active filter.
     !
     !   geometry    ELM initVerticalMod, urban branch (use_vancouver and
     !               use_mexicocity off): roof and walls on nlevurb = 5 layers

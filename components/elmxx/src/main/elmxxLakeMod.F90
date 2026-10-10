@@ -440,7 +440,7 @@ contains
     ! Per step: the reference height and the incident shortwave, per lake
     ! patch, with ELM's band assignment (1 visible, 2 near-IR). Everything else
     ! the lake reads, ELMxxLakeGatherForcing takes on the device from the
-    ! natural column of the same cell.
+    ! lake column's cell (`cell`).
     !
     implicit none
     type(ELMxxType), intent(in) :: elm

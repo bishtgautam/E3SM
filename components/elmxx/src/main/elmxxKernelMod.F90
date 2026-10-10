@@ -497,8 +497,8 @@ contains
        why = ' '
 
     case (K_URBANRAD, K_URBANFLUX)
-       ! Runnable since Stage 6.7 (U4), on the urban surface (urban /
-       ! urbanCol / urbanPatch, elmxxUrbanMod). UrbanAlbedo -- the old
+       ! Runnable since Stage 6.7 (U4), on the urban surface records
+       ! (urban.roof .. urban.perviousRoad, elmxxUrbanMod). UrbanAlbedo -- the old
        ! blocker, it produces sabs_dir/sabs_dif -- is ported and runs at the
        ! end of each albedo step. The two tokens switch on the whole urban
        ! step: every urban module's branch runs at its ELM driver position
