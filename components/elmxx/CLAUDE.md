@@ -189,8 +189,12 @@ Seeded by name from `elmxxUrbanMod` (`surf_set_*` splits a 5k+s array
 into `urban:<surface>.<member>.<field>` through `surf_path`, generated from
 the C++ layout). Stepped from `src/main/ELMxxUrban.cpp` by the
 `urbanrad,urbanflux` tokens. Durable facts:
-- Column kernels run once per surface. `UrbanSurfaceRef(e, s)` hands the
-  unchanged builders that record's views (column = patch = landunit).
+- Natural and urban share no container: the urban path uses urban types
+  only. Column kernels run once per surface; `MakeUrbanSurfaceRef(e, s)`
+  (`main/UrbanSurface.h`) feeds the urban builders (`Build*ViewUrban`),
+  generated from the natural builders through the record field
+  classification (column = patch = landunit). A field added to a natural
+  builder needs its urban counterpart.
   Members a surface lacks come from zero/spval stand-ins in `urbanAux`,
   never restarted. Per-call scratch (`fact_out`, ...) is shared by the
   surfaces, so a surface's solve must collapse before the next one runs.
