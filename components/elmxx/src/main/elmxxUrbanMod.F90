@@ -93,6 +93,7 @@ module elmxxUrbanMod
   real(r8), allocatable :: cv_roof(:,:), cv_wall(:,:), cv_improad(:,:)
 
   public :: elmxx_urban_init
+  public :: elmxx_urban_apply_finidat
   public :: elmxx_urban_diag_dump
   public :: elmxx_urban_diag_step
   public :: elmxx_urban_clean
@@ -628,6 +629,265 @@ contains
   end subroutine seed_surface
 
   !-----------------------------------------------------------------------
+  subroutine elmxx_urban_apply_finidat(elm, logunit)
+    !
+    ! Overwrite the urban cold start with an ELM restart's urban state
+    ! (elmxxFinidatMod), for the identical-IC probe (plan U8). Each packed
+    ! 5k+s entry is gathered from its subgrid column (landunit_columns), so,
+    ! like the natural push, this assumes one rank: the file is global and
+    ! the subgrid indices are local.
+    !
+    !   landunit   taf, qaf; the absorbed solar per surface (sabs_*), which
+    !              UrbanRadiation reads before the step's UrbanAlbedo
+    !   column     snow (layers, mass, depth, aerosol, grain radius),
+    !              layer temperature and water (combined, ELM-ordered, and
+    !              the split soil/snow halves, snow reversed: SnowIndexing.h),
+    !              h2osoi_vol as ELM derives it on read (ColumnDataType ::
+    !              col_ws_restart, no bounding on urban columns), t_grnd,
+    !              surface water, the previous step's snow melt, albedos
+    !   road soil  wa, zwt, zwt_perched, frost_table
+    !
+    ! Not on ELM's restart, and not needed: t_building (diagnosed from the
+    ! inner layer temperatures every step), the _p1 geometry (rebuilt from
+    ! the snow every step), and fluxes. Roof/wall slots below nlevurb keep
+    ! the cold start's spval.
+    !
+    use elmxxFinidatMod, only : finidat_read, fi_ncol, fi_npft, fi_nlun, &
+         fi_snl, fi_t_soisno, fi_h2osoi_liq, fi_h2osoi_ice, fi_dzsno, fi_zsno, &
+         fi_zisno, fi_snw_rds, fi_qflx_snofrz_lyr, fi_snow_depth, fi_h2osno, &
+         fi_int_snow, fi_frac_sno, fi_frac_sno_eff, fi_t_grnd, fi_t_h2osfc, &
+         fi_h2osfc, fi_frac_h2osfc, fi_wa, fi_zwt, fi_zwt_perched, fi_frost_table, &
+         fi_qflx_snow_melt, fi_albgrd, fi_albgri, fi_albd, fi_albi, &
+         fi_mss_bcphi, fi_mss_bcpho, fi_mss_ocphi, fi_mss_ocpho, &
+         fi_mss_dst1, fi_mss_dst2, fi_mss_dst3, fi_mss_dst4, &
+         fi_taf, fi_qaf, fi_sabs_dir, fi_sabs_dif
+    use elmxxSubgridMod, only : num_patches, patch_column
+    implicit none
+    type(ELMxxType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer  :: k, s, kc, c, p, j, nc, nlev
+    integer  :: subcol(5), urbpatch(num_columns)
+    real(r8), allocatable :: r1(:), rs(:,:), rg(:,:), rt(:,:), rt1(:,:), rr(:,:), dz(:,:)
+    real(r8), parameter :: denh2o = 1000._r8, denice = 917._r8
+    character(len=*), parameter :: sname(5) = (/ 'roof          ', 'sunlitWall    ', &
+         'shadedWall    ', 'imperviousRoad', 'perviousRoad  ' /)
+    character(len=*), parameter :: subname = '(elmxx_urban_apply_finidat) '
+
+    if (.not. urban_built) return
+    if (.not. finidat_read) call shr_sys_abort(subname//'ERROR: finidat not read')
+    if (fi_ncol /= num_columns .or. fi_npft /= num_patches .or. fi_nlun /= num_landunits) &
+         call shr_sys_abort(subname//'ERROR: finidat subgrid is not this rank''s')
+
+    nc = n_urb_col
+    allocate(r1(nc), rs(nc,nlevsno), rg(nc,nlevgrnd), rt(nc,nlevtot), rt1(nc,nlevtot+1), &
+             rr(nc,numrad), dz(nc,nlevgrnd))
+
+    ! ---- landunit ----
+    block
+      real(r8) :: lv(n_kokkos_urb), lr(n_kokkos_urb, numrad)
+      do k = 1, n_kokkos_urb; lv(k) = fi_taf(lun_of_kurb(k)); end do
+      call urb_set_1d(elm, 'urban:taf', lv)
+      do k = 1, n_kokkos_urb; lv(k) = fi_qaf(lun_of_kurb(k)); end do
+      call urb_set_1d(elm, 'urban:qaf', lv)
+      do s = 1, 5
+         do k = 1, n_kokkos_urb; lr(k,:) = fi_sabs_dir(:, lun_of_kurb(k), s); end do
+         call urb_set_2d(elm, 'urban:'//trim(sname(s))//'.rad.sabsDir', lr)
+         do k = 1, n_kokkos_urb; lr(k,:) = fi_sabs_dif(:, lun_of_kurb(k), s); end do
+         call urb_set_2d(elm, 'urban:'//trim(sname(s))//'.rad.sabsDif', lr)
+      end do
+    end block
+
+    ! ---- column scalars ----
+    call col_1d('snowsoil.snl'          , real(fi_snl, r8))
+    call col_1d('snowsoil.h2osno'       , fi_h2osno)
+    call col_1d('snowsoil.snow_depth'   , fi_snow_depth)
+    call col_1d('snowsoil.int_snow'     , fi_int_snow)
+    call col_1d('snowsoil.frac_sno'     , fi_frac_sno)
+    call col_1d('snowsoil.frac_sno_eff' , fi_frac_sno_eff)
+    call col_1d('snowsoil.qflx_snow_melt', fi_qflx_snow_melt)
+    call col_1d('t_grnd'      , fi_t_grnd)
+    call col_1d('t_h2osfc'    , fi_t_h2osfc)
+    call col_1d('h2osfc'      , fi_h2osfc)
+    call col_1d('frac_h2osfc' , fi_frac_h2osfc)
+    call col_1d('wa'          , fi_wa)
+    call col_1d('zwt'         , fi_zwt)
+    call col_1d('zwt_perched' , fi_zwt_perched)
+    call col_1d('frost_table' , fi_frost_table)
+
+    ! ---- snow layers: reversed (slot 1 soil-adjacent) ----
+    call col_sno('snowsoil.dz_sno'        , fi_dzsno)
+    call col_sno('snowsoil.t_soisno_sno'  , fi_t_soisno(1:nlevsno,:))
+    call col_sno('snowsoil.h2osoi_liq_sno', fi_h2osoi_liq(1:nlevsno,:))
+    call col_sno('snowsoil.h2osoi_ice_sno', fi_h2osoi_ice(1:nlevsno,:))
+    call col_sno('snowsoil.snw_rds'       , fi_snw_rds)
+    call col_sno('snowsoil.mss_bcphi', fi_mss_bcphi)
+    call col_sno('snowsoil.mss_bcpho', fi_mss_bcpho)
+    call col_sno('snowsoil.mss_ocphi', fi_mss_ocphi)
+    call col_sno('snowsoil.mss_ocpho', fi_mss_ocpho)
+    call col_sno('snowsoil.mss_dst1' , fi_mss_dst1)
+    call col_sno('snowsoil.mss_dst2' , fi_mss_dst2)
+    call col_sno('snowsoil.mss_dst3' , fi_mss_dst3)
+    call col_sno('snowsoil.mss_dst4' , fi_mss_dst4)
+    ! ELM-ordered, as the natural column's (ELMxxSetters.cpp).
+    do k = 1, n_kokkos_urb
+       call landunit_columns(lun_of_kurb(k), subcol)
+       do s = 1, 5
+          rs(5*(k-1)+s, :) = fi_qflx_snofrz_lyr(:, subcol(s))
+       end do
+    end do
+    call surf_set_2d(elm, 'qflx_snofrz_lyr', rs)
+
+    ! ---- layer state: the split soil half, then the combined arrays ----
+    call surf_get_2d(elm, 'thermal.dz_soi', dz)
+    call col_soi('thermal.t_soisno_soi'   , fi_t_soisno)
+    call col_soi('snowsoil.h2osoi_liq_soi', fi_h2osoi_liq)
+    call col_soi('snowsoil.h2osoi_ice_soi', fi_h2osoi_ice)
+    rg = spval
+    do k = 1, n_kokkos_urb
+       call landunit_columns(lun_of_kurb(k), subcol)
+       do s = 1, 5
+          kc = 5*(k-1) + s
+          nlev = merge(nlevurb_c, nlevgrnd, s <= 3)
+          do j = 1, nlev
+             rg(kc,j) = fi_h2osoi_liq(nlevsno+j, subcol(s))/(dz(kc,j)*denh2o) &
+                      + fi_h2osoi_ice(nlevsno+j, subcol(s))/(dz(kc,j)*denice)
+          end do
+       end do
+    end do
+    call surf_set_2d(elm, 'h2osoi_vol', rg)
+    call col_tot('t_soisno'  , fi_t_soisno)
+    call col_tot('h2osoi_liq', fi_h2osoi_liq)
+    call col_tot('h2osoi_ice', fi_h2osoi_ice)
+
+    ! Snow geometry in the combined (ELM-ordered) arrays; the soil half is
+    ! the grid seeded at init. zi slot i is ELM zi(i-1-nlevsno).
+    call surf_get_2d(elm, 'dz', rt)
+    call fill_snow(rt, fi_dzsno)
+    call surf_set_2d(elm, 'dz', rt)
+    call surf_get_2d(elm, 'snowsoil.z', rt)
+    call fill_snow(rt, fi_zsno)
+    call surf_set_2d(elm, 'snowsoil.z', rt)
+    call surf_get_2d(elm, 'snowsoil.zi', rt1)
+    call fill_snow(rt1, fi_zisno)
+    call surf_set_2d(elm, 'snowsoil.zi', rt1)
+
+    ! ---- albedos (column ground, and the one patch per column) ----
+    urbpatch = 0
+    do p = 1, num_patches
+       urbpatch(patch_column(p)) = p
+    end do
+    call col_rad('albgrd', fi_albgrd, .false.)
+    call col_rad('albgri', fi_albgri, .false.)
+    call col_rad('albd'  , fi_albd  , .true.)
+    call col_rad('albi'  , fi_albi  , .true.)
+
+    if (masterproc) then
+       write(logunit,*) subname,'seeded ',n_kokkos_urb,' urban landunits from finidat; snl ', &
+            (fi_snl(subcol(s)), s = 1, 5)
+       call shr_sys_flush(logunit)
+    end if
+    deallocate(r1, rs, rg, rt, rt1, rr, dz)
+
+  contains
+
+    subroutine col_1d(name, src)
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:)
+      integer :: kk, ss
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            r1(5*(kk-1)+ss) = src(subcol(ss))
+         end do
+      end do
+      call surf_set_1d(elm, name, r1)
+    end subroutine col_1d
+
+    subroutine col_sno(name, src)
+      ! src (nlevsno, ncol), ELM order (slot nlevsno soil-adjacent).
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, ss, jj
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            do jj = 1, nlevsno
+               rs(5*(kk-1)+ss, jj) = src(nlevsno+1-jj, subcol(ss))
+            end do
+         end do
+      end do
+      call surf_set_2d(elm, name, rs)
+    end subroutine col_sno
+
+    subroutine col_soi(name, src)
+      ! src (nlevtot, ncol); the surface's own layers only.
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, ss, jj
+      rg = spval
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            do jj = 1, merge(nlevurb_c, nlevgrnd, ss <= 3)
+               rg(5*(kk-1)+ss, jj) = src(nlevsno+jj, subcol(ss))
+            end do
+         end do
+      end do
+      call surf_set_2d(elm, name, rg)
+    end subroutine col_soi
+
+    subroutine col_tot(name, src)
+      ! src (nlevtot, ncol), ELM order; roof/wall slots below nlevurb keep
+      ! the cold start's spval.
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, ss, jj
+      call surf_get_2d(elm, name, rt)
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            do jj = 1, nlevsno + merge(nlevurb_c, nlevgrnd, ss <= 3)
+               rt(5*(kk-1)+ss, jj) = src(jj, subcol(ss))
+            end do
+         end do
+      end do
+      call surf_set_2d(elm, name, rt)
+    end subroutine col_tot
+
+    subroutine fill_snow(v, src)
+      ! The snow slots 1..nlevsno of a combined array from src (nlevsno, ncol).
+      real(r8), intent(inout) :: v(:,:)
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, ss, jj
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            do jj = 1, nlevsno
+               v(5*(kk-1)+ss, jj) = src(jj, subcol(ss))
+            end do
+         end do
+      end do
+    end subroutine fill_snow
+
+    subroutine col_rad(name, src, by_patch)
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      logical, intent(in) :: by_patch
+      integer :: kk, ss, ii
+      do kk = 1, n_kokkos_urb
+         call landunit_columns(lun_of_kurb(kk), subcol)
+         do ss = 1, 5
+            ii = subcol(ss)
+            if (by_patch) ii = urbpatch(ii)
+            rr(5*(kk-1)+ss, :) = src(:, ii)
+         end do
+      end do
+      call surf_set_2d(elm, name, rr)
+    end subroutine col_rad
+
+  end subroutine elmxx_urban_apply_finidat
+
+  !-----------------------------------------------------------------------
   subroutine landunit_columns(l, cols)
     ! The five subgrid columns of urban landunit l, in subgrid (ELM) order.
     implicit none
@@ -735,8 +995,17 @@ contains
     call surf_get_1d(elm, 'qflx_drain', v); call elmxx_diag_1d(trim(tag)//':qflx_drain', v, n_urb_col)
     call surf_get_1d(elm, 'snowsoil.qflx_top_soil', v); call elmxx_diag_1d(trim(tag)//':qflx_top_soil', v, n_urb_col)
     call surf_get_1d(elm, 'zwt', v); call elmxx_diag_1d(trim(tag)//':zwt', v, n_urb_col)
+    call surf_get_1d(elm, 'wa', v); call elmxx_diag_1d(trim(tag)//':wa', v, n_urb_col)
+    call surf_get_1d(elm, 'qcharge', v); call elmxx_diag_1d(trim(tag)//':qcharge', v, n_urb_col)
     call surf_get_1d(elm, 'hs_top_snow', v); call elmxx_diag_1d(trim(tag)//':hs_top_snow', v, n_urb_col)
     call surf_get_1d(elm, 'dhsdT', v);       call elmxx_diag_1d(trim(tag)//':dhsdT', v, n_urb_col)
+    ! Landunit (packed k), pairs with ELM urbanflux_out:taf/qaf/t_building.
+    block
+      real(r8) :: lv(n_kokkos_urb)
+      call urb_get_1d(elm, 'urban:taf', lv);       call elmxx_diag_1d(trim(tag)//':taf', lv, n_kokkos_urb)
+      call urb_get_1d(elm, 'urban:qaf', lv);       call elmxx_diag_1d(trim(tag)//':qaf', lv, n_kokkos_urb)
+      call urb_get_1d(elm, 'urban:tBuilding', lv); call elmxx_diag_1d(trim(tag)//':t_building', lv, n_kokkos_urb)
+    end block
     deallocate(v2); allocate(v2(n_urb_col, nlevsno))
     call surf_get_2d(elm, 'snowsoil.t_soisno_sno', v2)
     call elmxx_diag_2d(trim(tag)//':t_soisno_sno', v2, n_urb_col, nlevsno)

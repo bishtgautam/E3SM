@@ -74,7 +74,8 @@ module elmxxMod
   use elmxxLakeMod           , only : elmxx_lake_init, elmxx_lake_push_forcing, &
                                       elmxx_lake_clean, lake_built
   use elmxxUrbanMod          , only : elmxx_urban_init, elmxx_urban_diag_dump, &
-                                      elmxx_urban_clean, urban_built, elmxx_urban_diag_step
+                                      elmxx_urban_clean, urban_built, elmxx_urban_diag_step, &
+                                      elmxx_urban_apply_finidat
   use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
@@ -626,6 +627,8 @@ contains
           ! from them, so seeding only the device would be undone one step in.
           call elmxx_finidat_apply_soilprop(logunit)
           call elmxx_kokkos_push_finidat(elmxx_state, logunit)
+          ! Urban state too (U8 probe); lake is still a cold start (STATUS L1).
+          call elmxx_urban_apply_finidat(elmxx_state, logunit)
        end if
 
        ! Parse after seeding, so a blocked kernel's abort names a

@@ -89,13 +89,21 @@ module elmxxFinidatMod
   real(r8), allocatable, public :: fi_albgrd(:,:), fi_albgri(:,:)
   real(r8), allocatable, public :: fi_flx_absdv(:,:), fi_flx_absdn(:,:)
   real(r8), allocatable, public :: fi_flx_absiv(:,:), fi_flx_absin(:,:)
+  ! Urban road soil and snow (elmxxUrbanMod :: elmxx_urban_apply_finidat).
+  real(r8), allocatable, public :: fi_qflx_snow_melt(:), fi_zwt_perched(:), fi_frost_table(:)
+
+  ! ---- landunit state (urban canyon air, absorbed solar per surface) ----
+  real(r8), allocatable, public :: fi_taf(:), fi_qaf(:)    ! (nlun)
+  ! (numrad, nlun, s): s = roof, sunlit wall, shaded wall, impervious road,
+  ! pervious road -- ELM's urban column order.
+  real(r8), allocatable, public :: fi_sabs_dir(:,:,:), fi_sabs_dif(:,:,:)
 
   ! ---- patch state ----
   real(r8), allocatable, public :: fi_t_veg(:), fi_h2ocan(:), fi_fwet(:)
   real(r8), allocatable, public :: fi_elai(:), fi_esai(:), fi_htop(:)
   real(r8), allocatable, public :: fi_albd(:,:), fi_albi(:,:)
 
-  integer, public :: fi_ncol = 0, fi_npft = 0
+  integer, public :: fi_ncol = 0, fi_npft = 0, fi_nlun = 0
 
   public :: elmxx_finidat_read
   public :: elmxx_finidat_apply_soilprop
@@ -110,7 +118,9 @@ contains
     character(len=*), intent(in) :: fname
     integer         , intent(in) :: ncol_expect, npft_expect, logunit
     type(file_desc_t) :: ncid
-    integer :: status
+    integer :: status, s
+    character(len=*), parameter :: sabs_name(5) = (/ 'roof     ', 'sunwall  ', &
+         'shadewall', 'improad  ', 'perroad  ' /)
     character(len=*), parameter :: subname = '(elmxx_finidat_read) '
 
     call elmxx_finidat_clean()
@@ -122,6 +132,7 @@ contains
 
     fi_ncol = get_dimlen(ncid, fname, 'column')
     fi_npft = get_dimlen(ncid, fname, 'pft')
+    fi_nlun = get_dimlen(ncid, fname, 'landunit')
 
     ! A restart from a different grid would read cleanly and seed nonsense, so
     ! the shapes are checked rather than assumed.
@@ -156,6 +167,9 @@ contains
     allocate(fi_albgrd(2, fi_ncol), fi_albgri(2, fi_ncol))
     allocate(fi_flx_absdv(nlevsno_r+1, fi_ncol), fi_flx_absdn(nlevsno_r+1, fi_ncol), &
              fi_flx_absiv(nlevsno_r+1, fi_ncol), fi_flx_absin(nlevsno_r+1, fi_ncol))
+    allocate(fi_qflx_snow_melt(fi_ncol), fi_zwt_perched(fi_ncol), fi_frost_table(fi_ncol))
+    allocate(fi_taf(fi_nlun), fi_qaf(fi_nlun))
+    allocate(fi_sabs_dir(2, fi_nlun, 5), fi_sabs_dif(2, fi_nlun, 5))
     allocate(fi_t_veg(fi_npft), fi_h2ocan(fi_npft), fi_fwet(fi_npft), &
              fi_elai(fi_npft), fi_esai(fi_npft), fi_htop(fi_npft))
     allocate(fi_albd(2, fi_npft), fi_albi(2, fi_npft))
@@ -195,6 +209,16 @@ contains
     call read_real2d(ncid, fname, 'flx_absdn'   , fi_flx_absdn)
     call read_real2d(ncid, fname, 'flx_absiv'   , fi_flx_absiv)
     call read_real2d(ncid, fname, 'flx_absin'   , fi_flx_absin)
+    call read_real1d(ncid, fname, 'qflx_snow_melt', fi_qflx_snow_melt)
+    call read_real1d(ncid, fname, 'ZWT_PERCH'   , fi_zwt_perched)
+    call read_real1d(ncid, fname, 'FROST_TABLE' , fi_frost_table)
+
+    call read_real1d(ncid, fname, 'taf'         , fi_taf)
+    call read_real1d(ncid, fname, 'qaf'         , fi_qaf)
+    do s = 1, 5
+       call read_real2d(ncid, fname, 'sabs_'//trim(sabs_name(s))//'_dir', fi_sabs_dir(:,:,s))
+       call read_real2d(ncid, fname, 'sabs_'//trim(sabs_name(s))//'_dif', fi_sabs_dif(:,:,s))
+    end do
 
     call read_real1d(ncid, fname, 'T_VEG'  , fi_t_veg)
     call read_real1d(ncid, fname, 'H2OCAN' , fi_h2ocan)
@@ -256,6 +280,13 @@ contains
     if (allocated(fi_flx_absdn))         deallocate(fi_flx_absdn)
     if (allocated(fi_flx_absiv))         deallocate(fi_flx_absiv)
     if (allocated(fi_flx_absin))         deallocate(fi_flx_absin)
+    if (allocated(fi_qflx_snow_melt))    deallocate(fi_qflx_snow_melt)
+    if (allocated(fi_zwt_perched))       deallocate(fi_zwt_perched)
+    if (allocated(fi_frost_table))       deallocate(fi_frost_table)
+    if (allocated(fi_taf))               deallocate(fi_taf)
+    if (allocated(fi_qaf))               deallocate(fi_qaf)
+    if (allocated(fi_sabs_dir))          deallocate(fi_sabs_dir)
+    if (allocated(fi_sabs_dif))          deallocate(fi_sabs_dif)
     if (allocated(fi_t_veg))             deallocate(fi_t_veg)
     if (allocated(fi_h2ocan))            deallocate(fi_h2ocan)
     if (allocated(fi_fwet))              deallocate(fi_fwet)
@@ -265,7 +296,7 @@ contains
     if (allocated(fi_albd))              deallocate(fi_albd)
     if (allocated(fi_albi))              deallocate(fi_albi)
     finidat_read = .false.
-    fi_ncol = 0; fi_npft = 0
+    fi_ncol = 0; fi_npft = 0; fi_nlun = 0
   end subroutine elmxx_finidat_clean
 
   !-----------------------------------------------------------------------

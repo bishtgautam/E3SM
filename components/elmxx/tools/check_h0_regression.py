@@ -24,6 +24,13 @@ Usage:
 
 Exit status is 1 if any field regressed by more than --tol (fractional, so
 0.10 = 10% worse than the reference), else 0.
+
+References, one per twin (pass the matching one with --ref):
+    h0_reference.json                  1x1_glc (the default)
+    h0_reference_nhcell_urban.json     nhcell_urban, 1948 forcing
+    h0_reference_nhcell_urban_1979.json nhcell_urban, 1979 forcing
+                                       (DATM_CLMNCEP_YR_START/END=1979)
+    h0_reference_brazil_urban100.json  brazil_urban100 (identical to ELM)
 """
 import argparse
 import glob
