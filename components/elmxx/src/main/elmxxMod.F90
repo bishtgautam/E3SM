@@ -120,6 +120,24 @@ module elmxxMod
   integer , public, pointer :: natural_id_cells_owned(:) ! 1-based global grid IDs owned by this rank
 
   !--------------------------------------------------------------------------
+  ! Perf mode (plan Stage 6.8). Set by the standalone perf driver
+  ! (src/perf/elmxx_perf.F90) before elmxx_init; never by the coupled model,
+  ! where it stays 0 and nothing below changes.
+  !
+  ! With elmxx_perf_ncells = N > 0, the domain's active cells are SOURCE
+  ! cells (nsrc of them) and the decomposition deals N virtual cells
+  ! round-robin, exactly as it deals real ones. Virtual cell g copies source
+  ! cell mod(g-1, nsrc) + 1: natural_id_cells_owned holds that source's grid
+  ! ID, so it repeats, and every reader that indexes its file through it
+  ! (domain, surfdata) replicates the cell with no change of its own.
+  ! What assumes unique IDs is switched off: history, the per-step
+  ! init snapshot, the step reports, and finidat (its counts are per file).
+  !--------------------------------------------------------------------------
+  integer , public          :: elmxx_perf_ncells = 0
+  integer , public          :: elmxx_perf_nsrc   = 0
+  integer , public, pointer :: elmxx_perf_src_owned(:) => null() ! source ordinal of each owned cell
+
+  !--------------------------------------------------------------------------
   ! Global grid, read from the land domain file on every rank
   !--------------------------------------------------------------------------
   integer , public          :: nlon_g                    ! ni
@@ -397,12 +415,6 @@ contains
        call shr_sys_abort(subname//' ERROR: no active land cells (mask==1) in '//trim(fatmlndfrc))
     end if
 
-    if (npes > num_cells_global) then
-       write(logunit,*) subname,'ERROR: number of processes exceeds number of ', &
-                        'land grid cells ',npes,num_cells_global
-       call shr_sys_abort(subname//' ERROR: more MPI ranks than active land cells')
-    end if
-
     ! global grid IDs of the active land cells, in ascending order
     allocate(land_ids(num_cells_global))
     k = 0
@@ -412,6 +424,27 @@ contains
           land_ids(k) = n
        end if
     end do
+
+    ! Perf mode: the active cells just counted are the sources; the
+    ! decomposition below deals elmxx_perf_ncells virtual cells instead.
+    if (elmxx_perf_ncells > 0) then
+       if (len_trim(finidat) > 0) then
+          call shr_sys_abort(subname//' ERROR: perf mode is a cold start; '// &
+               'finidat must be blank (its column/pft counts are per file)')
+       end if
+       elmxx_perf_nsrc  = num_cells_global
+       num_cells_global = elmxx_perf_ncells
+       if (masterproc) then
+          write(logunit,*) subname,'PERF MODE: ',num_cells_global, &
+                           ' virtual cells replicating ',elmxx_perf_nsrc,' source cells'
+       end if
+    end if
+
+    if (npes > num_cells_global) then
+       write(logunit,*) subname,'ERROR: number of processes exceeds number of ', &
+                        'land grid cells ',npes,num_cells_global
+       call shr_sys_abort(subname//' ERROR: more MPI ranks than active land cells')
+    end if
 
     ! ---- round-robin decomposition over the active land cells ----
     ! Rank iam owns the iam+1, iam+1+npes, iam+1+2*npes, ... land cells. Note the
@@ -423,9 +456,17 @@ contains
     if (iam < mod(num_cells_global, npes)) num_cells_owned = num_cells_owned + 1
 
     allocate(natural_id_cells_owned(num_cells_owned))
-    do i = 1, num_cells_owned
-       natural_id_cells_owned(i) = land_ids(iam + 1 + (i-1)*npes)
-    end do
+    if (elmxx_perf_ncells > 0) then
+       allocate(elmxx_perf_src_owned(num_cells_owned))
+       do i = 1, num_cells_owned
+          elmxx_perf_src_owned(i) = mod(iam + (i-1)*npes, elmxx_perf_nsrc) + 1
+          natural_id_cells_owned(i) = land_ids(elmxx_perf_src_owned(i))
+       end do
+    else
+       do i = 1, num_cells_owned
+          natural_id_cells_owned(i) = land_ids(iam + 1 + (i-1)*npes)
+       end do
+    end if
 
     deallocate(land_ids)
 
@@ -466,7 +507,9 @@ contains
        call elmxx_build_subgrid(logunit, num_cells_owned)
        call elmxx_surface_state_init(logunit, month, day)
        call elmxx_build_filters(logunit, num_cells_owned)
-       call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
+       if (elmxx_perf_ncells == 0) then
+          call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
+       end if
     else
        if (masterproc) then
           write(logunit,*) subname,'no fsurdat in lnd_in; no surface dataset read'
@@ -878,7 +921,7 @@ contains
     ! ground until then. ELMxx updated phenology unconditionally and so entered
     ! step 0 with a full canopy, routing patches through CanopyFluxes where ELM
     ! was still running BareGroundFluxes.
-    if (subgrid_built) then
+    if (subgrid_built .and. elmxx_perf_ncells == 0) then
        call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     end if
 
@@ -959,7 +1002,8 @@ contains
     ! If no soil/hydrology kernel is ever active, soil_kernel_built never
     ! becomes true and history is never activated either -- no crash, just no
     ! output, which is the same prerequisite the soil kernels themselves have.
-    if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done) then
+    if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done &
+        .and. elmxx_perf_ncells == 0) then
        call elmxx_hist_init(elmxx_state, logunit, elmxx_caseid, elmxx_hist_fincl, &
                             elmxx_hist_start_year, elmxx_hist_start_month, &
                             elmxx_hist_start_day, n_kokkos_col, num_cells_global, &
@@ -1087,7 +1131,7 @@ contains
              if (ierr_rs /= ELMXX_SUCCESS) &
                   call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoUrban failed')
           end if
-          if (nstep == 1 .or. mod(nstep, 24) == 0) then
+          if ((nstep == 1 .or. mod(nstep, 24) == 0) .and. elmxx_perf_ncells == 0) then
              call elmxx_surface_albedo_report(logunit)
           end if
        end if
@@ -1098,7 +1142,7 @@ contains
        ! radiation kernel that appears to do nothing. Sampling half a day out
        ! catches daylight. It also gives the surface fluxes a day/night
        ! contrast, which is worth having for free.
-       if (nstep == 1 .or. mod(nstep, 24) == 0) then
+       if ((nstep == 1 .or. mod(nstep, 24) == 0) .and. elmxx_perf_ncells == 0) then
           call elmxx_report_surfrad(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_kernels_report(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_report_cantemp(elmxx_state, n_kokkos_col, logunit)
@@ -1123,7 +1167,7 @@ contains
     ! ELAI/ESAI/LAISUN/LAISHA. Not gated on any_kernel_active: history should
     ! track whatever state exists, cold-start or not.
     !-----------------------------------------------------------------------
-    if (kokkos_state_built .and. subgrid_built) then
+    if (kokkos_state_built .and. subgrid_built .and. elmxx_perf_ncells == 0) then
        call elmxx_hist_step(elmxx_state, logunit)
        ! The nstep-0 pass is accumulated (ELM's January mean includes it --
        ! measured, H2OCAN to 1.3e-7) but never closes a tape: ELM skips the
@@ -1136,7 +1180,7 @@ contains
        end if
     end if
 
-    if (masterproc) then
+    if (masterproc .and. elmxx_perf_ncells == 0) then
        write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
        call shr_sys_flush(logunit)
     end if
@@ -1250,7 +1294,7 @@ contains
     if (elmxx_state_created) then
        ! History's partial-month flush needs elmxx_state, so it must run
        ! BEFORE ELMxxDestroy, not after.
-       if (subgrid_built) then
+       if (subgrid_built .and. elmxx_perf_ncells == 0) then
           call elmxx_hist_final(elmxx_state, hist_year, hist_month, hist_day, &
                                 hist_tod, iulog)
        end if
@@ -1276,6 +1320,7 @@ contains
     call elmxx_surfdata_clean()
 
     if (associated(natural_id_cells_owned)) deallocate(natural_id_cells_owned)
+    if (associated(elmxx_perf_src_owned))   deallocate(elmxx_perf_src_owned)
     if (associated(lonc_g))  deallocate(lonc_g)
     if (associated(latc_g))  deallocate(latc_g)
     if (associated(areac_g)) deallocate(areac_g)

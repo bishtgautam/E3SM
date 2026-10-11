@@ -379,6 +379,36 @@ macro(build_model COMP_CLASS COMP_NAME)
         endif()
         target_include_directories(${TARGET_NAME} PRIVATE "${ELMXX_MOD_DIR}")
         add_dependencies(${TARGET_NAME} elmxx_fortran)
+
+        # Standalone perf driver (plan Stage 6.8): the coupled path without
+        # the coupler, linked against this very lnd library so its compilers,
+        # flags and libraries are the case's. Not part of case.build; build it
+        # after one with `make elmxx_perf` in ${EXEROOT}/cmake-bld, which
+        # writes ${EXEROOT}/elmxx_perf.
+        set(ELMXX_PERF_DIR "${PROJECT_SOURCE_DIR}/elmxx/src/perf")
+        add_executable(elmxx_perf EXCLUDE_FROM_ALL
+          "${ELMXX_PERF_DIR}/elmxxPerfForcingMod.F90"
+          "${ELMXX_PERF_DIR}/elmxxPerfCheckMod.F90"
+          "${ELMXX_PERF_DIR}/elmxx_perf.F90")
+        set_target_properties(elmxx_perf PROPERTIES
+          Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/elmxx_perf_mod")
+        target_include_directories(elmxx_perf PRIVATE
+          "${CMAKE_CURRENT_BINARY_DIR}" "${ELMXX_MOD_DIR}" ${INCLDIR})
+        separate_arguments(ELMXX_PERF_CPPDEFS UNIX_COMMAND "${CPPDEFS}")
+        target_compile_definitions(elmxx_perf PRIVATE ${ELMXX_PERF_CPPDEFS})
+        find_package(NETCDF REQUIRED)
+        target_link_libraries(elmxx_perf ${TARGET_NAME} elmxx_fortran elmxx csm_share netcdf)
+        if (USE_KOKKOS)
+          target_link_libraries(elmxx_perf Kokkos::kokkos)
+        endif()
+        if (NOT DEFINED ENV{SKIP_BLAS})
+          target_link_libraries(elmxx_perf LAPACK::LAPACK)
+        endif()
+        if (E3SM_LINK_WITH_FORTRAN)
+          set_target_properties(elmxx_perf PROPERTIES LINKER_LANGUAGE Fortran)
+        else()
+          set_target_properties(elmxx_perf PROPERTIES LINKER_LANGUAGE CXX)
+        endif()
       endif()
       if (COMP_NAME STREQUAL "ww3")
 
