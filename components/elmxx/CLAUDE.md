@@ -378,10 +378,9 @@ cmake --build <build> -j 8 && ctest --test-dir <build>
   `kokkos_tpls.cmake`. This matches what EKAT does inside the E3SM build.
 - Both diag paths must be set or the data-driven tests **skip and report
   `Passed`** (see the note further down).
-- **The suite is currently RED: seven pre-existing failures** at submodule
-  commit `2dcf189`, the one E3SM builds against — `CanopyTemperatureTests`,
-  `test_cantemp_val`, `test_bgflux_val`, `test_canflx_val`, `test_soilflx_val`,
-  `test_surfruninf_val`, `test_integration`. Baseline before blaming your
+- **The suite is currently RED: three pre-existing failures** at submodule
+  commit `9b0422a` (2026-10-10) — `test_groundheat_val`,
+  `test_hydrodrain_val`, `test_integration`. Baseline before blaming your
   change: `git stash`, rebuild, re-run.
 
 Two things bite every time:
