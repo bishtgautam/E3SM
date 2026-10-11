@@ -209,7 +209,13 @@ the C++ layout). Stepped from `src/main/ELMxxUrban.cpp` by the
 - `ELMXX_DIAG` writes a per-step urban trace (`elmxx_urbin/urbflx/urbout`),
   still packed 5k+s: entry c is ELM column c+1, patch 17+c on a one-cell
   domain (natural first, lake last). Wall entries of snow/water fields are
-  spval (the wall record has none).
+  spval (the wall record has none). `tools/urban_step_compare.py` pairs it
+  with ELM's labels for an identical-IC probe.
+- **finidat seeds urban** (`elmxx_urban_apply_finidat`, after the natural
+  push), one rank only, like the natural push. It sets both the split
+  (`_soi`/`_sno`, snow reversed) and the combined ELM-ordered arrays; the
+  `_p1` geometry is rebuilt from the snow every step and `t_building` is
+  diagnosed, so neither is seeded. Lake is still a cold start under finidat.
 
 ## The lake surface
 
@@ -294,6 +300,12 @@ when the coupler's restart alarm rings, dated with the step's END time
   continue, so each run keeps its own `cpl.r`/`datm.rs1` and only
   `rpointer.lnd` points at the other layout's file. A grid of identical cells
   cannot catch a permutation -- every reorder compares equal.
+- **Urban layout test (passes, 2026-10-10):** `urb4_np1`/`urb4_np2`, clones
+  of the nhcell ELMxx case on a 4-cell f19 domain
+  (`tools/make_nhcell4_urbtest.py`: four real cells, regions 6 and 18, TBD
+  active on two, 0-27% lake, snow) -- 12 urban landunits, 6 per rank. Same
+  procedure as above (10 d, `REST_N=5`); the negative control must perturb
+  an ACTIVE landunit (a 0-weight one moves the restart but not h0).
 - **A branch starts history fresh**, as ELM's does (`hist_restart_ncd` zeroes
   `ntimes` on `nsrBranch`): the `hist:*` accumulators and the interval
   start/count are not read, so the first h0 holds only the branch's own steps
