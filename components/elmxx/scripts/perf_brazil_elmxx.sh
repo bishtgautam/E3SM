@@ -21,8 +21,14 @@ case ${MACH} in
     usage
     exit 0
     ;;
-  pm-gpu) COMPILER=gnugpu ;;
-  pm-cpu) COMPILER=gnu ;;
+  pm-gpu)
+    COMPILER=gnugpu
+    PROJECT=e3sm_g
+    ;;
+  pm-cpu)
+    COMPILER=gnu
+    PROJECT=e3sm
+    ;;
   *)
     usage >&2
     exit 1
@@ -42,10 +48,12 @@ CASE_NAME=perf_brazil.${RES}.${COMPSET}.${MACH}.${COMPILER}.${GIT_HASH}
 
 cd ${SRC_DIR}/cime/scripts
 ./create_newcase -case ${CASE_DIR}/${CASE_NAME} \
--res ${RES} -mach ${MACH} -compiler ${COMPILER} -compset ${COMPSET} --driver ${DRIVER}
+-res ${RES} -mach ${MACH} -compiler ${COMPILER} -compset ${COMPSET} --driver ${DRIVER} \
+--project ${PROJECT}
 
 cd ${CASE_DIR}/${CASE_NAME}
 ./xmlchange NTASKS=1
+./xmlchange JOB_QUEUE=debug,JOB_WALLCLOCK_TIME=00:10:00
 ./xmlchange STOP_OPTION=ndays
 ./xmlchange STOP_N=2
 
