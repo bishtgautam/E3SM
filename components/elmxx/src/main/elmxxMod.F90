@@ -712,6 +712,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine elmxx_count_for_create(n_nat_col, n_nat_patch, n_urb_lun)
+    use elmxxSubgridMod, only : num_patches, patch_column
     !
     ! !DESCRIPTION:
     ! Translate the subgrid into the three counts ELMxxCreate wants.
@@ -726,7 +727,7 @@ contains
     !
     integer, intent(out) :: n_nat_col, n_nat_patch, n_urb_lun
     !
-    integer :: l, c
+    integer :: l, p
 
     n_nat_col = 0; n_nat_patch = 0; n_urb_lun = 0
 
@@ -741,9 +742,9 @@ contains
 
     ! Patches on natural-vegetation columns. Counted from the column side so it
     ! stays correct if a landunit ever gets more than one column.
-    do c = 1, num_columns
-       if (lun_itype(col_landunit(c)) == istsoil) then
-          n_nat_patch = n_nat_patch + count_patches_on(c)
+    do p = 1, num_patches
+       if (lun_itype(col_landunit(patch_column(p))) == istsoil) then
+          n_nat_patch = n_nat_patch + 1
        end if
     end do
 
@@ -755,21 +756,6 @@ contains
     end if
 
   end subroutine elmxx_count_for_create
-
-  !-----------------------------------------------------------------------
-  integer function count_patches_on(c)
-    !
-    use elmxxSubgridMod, only : num_patches, patch_column
-    implicit none
-    integer, intent(in) :: c
-    integer :: p
-
-    count_patches_on = 0
-    do p = 1, num_patches
-       if (patch_column(p) == c) count_patches_on = count_patches_on + 1
-    end do
-
-  end function count_patches_on
 
   !-----------------------------------------------------------------------
   subroutine elmxx_report_composition(logunit)
