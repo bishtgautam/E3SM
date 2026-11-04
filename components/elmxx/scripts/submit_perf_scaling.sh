@@ -8,7 +8,7 @@ Submit a strong scaling study of elmxx_perf on Perlmutter. The machine comes
 from the case, so run this once for a pm-cpu case and once for a pm-gpu case.
 Create and build the cases with perf_brazil_elmxx.sh.
 
-Submits these jobs to the debug queue:
+Submits these jobs:
   reference  1 node: 1 cell on 1 rank writes ref.bin and a restart, then a
              negative control with one perturbed cell must fail the checks.
   scaling    One job for each node count, after the reference succeeds. Every
@@ -27,6 +27,7 @@ Settings, from the environment:
   CELLS="100000"  Cell counts. The same counts run on every node count
   NODES="1 2 4"   Node counts
   NDAYS=5         Simulated days, at 48 steps of 1800 s per day
+  QOS=debug       Queue. debug allows at most 8 nodes
 USAGE_EOF
 }
 
@@ -43,7 +44,9 @@ set_machine() {
       ;;
     pm-gpu)
       ACCOUNT=m5263_g
-      CONSTRAINT=gpu
+      # gpu alone can land on 40 GB or 80 GB A100s. Pin one, so that a problem
+      # size fits every time and the timings stay comparable.
+      CONSTRAINT='gpu&hbm80g'
       RANKS_PER_NODE=4
       CPUS_PER_RANK=32
       SBATCH_GPU_FLAGS="--gpus-per-node=4"
@@ -159,7 +162,7 @@ submit() {
     shift
   done
   shift
-  local cmd=(sbatch --parsable --job-name="${name}" --account="${ACCOUNT}" --qos=debug
+  local cmd=(sbatch --parsable --job-name="${name}" --account="${ACCOUNT}" --qos="${QOS}"
     --constraint="${CONSTRAINT}" --nodes="${nodes}" --time="${walltime}"
     --output="${OUT}/${name}.%j.out" ${SBATCH_GPU_FLAGS} "${flags[@]}" "${SELF}" --job "$@")
   if [ "${DRY_RUN}" = 1 ]; then
@@ -207,6 +210,7 @@ fi
 CELLS=${CELLS:-100000}
 NODES=${NODES:-1 2 4}
 NDAYS=${NDAYS:-5}
+QOS=${QOS:-debug}
 NSTEPS=$((NDAYS * 48))
 
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
