@@ -85,6 +85,8 @@ module elmxxUrbanMod
   real(r8), allocatable :: em_roof(:), em_wall(:), em_improad(:), em_perroad(:)
   real(r8), allocatable :: thick_roof(:), thick_wall(:), t_bld_min(:), t_bld_max(:)
   real(r8), allocatable :: eflx_traffic_factor(:)
+  ! The subgrid columns of each landunit, up to five (landunit_columns).
+  integer, allocatable :: lun_ncols(:), lun_cols(:,:)
   integer , allocatable :: nlev_improad(:)
   real(r8), allocatable :: alb_roof_dir(:,:), alb_roof_dif(:,:), alb_wall_dir(:,:), alb_wall_dif(:,:)
   real(r8), allocatable :: alb_improad_dir(:,:), alb_improad_dif(:,:)
@@ -288,9 +290,11 @@ contains
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
-    integer :: kc, k, l, c, s, n, nidx, ierr
+    integer :: kc, k, l, g, j, s, n, ncell, nidx, ierr
+    integer :: subcol(5)
     integer , allocatable :: ptr(:), idx(:), cell_of_kc(:), lake_of(:)
-    real(r8), allocatable :: wlun(:), cwt(:), csf(:), css(:), wn(:), wl(:)
+    integer , allocatable :: urb_off(:), urb_next(:), urb_of_cell(:)
+    real(r8), allocatable :: wlun(:), cwt(:), csf(:), css(:), wn(:), wl(:), wnat(:)
     real(r8) :: hwr
     character(len=*), parameter :: subname = '(elmxx_urban_init) '
 
@@ -302,14 +306,33 @@ contains
     end do
 
     ! CSR: urban landunits per natural column, in packed order.
+    ! The urban landunits of each cell, k ascending within a cell, built in one
+    ! pass: a search per column is quadratic in the cells on this rank.
+    ncell = maxval(lun_gridcell(1:num_landunits))
+    allocate(urb_off(ncell+1), urb_next(ncell), urb_of_cell(max(n,1)))
+    urb_off = 0
+    do k = 1, n
+       g = lun_gridcell(lun_of_kurb(k))
+       urb_off(g+1) = urb_off(g+1) + 1
+    end do
+    do g = 1, ncell
+       urb_off(g+1) = urb_off(g+1) + urb_off(g)
+    end do
+    urb_next = urb_off(1:ncell)
+    do k = 1, n
+       g = lun_gridcell(lun_of_kurb(k))
+       urb_next(g) = urb_next(g) + 1
+       urb_of_cell(urb_next(g)) = k
+    end do
+
     nidx = 0
     ptr(1) = 0
     do kc = 1, n_kokkos_col
-       do k = 1, n
-          if (lun_gridcell(lun_of_kurb(k)) == cell_of_kc(kc)) then
-             nidx = nidx + 1
-             idx(nidx) = k - 1
-          end if
+       g = cell_of_kc(kc)
+       do j = urb_off(g) + 1, urb_off(g+1)
+          nidx = nidx + 1
+          if (nidx > n) call shr_sys_abort(subname//'ERROR: a cell has more than one natural column')
+          idx(nidx) = urb_of_cell(j) - 1
        end do
        ptr(kc+1) = nidx
     end do
@@ -319,12 +342,9 @@ contains
        l = lun_of_kurb(k)
        wlun(k) = lun_wtgcell(l)
        hwr = canyon_hwr(k)
-       s = 0
-       do c = 1, num_columns
-          if (col_landunit(c) /= l) cycle
-          s = s + 1
-          if (s > 5) call shr_sys_abort(subname//'ERROR: an urban landunit has more than five columns')
-          cwt(5*(k-1)+s) = col_wtlunit(c)
+       call landunit_columns(l, subcol)
+       do s = 1, 5
+          cwt(5*(k-1)+s) = col_wtlunit(subcol(s))
           select case (s)
           case (1)         ! roof
              csf(5*(k-1)+s) = 1._r8
@@ -337,17 +357,20 @@ contains
              css(5*(k-1)+s) = 3.0_r8 / (2._r8*hwr + 1._r8)
           end select
        end do
-       if (s /= 5) call shr_sys_abort(subname//'ERROR: an urban landunit does not have five columns')
     end do
 
     if (.not. lake_built) then
        allocate(lake_of(n_kokkos_col), wn(n_kokkos_col), wl(n_kokkos_col))
        lake_of = -1; wn = 0._r8; wl = 0._r8
-       do kc = 1, n_kokkos_col
-          do l = 1, num_landunits
-             if (lun_gridcell(l) == cell_of_kc(kc) .and. lun_itype(l) == istsoil) wn(kc) = lun_wtgcell(l)
-          end do
+       allocate(wnat(ncell))
+       wnat = 0._r8
+       do l = 1, num_landunits
+          if (lun_itype(l) == istsoil) wnat(lun_gridcell(l)) = lun_wtgcell(l)
        end do
+       do kc = 1, n_kokkos_col
+          wn(kc) = wnat(cell_of_kc(kc))
+       end do
+       deallocate(wnat)
        call ELMxxHistorySetLandunitWeights(elm, lake_of, wn, wl, n_kokkos_col, ierr)
        if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistorySetLandunitWeights failed')
        deallocate(lake_of, wn, wl)
@@ -360,7 +383,7 @@ contains
        write(logunit,*) subname,'history urban landunit weights ',wlun
        call shr_sys_flush(logunit)
     end if
-    deallocate(ptr, idx, cell_of_kc, wlun, cwt, csf, css)
+    deallocate(ptr, idx, cell_of_kc, wlun, cwt, csf, css, urb_off, urb_next, urb_of_cell)
 
   end subroutine push_history_weights
 
@@ -893,15 +916,21 @@ contains
     implicit none
     integer, intent(in)  :: l
     integer, intent(out) :: cols(5)
-    integer :: c, s
-    s = 0
-    do c = 1, num_columns
-       if (col_landunit(c) /= l) cycle
-       s = s + 1
-       if (s > 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit with more than five columns')
-       cols(s) = c
-    end do
-    if (s /= 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit without five columns')
+    integer :: c, m
+    ! The table is built once: this is called per landunit in over a dozen
+    ! sweeps, so a scan of all columns here is quadratic in the cells on a rank.
+    if (.not. allocated(lun_ncols)) then
+       allocate(lun_ncols(num_landunits), lun_cols(5, num_landunits))
+       lun_ncols = 0
+       do c = 1, num_columns
+          m = col_landunit(c)
+          lun_ncols(m) = lun_ncols(m) + 1
+          if (lun_ncols(m) <= 5) lun_cols(lun_ncols(m), m) = c
+       end do
+    end if
+    if (lun_ncols(l) > 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit with more than five columns')
+    if (lun_ncols(l) < 5) call shr_sys_abort('(elmxx_urban_init) ERROR: urban landunit without five columns')
+    cols = lun_cols(:, l)
   end subroutine landunit_columns
 
 
@@ -1285,6 +1314,7 @@ contains
             alb_perroad_dir, alb_perroad_dif, tk_roof, tk_wall, tk_improad, &
             cv_roof, cv_wall, cv_improad)
     end if
+    if (allocated(lun_ncols)) deallocate(lun_ncols, lun_cols)
     urban_params_built = .false.
     urban_built = .false.
     n_urb_col = 0

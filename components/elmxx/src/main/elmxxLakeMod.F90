@@ -101,7 +101,8 @@ contains
   subroutine build_maps(logunit)
     implicit none
     integer, intent(in) :: logunit
-    integer :: c, p, k, np
+    integer :: c, p, k
+    integer, allocatable :: np_of_col(:), patch_of_col(:)
     character(len=*), parameter :: subname = '(elmxx_lake_init) '
 
     n_lake = 0
@@ -112,21 +113,24 @@ contains
     if (n_lake == 0) return
 
     allocate(col_of_klake(n_lake), patch_of_klake(n_lake), cell_of_klake(n_lake))
+    ! Patches per column in one pass; a scan per lake column is quadratic in
+    ! the cells on this rank.
+    allocate(np_of_col(num_columns), patch_of_col(num_columns))
+    np_of_col = 0
+    do p = 1, num_patches
+       np_of_col(patch_column(p)) = np_of_col(patch_column(p)) + 1
+       patch_of_col(patch_column(p)) = p
+    end do
     k = 0
     do c = 1, num_columns
        if (lun_itype(col_landunit(c)) /= istdlak) cycle
        k = k + 1
        col_of_klake(k)  = c
        cell_of_klake(k) = lun_gridcell(col_landunit(c))
-       np = 0
-       do p = 1, num_patches
-          if (patch_column(p) == c) then
-             np = np + 1
-             patch_of_klake(k) = p
-          end if
-       end do
-       if (np /= 1) call shr_sys_abort(subname//'ERROR: a lake column must carry exactly one patch')
+       if (np_of_col(c) /= 1) call shr_sys_abort(subname//'ERROR: a lake column must carry exactly one patch')
+       patch_of_klake(k) = patch_of_col(c)
     end do
+    deallocate(np_of_col, patch_of_col)
     ! Ascending patches on ascending columns: packed patch k is on packed
     ! column k, which is what LakeHydrology's p = c assumes.
     do k = 2, n_lake
@@ -390,35 +394,45 @@ contains
     implicit none
     type(ELMxxType), intent(in) :: elm
     integer, intent(in) :: logunit
-    integer :: kc, k, l, g, ierr
-    integer , allocatable :: lake_of(:)
+    integer :: kc, k, l, g, ncell, ierr
+    integer , allocatable :: lake_of(:), lake_of_cell(:)
     real(r8), allocatable :: wn(:), wl(:), wother(:)
+    real(r8), allocatable :: wn_cell(:), wl_cell(:), wother_cell(:)
     real(r8), parameter :: tol = 1.0e-6_r8
     character(len=*), parameter :: subname = '(elmxx_lake_init) '
 
     allocate(lake_of(n_kokkos_col), wn(n_kokkos_col), wl(n_kokkos_col), &
              wother(n_kokkos_col))
-    lake_of = -1; wn = 0._r8; wl = 0._r8; wother = 0._r8
+    ! Per cell first, in one pass over the landunits and the lake columns: a
+    ! search per natural column is quadratic in the cells on this rank.
+    ncell = maxval(lun_gridcell(1:num_landunits))
+    allocate(lake_of_cell(ncell), wn_cell(ncell), wl_cell(ncell), wother_cell(ncell))
+    lake_of_cell = -1; wn_cell = 0._r8; wl_cell = 0._r8; wother_cell = 0._r8
+    do l = 1, num_landunits
+       g = lun_gridcell(l)
+       select case (lun_itype(l))
+       case (istsoil)
+          wn_cell(g) = lun_wtgcell(l)
+       case (istdlak)
+          wl_cell(g) = lun_wtgcell(l)
+       case (isturb_tbd:isturb_md)
+          ! Urban joins the mean through ELMxxHistorySetUrbanWeights
+          ! (elmxxUrbanMod, Stage 6.7).
+       case default
+          wother_cell(g) = wother_cell(g) + lun_wtgcell(l)
+       end select
+    end do
+    do k = 1, n_lake
+       lake_of_cell(cell_of_klake(k)) = k - 1
+    end do
     do kc = 1, n_kokkos_col
        g = lun_gridcell(col_landunit(col_of_kcol(kc)))
-       do l = 1, num_landunits
-          if (lun_gridcell(l) /= g) cycle
-          select case (lun_itype(l))
-          case (istsoil)
-             wn(kc) = lun_wtgcell(l)
-          case (istdlak)
-             wl(kc) = lun_wtgcell(l)
-          case (isturb_tbd:isturb_md)
-             ! Urban joins the mean through ELMxxHistorySetUrbanWeights
-             ! (elmxxUrbanMod, Stage 6.7).
-          case default
-             wother(kc) = wother(kc) + lun_wtgcell(l)
-          end select
-       end do
-       do k = 1, n_lake
-          if (cell_of_klake(k) == g) lake_of(kc) = k - 1
-       end do
+       lake_of(kc) = lake_of_cell(g)
+       wn(kc)      = wn_cell(g)
+       wl(kc)      = wl_cell(g)
+       wother(kc)  = wother_cell(g)
     end do
+    deallocate(lake_of_cell, wn_cell, wl_cell, wother_cell)
     if (any(wother > tol)) then
        call shr_sys_abort(subname//'ERROR: a lake cell has weight on a landunit '// &
             'other than natural, lake and urban, which ELMxx history cannot represent')
