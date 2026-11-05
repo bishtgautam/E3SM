@@ -299,6 +299,7 @@ if ($LND_GRID eq "null") {
     # Stage 3 Fortran<->Kokkos boundary check. On by default and fatal by
     # default: a wrong index map is silent, and every kernel builds on it.
     add_default($nl, 'elmxx_check_boundary');
+    add_default($nl, 'elmxx_stage2_snapshot');
     add_default($nl, 'elmxx_check_soft_fail');
 
     # Stage 4 kernel activation. Empty by default -- the timestep stays a

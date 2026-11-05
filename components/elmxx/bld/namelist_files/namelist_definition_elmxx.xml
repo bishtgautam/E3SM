@@ -100,6 +100,17 @@ and is identical by construction.
 Default: ' '
 </entry>
 
+<entry id="elmxx_stage2_snapshot"
+       type="logical"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: .false.
+If .true., write elmxx_stage2_rank*.dat from every rank, at init and again every
+step, for tools/compare_stage2_init.py to check a run against its ELM twin at the
+run's last date. It costs about 17 KB of text per cell per step, so leave it off
+except on small validation cases.
+</entry>
+
 <entry id="elmxx_check_boundary"
        type="logical"
        category="elmxx"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare ELMxx's Stage 2 snapshot against an ELM twin restart.
 
-Run the ELM and ELMxx twins for the same short interval, then invoke this
+Run the ELM and ELMxx twins for the same short interval, with
+elmxx_stage2_snapshot = .true. in user_nl_elmxx, then invoke this
 script from the ELMxx run directory (or pass its rank-local snapshots):
 
   python3 components/elmxx/tools/compare_stage2_init.py \
