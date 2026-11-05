@@ -910,7 +910,11 @@ contains
     ! ground until then. ELMxx updated phenology unconditionally and so entered
     ! step 0 with a full canopy, routing patches through CanopyFluxes where ELM
     ! was still running BareGroundFluxes.
-    if (subgrid_built .and. elmxx_perf_ncells == 0) then
+    !
+    ! The snapshot is a Stage 2 check of the initial state, so it is written on
+    ! the first pass only. Rewriting it every step took most of a step's time,
+    ! about 17 KB of text per cell.
+    if (subgrid_built .and. elmxx_perf_ncells == 0 .and. nstep == 0) then
        call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     end if
 
