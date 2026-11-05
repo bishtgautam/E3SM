@@ -355,12 +355,12 @@ CONTAINS
                          s=hist_tod, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet hist_time')
 
-       call elmxx_t_start('elm_run')
+       call elmxx_t_start('elmxx_run')
        call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
                       nextsw_cday, declinp1, doalb=doalb_step, &
                       hist_year=hist_year, hist_month=hist_month, &
                       hist_day=hist_day, hist_tod=hist_tod)
-       call elmxx_t_stop('elm_run')
+       call elmxx_t_stop('elmxx_run')
 
        ! Restart at the end of the coupling interval the alarm rings in, dated
        ! with this step's end time (ELM: rstwr = rstwr_sync .and. dosend).
