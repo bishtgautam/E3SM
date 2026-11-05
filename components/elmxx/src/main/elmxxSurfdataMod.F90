@@ -8,12 +8,14 @@ module elmxxSurfdataMod
   ! satellite-phenology streams used by elmxxSurfaceStateMod. CN/BGC, crop and
   ! transient land-use fields are out of scope entirely.
   !
-  ! Reading strategy: like elmxx_read_domain, the whole global field is read on
-  ! every rank and the owned cells are then picked out of it. That is simple and
-  ! adequate at the resolutions run today, but it is O(global) memory per rank --
-  ! at f19 the four MONTHLY_* fields alone would be ~90 MB per rank once they are
-  ! added. Move to a decomposed read (pio_read_darray with a decomp built from
-  ! natural_id_cells_owned) before this reaches production resolutions.
+  ! Reading strategy: each rank reads only the cells it owns, with
+  ! pio_read_darray and a decomposition built from natural_id_cells_owned, so
+  ! memory and I/O per rank follow the owned cells, not the global grid.
+  !
+  ! elmxx_perf is the exception. It deals many virtual cells from a few source
+  ! cells, so a rank owns the same grid ID many times, which a PIO decomposition
+  ! cannot express. There the file is tiny, so the whole global field is read on
+  ! every rank and the owned cells are picked out of it.
   !
   ! Indexing: natural_id_cells_owned holds 1-based *global grid* IDs, i.e.
   ! indices into the ni*nj arrays. The surface dataset spans the same full grid,
@@ -56,6 +58,17 @@ module elmxxSurfdataMod
   ! Grid convention of the surface dataset currently being read
   logical :: structured = .false.
   integer :: nlon_s = 0, nlat_s = 0
+
+  ! Read owned cells in parallel, or read globally and pick them out.
+  logical :: decomposed = .false.
+
+  ! PIO decompositions, one for each shape of field, kept for one file read.
+  integer, parameter :: max_iod = 16, max_extra = 2
+  type(io_desc_t) :: iod(max_iod)
+  integer :: n_iod = 0
+  integer :: iod_xtype(max_iod)
+  integer :: iod_nextra(max_iod)
+  integer :: iod_extra(max_extra, max_iod)
 
   !--------------------------------------------------------------------------
   ! Subgrid composition, per owned cell. Percentages as stored on the file.
@@ -169,7 +182,7 @@ module elmxxSurfdataMod
 contains
 
   !-----------------------------------------------------------------------
-  subroutine elmxx_read_surfdata(iulog, fname, gsize, cell_ids)
+  subroutine elmxx_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed)
     !
     ! !DESCRIPTION:
     ! Read the surface dataset and keep the rows for the cells this rank owns.
@@ -180,6 +193,7 @@ contains
     character(len=*), intent(in) :: fname        ! surface dataset
     integer         , intent(in) :: gsize        ! ni*nj, for cross-checking
     integer         , intent(in) :: cell_ids(:)  ! 1-based global grid IDs owned here
+    logical         , intent(in) :: read_decomposed ! false if cell_ids repeat
     !
     type(file_desc_t) :: ncid
     integer           :: dimid, status
@@ -188,6 +202,7 @@ contains
     character(len=*), parameter :: subname = 'elmxx_read_surfdata'
 
     ncells = size(cell_ids)
+    decomposed = read_decomposed
 
     if (masterproc) then
        write(iulog,*) trim(subname),': reading surface dataset ',trim(fname)
@@ -335,6 +350,7 @@ contains
     call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_BOT', ngrid, lsmpft, nmonths, &
                         cell_ids, monthly_height_bot)
 
+    call free_iodescs()
     call pio_closefile(ncid)
 
     surfdata_read = .true.
@@ -347,6 +363,166 @@ contains
     end if
 
   end subroutine elmxx_read_surfdata
+
+  !-----------------------------------------------------------------------
+  subroutine get_iodesc(ngrid, extra, xtype, cell_ids, idx)
+    !
+    ! !DESCRIPTION:
+    ! Return the slot of the PIO decomposition for fields with these non-grid
+    ! dimensions, building it the first time. `extra` is in Fortran order, so
+    ! fastest first, and follows the grid dimensions. Each level repeats the
+    ! cells this rank owns, offset by a level of the global grid, so a rank's
+    ! buffer comes back as (cell, extra...).
+    !
+    implicit none
+    integer, intent(in)  :: ngrid
+    integer, intent(in)  :: extra(:)
+    integer, intent(in)  :: xtype
+    integer, intent(in)  :: cell_ids(:)
+    integer, intent(out) :: idx
+    !
+    integer, allocatable :: dims(:)
+    integer(kind=PIO_OFFSET_KIND), allocatable :: compdof(:)
+    integer :: i, n, nlev, ncells, ngriddims
+    character(len=*), parameter :: subname = 'elmxx_read_surfdata::get_iodesc'
+
+    do idx = 1, n_iod
+       if (iod_xtype(idx) == xtype .and. iod_nextra(idx) == size(extra)) then
+          if (all(iod_extra(1:size(extra), idx) == extra)) return
+       end if
+    end do
+
+    if (n_iod == max_iod) call shr_sys_abort(subname//' ERROR: too many decompositions')
+    n_iod = n_iod + 1
+    idx   = n_iod
+    iod_xtype(idx)  = xtype
+    iod_nextra(idx) = size(extra)
+    iod_extra(1:size(extra), idx) = extra
+
+    ngriddims = merge(2, 1, structured)
+    allocate(dims(ngriddims + size(extra)))
+    if (structured) then
+       dims(1:2) = (/nlon_s, nlat_s/)
+    else
+       dims(1) = ngrid
+    end if
+    dims(ngriddims+1:) = extra
+
+    ncells = size(cell_ids)
+    nlev   = product(extra)
+    allocate(compdof(ncells*nlev))
+    do n = 1, nlev
+       do i = 1, ncells
+          compdof((n-1)*ncells + i) = int(n-1, PIO_OFFSET_KIND)*int(ngrid, PIO_OFFSET_KIND) + &
+                                      int(cell_ids(i), PIO_OFFSET_KIND)
+       end do
+    end do
+    call pio_initdecomp(pio_subsystem, xtype, dims, compdof, iod(idx))
+    deallocate(dims, compdof)
+
+  end subroutine get_iodesc
+
+  !-----------------------------------------------------------------------
+  subroutine free_iodescs()
+    implicit none
+    integer :: idx
+
+    do idx = 1, n_iod
+       call pio_freedecomp(pio_subsystem, iod(idx))
+    end do
+    n_iod = 0
+
+  end subroutine free_iodescs
+
+  !-----------------------------------------------------------------------
+  subroutine read_darray_real(ncid, fname, varname, ngrid, extra, cell_ids, buf, frame)
+    !
+    ! !DESCRIPTION:
+    ! Read the owned cells of a real field, in parallel. With `frame`, read that
+    ! record of a field whose slowest dimension is time.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    integer          , intent(in)    :: ngrid
+    integer          , intent(in)    :: extra(:)
+    integer          , intent(in)    :: cell_ids(:)
+    real(r8)         , intent(inout) :: buf(:)
+    integer, optional, intent(in)    :: frame
+    !
+    type(var_desc_t) :: vardesc
+    integer :: idx, status
+    character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_darray_real'
+
+    status = pio_inq_varid(ncid, trim(varname), vardesc)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
+    end if
+    call get_iodesc(ngrid, extra, PIO_DOUBLE, cell_ids, idx)
+    if (present(frame)) call pio_setframe(ncid, vardesc, int(frame, PIO_OFFSET_KIND))
+    call pio_read_darray(ncid, vardesc, iod(idx), buf, status)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
+    end if
+
+  end subroutine read_darray_real
+
+  !-----------------------------------------------------------------------
+  subroutine read_darray_int(ncid, fname, varname, ngrid, cell_ids, buf)
+    !
+    ! !DESCRIPTION:
+    ! Read the owned cells of a (gridcell) integer field, in parallel.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    integer          , intent(in)    :: ngrid
+    integer          , intent(in)    :: cell_ids(:)
+    integer          , intent(inout) :: buf(:)
+    !
+    type(var_desc_t) :: vardesc
+    integer :: idx, status
+    integer :: no_extra(0)
+    character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_darray_int'
+
+    status = pio_inq_varid(ncid, trim(varname), vardesc)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
+    end if
+    call get_iodesc(ngrid, no_extra, PIO_INT, cell_ids, idx)
+    call pio_read_darray(ncid, vardesc, iod(idx), buf, status)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: cannot read '//trim(varname)//' from '//trim(fname))
+    end if
+
+  end subroutine read_darray_int
+
+  !-----------------------------------------------------------------------
+  logical function slowest_dim_is_time(ncid, fname, varname)
+    !
+    ! !DESCRIPTION:
+    ! True if the field's slowest dimension is time, as ncd_io checks in ELM.
+    ! PIO decompositions do not include that dimension: it is read by frame.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    !
+    type(var_desc_t) :: vardesc
+    integer :: dids(8), ndims, status
+    character(len=32) :: dimname
+    character(len=*), parameter :: subname = 'elmxx_read_surfdata::slowest_dim_is_time'
+
+    status = pio_inq_varid(ncid, trim(varname), vardesc)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
+    end if
+    status = pio_inq_varndims(ncid, vardesc, ndims)
+    status = pio_inq_vardimid(ncid, vardesc, dids(1:ndims))
+    status = pio_inq_dimname(ncid, dids(ndims), dimname)
+    slowest_dim_is_time = (trim(dimname) == 'time')
+
+  end function slowest_dim_is_time
 
   !-----------------------------------------------------------------------
   logical function has_dim(ncid, dimname)
@@ -411,7 +587,13 @@ contains
     !
     real(r8), allocatable :: glob(:), buf2d(:,:)
     integer :: varid, status, i
+    integer :: no_extra(0)
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real1d'
+
+    if (decomposed) then
+       call read_darray_real(ncid, fname, varname, ngrid, no_extra, cell_ids, out)
+       return
+    end if
 
     allocate(glob(ngrid))
     status = pio_inq_varid(ncid, trim(varname), varid)
@@ -482,6 +664,11 @@ contains
     integer :: varid, status, i
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_int1d'
 
+    if (decomposed) then
+       call read_darray_int(ncid, fname, varname, ngrid, cell_ids, out)
+       return
+    end if
+
     allocate(glob(ngrid))
     status = pio_inq_varid(ncid, trim(varname), varid)
     if (status /= PIO_NOERR) then
@@ -528,9 +715,17 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     real(r8)         , intent(inout) :: out(:,:)
     !
-    real(r8), allocatable :: glob(:,:), buf3d(:,:,:)
+    real(r8), allocatable :: glob(:,:), buf3d(:,:,:), buf(:)
     integer :: varid, status, i, k
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real2d'
+
+    if (decomposed) then
+       allocate(buf(size(cell_ids)*nsecond))
+       call read_darray_real(ncid, fname, varname, ngrid, (/nsecond/), cell_ids, buf)
+       out = reshape(buf, (/size(cell_ids), nsecond/))
+       deallocate(buf)
+       return
+    end if
 
     allocate(glob(ngrid, nsecond))
     status = pio_inq_varid(ncid, trim(varname), varid)
@@ -577,9 +772,25 @@ contains
     integer          , intent(in)    :: cell_ids(:)
     real(r8)         , intent(inout) :: out(:,:,:)
     !
-    real(r8), allocatable :: glob(:,:,:), buf4d(:,:,:,:)
+    real(r8), allocatable :: glob(:,:,:), buf4d(:,:,:,:), buf(:)
     integer :: varid, status, i, k, m
     character(len=*), parameter :: subname = 'elmxx_read_surfdata::read_gc_real3d'
+
+    if (decomposed) then
+       if (slowest_dim_is_time(ncid, fname, varname)) then
+          allocate(buf(size(cell_ids)*nsecond))
+          do m = 1, nthird
+             call read_darray_real(ncid, fname, varname, ngrid, (/nsecond/), cell_ids, buf, frame=m)
+             out(:,:,m) = reshape(buf, (/size(cell_ids), nsecond/))
+          end do
+       else
+          allocate(buf(size(cell_ids)*nsecond*nthird))
+          call read_darray_real(ncid, fname, varname, ngrid, (/nsecond, nthird/), cell_ids, buf)
+          out = reshape(buf, (/size(cell_ids), nsecond, nthird/))
+       end if
+       deallocate(buf)
+       return
+    end if
 
     allocate(glob(ngrid, nsecond, nthird))
     status = pio_inq_varid(ncid, trim(varname), varid)

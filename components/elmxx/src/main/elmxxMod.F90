@@ -22,6 +22,7 @@ module elmxxMod
   use shr_nl_mod   , only : shr_nl_find_group_name
   use elmxxSpmdMod , only : masterproc, iam, npes, mpicom_lnd
   use elmxxIO      , only : elmxx_pio_init, elmxx_read_domain
+  use elmxxTimerMod, only : elmxx_t_start, elmxx_t_stop
   use elmxxSurfdataMod, only : elmxx_read_surfdata, elmxx_surfdata_clean, &
                                surfdata_read, numurbl, natpft, nlevsoi, &
                                pct_natveg, pct_crop, pct_lake, pct_wetland, &
@@ -501,8 +502,10 @@ contains
     ! depends on it.
     !-----------------------------------------------------------------------
     if (len_trim(fsurdat) > 0) then
+       call elmxx_t_start('elmxx_read_surfdata')
        call elmxx_read_surfdata(logunit, fsurdat, num_cells_grid, &
-                                natural_id_cells_owned)
+                                natural_id_cells_owned, elmxx_perf_ncells == 0)
+       call elmxx_t_stop('elmxx_read_surfdata')
        call elmxx_report_composition(logunit)
        call elmxx_build_subgrid(logunit, num_cells_owned)
        call elmxx_surface_state_init(logunit, month, day)
@@ -928,9 +931,11 @@ contains
     ! change while the kernels are off.
     !-----------------------------------------------------------------------
     if (kokkos_state_built) then
+       call elmxx_t_start('elmxx_push_forcing')
        call elmxx_kokkos_push_forcing(elmxx_state, nextsw_cday, declinp1, &
             cell_lat, cell_lon, logunit)
        call elmxx_lake_push_forcing(elmxx_state)
+       call elmxx_t_stop('elmxx_push_forcing')
     end if
 
     !-----------------------------------------------------------------------
@@ -1088,6 +1093,7 @@ contains
        ! indices and their weights cross. This replaces push_phenology, which
        ! shipped interpolated leaf area every doalb step.
        if (subgrid_built .and. doalb_in) then
+          call elmxx_t_start('ecosysdyn')
           if (.not. monthly_phen_pushed) then
              call elmxx_push_monthly_phenology(elmxx_state, logunit)
              monthly_phen_pushed = .true.
@@ -1096,6 +1102,7 @@ contains
           call ELMxxComputeSatellitePhenologyNatural(elmxx_state, phm1, phm2, phw1, phw2, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
                call shr_sys_abort('(elmxx_run) ERROR: ComputeSatellitePhenologyNatural failed')
+          call elmxx_t_stop('ecosysdyn')
        end if
 
        if (do_albedo_this_step) then
@@ -1103,6 +1110,7 @@ contains
           ! it on the device from these same two scalars at the top of the
           ! step. SurfaceAlbedo is the only reader, so deriving it earlier in
           ! the step changes no value.
+          call elmxx_t_start('surfalb')
           call ELMxxComputeSurfaceAlbedoNatural(elmxx_state, ierr_rs)
           if (ierr_rs /= ELMXX_SUCCESS) &
                call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoNatural failed')
@@ -1111,11 +1119,14 @@ contains
              if (ierr_rs /= ELMXX_SUCCESS) &
                   call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoLake failed')
           end if
+          call elmxx_t_stop('surfalb')
           ! UrbanAlbedo, with the albedo pass's next-step coszen (Stage 6.7).
           if (urban_built) then
+             call elmxx_t_start('urbsurfalb')
              call ELMxxComputeSurfaceAlbedoUrban(elmxx_state, ierr_rs)
              if (ierr_rs /= ELMXX_SUCCESS) &
                   call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoUrban failed')
+             call elmxx_t_stop('urbsurfalb')
           end if
           if ((nstep == 1 .or. mod(nstep, 24) == 0) .and. elmxx_perf_ncells == 0) then
              call elmxx_surface_albedo_report(logunit)
@@ -1154,16 +1165,22 @@ contains
     ! track whatever state exists, cold-start or not.
     !-----------------------------------------------------------------------
     if (kokkos_state_built .and. subgrid_built .and. elmxx_perf_ncells == 0) then
+       call elmxx_t_start('elm_drv_io')
+       call elmxx_t_start('hbuf')
        call elmxx_hist_step(elmxx_state, logunit)
+       call elmxx_t_stop('hbuf')
        ! The nstep-0 pass is accumulated (ELM's January mean includes it --
        ! measured, H2OCAN to 1.3e-7) but never closes a tape: ELM skips the
        ! write at nstep 0 (histFileMod.F90:3415). Its stamp is the run start,
        ! day 1 00:00, which would otherwise write a one-sample file.
        if (nstep > 0 .and. present(hist_year) .and. present(hist_month) .and. &
            present(hist_day) .and. present(hist_tod)) then
+          call elmxx_t_start('elm_drv_io_htapes')
           call elmxx_hist_write_if_month_end(elmxx_state, hist_year, hist_month, &
                                              hist_day, hist_tod, logunit)
+          call elmxx_t_stop('elm_drv_io_htapes')
        end if
+       call elmxx_t_stop('elm_drv_io')
     end if
 
     if (masterproc .and. elmxx_perf_ncells == 0) then
