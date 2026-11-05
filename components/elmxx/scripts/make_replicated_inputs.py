@@ -24,19 +24,25 @@ SURFDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", 
                         "cime", "scripts", "surfdata_1x1_brazil_simyr1850_c140610.nc")
 
 
-def copy_var(src, dst, name, grid_dim, ncells):
-    """Copy a variable, tiling it along grid_dim when it has that dimension."""
+def define_var(src, dst, name):
+    """Define a variable and its attributes on dst, without writing its data."""
     var = src.variables[name]
     fill = var.getncattr("_FillValue") if "_FillValue" in var.ncattrs() else None
     out = dst.createVariable(name, var.dtype, var.dimensions, fill_value=fill)
     out.setncatts({a: var.getncattr(a) for a in var.ncattrs() if a != "_FillValue"})
+
+
+def write_var(src, dst, name, grid_dim):
+    """Write a variable, tiling it along grid_dim when it has that dimension."""
+    var = src.variables[name]
+    out = dst.variables[name]
 
     if grid_dim not in var.dimensions:
         out[...] = var[...]
         return
 
     # The grid dimension has size 1 on the source, so it broadcasts wherever it
-    # sits. A record at a time, so memory stays near one record's size., so memory stays near one record's size.
+    # sits. A record at a time, so memory stays near one record's size.
     if var.dimensions[0] == "time":
         for t in range(var.shape[0]):
             out[t, ...] = np.broadcast_to(var[t, ...], out.shape[1:])
@@ -54,6 +60,9 @@ def replicate(src_path, dst_path, grid_dim, ncells):
             netCDF4.Dataset(tmp_path, "w", format="NETCDF3_64BIT_OFFSET") as dst:
         src.set_auto_mask(False)
         dst.set_auto_mask(False)
+        # A classic file moves all its data whenever its header grows, so define
+        # every variable before writing any, with nothing prefilled to move.
+        dst.set_fill_off()
         if src.dimensions[grid_dim].size != 1:
             sys.exit(f"ERROR: {src_path} has more than one cell")
         for name, dim in src.dimensions.items():
@@ -62,7 +71,9 @@ def replicate(src_path, dst_path, grid_dim, ncells):
         dst.setncatts({a: src.getncattr(a) for a in src.ncattrs()})
         dst.setncattr("replicated_from", src_path)
         for name in src.variables:
-            copy_var(src, dst, name, grid_dim, ncells)
+            define_var(src, dst, name)
+        for name in src.variables:
+            write_var(src, dst, name, grid_dim)
     os.rename(tmp_path, dst_path)
     print(f"wrote: {dst_path} ({os.path.getsize(dst_path) / 1e9:.3f} GB)")
 
