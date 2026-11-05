@@ -152,6 +152,12 @@ new_case "${CASE}"
 ./xmlchange JOB_QUEUE="${QUEUE}",JOB_WALLCLOCK_TIME="${WALLCLOCK}"
 ./xmlchange TIMER_LEVEL=10
 ./xmlchange EXEROOT="${EXEROOT}",BUILD_COMPLETE=TRUE
+
+# GPU-aware MPI slows PIO's rearranger about 100 times on host buffers, and
+# ELMxx passes no device buffers to MPI.
+if [ "${MACH}" = pm-gpu ]; then
+  sed -i 's|\(<env name="MPICH_GPU_SUPPORT_ENABLED">\)1<|\10<|' env_mach_specific.xml
+fi
 write_namelist "${SURFDATA}"
 ./case.setup || exit 1
 echo "case: ${CASE}"
