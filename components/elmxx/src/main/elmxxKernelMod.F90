@@ -26,6 +26,7 @@ module elmxxKernelMod
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use elmxxSpmdMod    , only : masterproc, iam
+  use elmxxTimerMod   , only : elmxx_t_start, elmxx_t_stop
   use elmxxDiagnosticsMod, only : elmxx_diag_snapshot_preinfil, elmxx_diag_snapshot_presoilflux, elmxx_diag_snapshot_presoiltemp, elmxx_diag_snapshot_soilwater, elmxx_diag_snapshot_postcanhydro, elmxx_diag_snapshot_postcanflux, elmxx_diag_snapshot_snowstate
   use elmxxKokkosStateMod , only : n_kokkos_col
   use elmxxLakeMod       , only : lake_built
@@ -692,6 +693,7 @@ contains
     ! ELM snapshots the column water inventory at the very top of the step,
     ! before any physics (elm_driver.F90:559). It must therefore be first
     ! here too, whatever order the namelist lists it in.
+    call elmxx_t_start('begwbal')
     if (kernel_active(K_BEGWATERBAL)) then
        call ELMxxComputeBeginWaterBalanceNatural(elm, ierr)
        call check(ierr, logunit, K_BEGWATERBAL)
@@ -706,9 +708,11 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_BEGWATERBAL)
+    call elmxx_t_stop('begwbal')
 
     call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_pre')
 
+    call elmxx_t_start('canhydro')
     if (kernel_active(K_CANHYDRO)) then
        call ELMxxComputeCanopyHydrology(elm, dtime, ierr)
        call check(ierr, logunit, K_CANHYDRO)
@@ -720,7 +724,9 @@ contains
        call elmxx_diag_snapshot_snowstate(elm, 'elmxx_snow_post')
     end if
     call wbal_mark(elm, K_CANHYDRO)
+    call elmxx_t_stop('canhydro')
 
+    call elmxx_t_start('surfrad')
     if (kernel_active(K_CANSUNSHADE)) then
        call ELMxxComputeCanopySunShadeFractions(elm, ierr)
        call check(ierr, logunit, K_CANSUNSHADE)
@@ -738,7 +744,9 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_URBANRAD)
+    call elmxx_t_stop('surfrad')
 
+    call elmxx_t_start('bgp1')
     if (kernel_active(K_CANTEMP)) then
        call ELMxxComputeCanopyTemperature(elm, ierr)
        call check(ierr, logunit, K_CANTEMP)
@@ -748,26 +756,34 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_CANTEMP)
+    call elmxx_t_stop('bgp1')
 
+    call elmxx_t_start('bgflux')
     if (kernel_active(K_BAREGRND)) then
        call ELMxxComputeBareGroundFluxes(elm, ierr)
        call check(ierr, logunit, K_BAREGRND)
     end if
     call wbal_mark(elm, K_BAREGRND)
+    call elmxx_t_stop('bgflux')
 
+    call elmxx_t_start('canflux')
     if (kernel_active(K_CANFLUX)) then
        call ELMxxComputeCanopyFluxes(elm, dtime, ierr)
        call check(ierr, logunit, K_CANFLUX)
        call elmxx_diag_snapshot_postcanflux(elm, 'elmxx_cf')
     end if
     call wbal_mark(elm, K_CANFLUX)
+    call elmxx_t_stop('canflux')
 
+    call elmxx_t_start('uflux')
     if (urban_on()) then
        call ELMxxComputeUrbanFluxesUrban(elm, ierr)
        call check(ierr, logunit, K_URBANFLUX)
     end if
     call wbal_mark(elm, K_URBANFLUX)
+    call elmxx_t_stop('uflux')
 
+    call elmxx_t_start('bgplake')
     if (kernel_active(K_LAKEFLUX) .and. lake_built) then
        call ELMxxComputeLakeFluxesLake(elm, ierr)
        call check(ierr, logunit, K_LAKEFLUX)
@@ -779,6 +795,7 @@ contains
        call check(ierr, logunit, K_LAKETEMP)
     end if
     call wbal_mark(elm, K_LAKETEMP)
+    call elmxx_t_stop('bgplake')
 
     end if
 
@@ -786,6 +803,7 @@ contains
 
     call elmxx_diag_snapshot_presoiltemp(elm, nlevsno + nlevgrnd, 'elmxx_st')
 
+    call elmxx_t_start('soiltemperature')
     if (kernel_active(K_SOILTEMP)) then
        call ELMxxComputeSoilTemperatureNatural(elm, ierr)
        call check(ierr, logunit, K_SOILTEMP)
@@ -796,9 +814,11 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_SOILTEMP)
+    call elmxx_t_stop('soiltemperature')
 
     call elmxx_diag_snapshot_presoilflux(elm, nlevsno + nlevgrnd, 'elmxx_sf')
 
+    call elmxx_t_start('bgp2')
     if (kernel_active(K_SOILFLUX)) then
        call ELMxxComputeSoilFluxesNatural(elm, ierr)
        call check(ierr, logunit, K_SOILFLUX)
@@ -809,7 +829,9 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_SOILFLUX)
+    call elmxx_t_stop('bgp2')
 
+    call elmxx_t_start('hydro without drainage')
     ! ELM HydrologyNoDrainage calls SnowWater first, ahead of SurfaceRunoff:
     ! meltwater leaving the snowpack is part of what reaches the soil surface.
     if (kernel_active(K_SNOWWATER)) then
@@ -912,6 +934,9 @@ contains
        call check(ierr, logunit, K_SOILTEMP)
     end if
 
+    call elmxx_t_stop('hydro without drainage')
+
+    call elmxx_t_start('hylake')
     if (kernel_active(K_LAKEHYDRO) .and. lake_built) then
        call ELMxxComputeLakeHydrologyLake(elm, dtime, ierr)
        call check(ierr, logunit, K_LAKEHYDRO)
@@ -925,7 +950,9 @@ contains
        end if
     end if
     call wbal_mark(elm, K_LAKEHYDRO)
+    call elmxx_t_stop('hylake')
 
+    call elmxx_t_start('hydro2 drainage')
     if (kernel_active(K_HYDRODRAIN)) then
        call ELMxxComputeHydrologyDrainageNatural(elm, ierr)
        call check(ierr, logunit, K_HYDRODRAIN)
@@ -945,11 +972,13 @@ contains
        call check(ierr, logunit, K_SNOWAGE)
     end if
     call wbal_mark(elm, K_SNOWAGE)
+    call elmxx_t_stop('hydro2 drainage')
 
     ! ELM runs the balance check once the hydrology has finished
     ! (elm_driver.F90:1333), so it goes last here whatever order the
     ! namelist lists it in. It only differences state the step already
     ! produced, so it cannot perturb anything.
+    call elmxx_t_start('balchk')
     if (kernel_active(K_BALANCECHK)) then
        call ELMxxComputeWaterBalanceCheckNatural(elm, ierr)
        call check(ierr, logunit, K_BALANCECHK)
@@ -960,6 +989,7 @@ contains
        call check(ierr, logunit, K_URBANRAD)
     end if
     call wbal_mark(elm, K_BALANCECHK)
+    call elmxx_t_stop('balchk')
 
     end if
 

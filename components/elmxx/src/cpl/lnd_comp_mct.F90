@@ -33,6 +33,7 @@ module lnd_comp_mct
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
   use elmxx_cpl_indices, only : elmxx_cpl_indices_set
   use elmxxForcingMod  , only : elmxx_import
+  use elmxxTimerMod    , only : elmxx_timers_on, elmxx_t_start, elmxx_t_stop
 
   !
   ! !PUBLIC TYPES:
@@ -169,7 +170,11 @@ CONTAINS
     ! ELMxx before history needed it.
     call seq_infodata_GetData(infodata, case_name=elmxx_caseid)
 
+    elmxx_timers_on = .true.
+
+    call elmxx_t_start('elmxx_init')
     call elmxx_init(logunit_lnd, year, month, day)
+    call elmxx_t_stop('elmxx_init')
 
     ! Restart (Stage 6): a continue or branch run carries ELMxx's step count
     ! on, so doalb's nstep-0/1 special cases do not fire again; the state
@@ -290,7 +295,9 @@ CONTAINS
          orb_lambm0=lambm0, orb_obliqr=obliqr)
     call shr_orb_decl(nextsw_cday, eccen, mvelpp, lambm0, obliqr, declinp1, eccf)
 
+    call elmxx_t_start('lc_lnd_import')
     call elmxx_import(logunit_lnd, x2l_l)
+    call elmxx_t_stop('lc_lnd_import')
 
     ! Advance over model steps until ELMxx's clock catches the coupler's, the
     ! way ELM's lnd_run_mct does. On the first coupling call the clock starts
@@ -348,16 +355,20 @@ CONTAINS
                          s=hist_tod, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet hist_time')
 
+       call elmxx_t_start('elm_run')
        call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
                       nextsw_cday, declinp1, doalb=doalb_step, &
                       hist_year=hist_year, hist_month=hist_month, &
                       hist_day=hist_day, hist_tod=hist_tod)
+       call elmxx_t_stop('elm_run')
 
        ! Restart at the end of the coupling interval the alarm rings in, dated
        ! with this step's end time (ELM: rstwr = rstwr_sync .and. dosend).
        if (dosend .and. seq_timemgr_RestartAlarmIsOn(EClock)) then
+          call elmxx_t_start('elm_drv_io_wrest')
           call elmxx_restart_write(inst_suffix, hist_year, hist_month, hist_day, &
                                    hist_tod, logunit_lnd)
+          call elmxx_t_stop('elm_drv_io_wrest')
        end if
 
        elmxx_nstep = elmxx_nstep + 1
