@@ -9,7 +9,8 @@ module elmxxInitCheckMod
   ! adding a one-off model I/O format.  tools/compare_stage2_init.py joins the
   ! per-rank snapshots and compares them with an ELM restart from a twin case.
   ! The file is replaced after every coupling date so a twin run of any length
-  ! can be checked at its final common date.
+  ! can be checked at its final common date. It is written only when the
+  ! elmxx_stage2_snapshot namelist option is on.
   !-----------------------------------------------------------------------
 
   use shr_kind_mod         , only : r8 => shr_kind_r8

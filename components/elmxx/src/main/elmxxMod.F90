@@ -205,6 +205,7 @@ module elmxxMod
   ! every kernel was a no-op; it is not harmless now. Set it in the namelist
   ! only for a run whose results you intend to throw away.
   logical           , public :: elmxx_check_boundary  = .false.
+  logical           , public :: elmxx_stage2_snapshot = .false.
   logical           , public :: elmxx_check_soft_fail = .false.
   ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
   character(len=256), public :: elmxx_kernels = ' '
@@ -282,7 +283,7 @@ contains
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
-                            elmxx_kernels, fparamfile, elmxx_do_albedo, &
+                            elmxx_stage2_snapshot, elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
                             elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             elmxx_hist_fincl, elmxx_nrevsn
@@ -296,6 +297,7 @@ contains
     finidat     = ' '
     elmxx_nrevsn = ' '
     elmxx_check_boundary  = .false.
+    elmxx_stage2_snapshot = .false.
     elmxx_check_soft_fail = .false.
     elmxx_kernels         = ' '
     fparamfile            = ' '
@@ -341,6 +343,7 @@ contains
     call mpi_bcast (finidat    , len(finidat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_nrevsn, len(elmxx_nrevsn), MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_stage2_snapshot, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (fparamfile   , len(fparamfile)   , MPI_CHARACTER, 0, mpicom_lnd, ier)
@@ -359,6 +362,7 @@ contains
        write(logunit,*) '   fatmlndfrc = ', trim(fatmlndfrc)
        write(logunit,*) '   fsurdat    = ', trim(fsurdat)
        write(logunit,*) '   elmxx_check_boundary  = ', elmxx_check_boundary
+       write(logunit,*) '   elmxx_stage2_snapshot = ', elmxx_stage2_snapshot
        write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
        write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
@@ -510,7 +514,7 @@ contains
        call elmxx_build_subgrid(logunit, num_cells_owned)
        call elmxx_surface_state_init(logunit, month, day)
        call elmxx_build_filters(logunit, num_cells_owned)
-       if (elmxx_perf_ncells == 0) then
+       if (elmxx_stage2_snapshot .and. elmxx_perf_ncells == 0) then
           call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
        end if
     else
@@ -911,10 +915,11 @@ contains
     ! step 0 with a full canopy, routing patches through CanopyFluxes where ELM
     ! was still running BareGroundFluxes.
     !
-    ! The snapshot is a Stage 2 check of the initial state, so it is written on
-    ! the first pass only. Rewriting it every step took most of a step's time,
-    ! about 17 KB of text per cell.
-    if (subgrid_built .and. elmxx_perf_ncells == 0 .and. nstep == 0) then
+    ! The Stage 2 snapshot is for checking a run against its ELM twin, so it is
+    ! off unless elmxx_stage2_snapshot asks for it. It is replaced every step so
+    ! a run of any length can be checked at its last date, which costs about
+    ! 17 KB of text per cell per step and is far too much for production.
+    if (elmxx_stage2_snapshot .and. subgrid_built .and. elmxx_perf_ncells == 0) then
        call elmxx_write_init_snapshot(logunit, month, day, natural_id_cells_owned)
     end if
 
