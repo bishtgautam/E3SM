@@ -282,7 +282,7 @@ CONTAINS
     if (.not. do_elmxx) return
 
     coupling_dt_in_sec = get_step_size(EClock)
-    call get_clock_date(EClock, month, day)
+    ! month and day (satellite phenology) are set per step in the loop below.
 
     ! Orbital state for SurfaceAlbedo. Taken from the coupler rather than
     ! recomputed from the model clock: nextsw_cday is the day of the
@@ -339,8 +339,7 @@ CONTAINS
        end if
 
        ! History's month-end trigger needs the per-substep END time, as a
-       ! separate argument from month/day above (those drive phenology, and
-       ! changing what they carry would be a silent phenology change).
+       ! separate argument from month/day (those drive phenology, below).
        !
        ! That end time IS elmxx_clock_time, not clock + step: because of the
        ! duplicate nstep-0 pass, the clock during step n already reads
@@ -354,6 +353,15 @@ CONTAINS
        call ESMF_TimeGet(hist_time, yy=hist_year, mm=hist_month, dd=hist_day, &
                          s=hist_tod, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet hist_time')
+
+       ! Satellite phenology date: ELM's interpMonthlyVeg uses
+       ! get_curr_date(offset=dtime), i.e. its clock PLUS one step, and its
+       ! clock during step n already reads start + n*dt (as ours does, see
+       ! above). The EClock date used before was therefore one step behind
+       ! ELM at every day boundary, which shifted the monthly LAI/SAI weights
+       ! and left January ELAI 2.8e-5 and ESAI 8.6e-6 off ELM.
+       call ESMF_TimeGet(elmxx_clock_time + elmxx_step, mm=month, dd=day, rc=rc)
+       call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet phenology date')
 
        call elmxx_t_start('elmxx_run')
        call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
@@ -584,9 +592,7 @@ CONTAINS
 
   subroutine get_clock_date(EClock, month, day, year)
 
-    ! Extract the component clock date used by satellite phenology.  The
-    ! EClock passed into the run phase is already at the end of this coupling
-    ! interval, matching ELM's get_curr_date(offset=dtime) convention.
+    ! Extract the component clock date (used at initialization).
     !
     ! year is optional and, until history needed it, was computed here and
     ! discarded -- elmxx_init's hist_year argument now uses it.
