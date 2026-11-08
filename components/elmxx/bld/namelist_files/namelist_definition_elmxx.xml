@@ -111,6 +111,19 @@ run's last date. It costs about 17 KB of text per cell per step, so leave it off
 except on small validation cases.
 </entry>
 
+<entry id="elmxx_timer_level"
+       type="integer"
+       category="elmxx"
+       group="elmxx_inparm" >
+Default: 0
+Detail level of the timers inside ELMxx's C++ (Pacer, on the driver's GPTL;
+they appear in the run's timing files with the "l:ELMxx::" prefix). 0 leaves
+them off; 1 times the launches and phases inside each step that the Fortran
+timers (canflux, hbuf, ...) cover; 2 adds finer pieces. Each active timer
+fences Kokkos, which serialises a GPU run, so leave this at 0 except when
+profiling.
+</entry>
+
 <entry id="elmxx_check_boundary"
        type="logical"
        category="elmxx"

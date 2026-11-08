@@ -28,7 +28,8 @@ module lnd_comp_mct
   use elmxxMod        , only : elmxx_restart_set_start, elmxx_restart_write
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
-  use elmxxMod        , only : elmxx_caseid
+  use elmxxMod        , only : elmxx_caseid, elmxx_timer_level
+  use elmxx_kokkos_interface, only : ELMxxTimersInitialize
   use elmxxHistMod    , only : elmxx_hist_set_base_date
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
@@ -176,6 +177,17 @@ CONTAINS
     call elmxx_t_start('elmxx_init')
     call elmxx_init(logunit_lnd, year, month, day)
     call elmxx_t_stop('elmxx_init')
+
+    ! The C++ timers, inside the steps these Fortran timers cover. After
+    ! elmxx_init: it reads the namelist and starts Kokkos, which they fence.
+    if (elmxx_timer_level > 0) then
+       if (ELMxxTimersInitialize(mpicom_lnd, elmxx_timer_level) /= 1) then
+          if (masterproc) write(logunit_lnd,*) 'elmxx: elmxx_timer_level = ', &
+               elmxx_timer_level, ' but the C++ timers are unavailable; running untimed'
+       else if (masterproc) then
+          write(logunit_lnd,*) 'elmxx: C++ timers on at level ', elmxx_timer_level
+       end if
+    end if
 
     ! History's base day for mdcur/mscur: the run's start date, which the
     ! driver clock keeps as its startTime on a continue run too.

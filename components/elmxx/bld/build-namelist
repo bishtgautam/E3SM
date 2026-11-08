@@ -301,6 +301,7 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'elmxx_check_boundary');
     add_default($nl, 'elmxx_stage2_snapshot');
     add_default($nl, 'elmxx_check_soft_fail');
+    add_default($nl, 'elmxx_timer_level');
 
     # Stage 4 kernel activation. Empty by default -- the timestep stays a
     # no-op until kernels are named explicitly.
