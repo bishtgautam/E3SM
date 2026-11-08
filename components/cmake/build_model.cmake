@@ -361,6 +361,12 @@ macro(build_model COMP_CLASS COMP_NAME)
             "submodule with: git submodule update --init --recursive "
             "components/elmxx/external_models/elmxx")
         endif()
+        # ELMxx's C++ timers go through Pacer, on the driver's GPTL (whose
+        # gptl.h is installed in the shared include directory). Pacer is
+        # compiled into libelmxx; a second user of share/pacer in the same
+        # executable would want a shared pacer target instead.
+        set(ELMXX_PACER_DIR "${PROJECT_SOURCE_DIR}/../share/pacer")
+        set(ELMXX_GPTL_INCLUDE_DIRS "${INSTALL_SHAREDPATH}/include")
         add_subdirectory(${ELMXX_LIB_DIR} elmxx-lib)
         # elmxx         -> libelmxx.a         (C++ kernels + C API)
         # elmxx_fortran -> libelmxx_fortran.a (iso_c_binding wrappers; supplies

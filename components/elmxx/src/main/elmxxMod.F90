@@ -105,7 +105,7 @@ module elmxxMod
                                       kokkos_state_built, n_kokkos_col, &
                                       n_kokkos_patch, n_kokkos_urb
   use elmxx_kokkos_interface , only : ELMxxKokkosInitialize, ELMxxKokkosFinalize, &
-                                      ELMxxKokkosPrintConfiguration
+                                      ELMxxKokkosPrintConfiguration, ELMxxTimersFinalize
 
   implicit none
   save
@@ -207,6 +207,9 @@ module elmxxMod
   logical           , public :: elmxx_check_boundary  = .false.
   logical           , public :: elmxx_stage2_snapshot = .false.
   logical           , public :: elmxx_check_soft_fail = .false.
+  ! C++ timers inside the Fortran-timed steps (src/utils/Timers.h in the
+  ! library): 0 off, 1 the launches and phases of each step, 2 finer.
+  integer           , public :: elmxx_timer_level     = 0
   ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
   character(len=256), public :: elmxx_kernels = ' '
   ! PFT parameter file (ELM's clm_params). Needed once root water stress runs.
@@ -286,7 +289,7 @@ contains
                             elmxx_stage2_snapshot, elmxx_kernels, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
                             elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
-                            elmxx_hist_fincl, elmxx_nrevsn
+                            elmxx_hist_fincl, elmxx_nrevsn, elmxx_timer_level
 
     ! defaults
     do_elmxx   = .true.
@@ -306,6 +309,7 @@ contains
     elmxx_do_photosynthesis = .false.
     elmxx_co2_ppmv        = 284.7_r8
     elmxx_hist_fincl      = ' '
+    elmxx_timer_level     = 0
 
     nlfilename = "lnd_in" // trim(inst_suffix)
 
@@ -354,6 +358,7 @@ contains
     call mpi_bcast (elmxx_stomata_closed   , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_do_photosynthesis, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_co2_ppmv         , 1, MPI_REAL8  , 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_timer_level      , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -367,6 +372,7 @@ contains
        write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   elmxx_hist_fincl      = ', trim(elmxx_hist_fincl)
+       write(logunit,*) '   elmxx_timer_level     = ', elmxx_timer_level
        call shr_sys_flush(logunit)
     end if
 
@@ -1293,6 +1299,9 @@ contains
     integer, intent(in) :: hist_year, hist_month, hist_day, hist_tod
 
     integer :: ierr_elmxx
+
+    ! Stop the C++ timers before the Kokkos teardown below: they fence.
+    call ELMxxTimersFinalize()
 
     ! Per-kernel water budget, if ELMXX_WBAL was set in the environment.
     ! Before teardown: it reads state the destroy below releases.

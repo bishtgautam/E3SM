@@ -21,6 +21,7 @@ attributes to express the dependency.
      from a naming convention, so it must be given explicitly in user_nl_elmxx -->
 
 <elmxx_check_boundary>.true.</elmxx_check_boundary>
+<elmxx_timer_level>0</elmxx_timer_level>
 <elmxx_stage2_snapshot>.false.</elmxx_stage2_snapshot>
 <elmxx_check_soft_fail>.false.</elmxx_check_soft_fail>
 <elmxx_do_albedo>.false.</elmxx_do_albedo>
