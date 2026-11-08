@@ -29,6 +29,7 @@ module lnd_comp_mct
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
   use elmxxMod        , only : elmxx_caseid
+  use elmxxHistMod    , only : elmxx_hist_set_base_date
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
   use elmxxMod        , only : inst_name, inst_index, inst_suffix, do_elmxx
   use elmxx_cpl_indices, only : elmxx_cpl_indices_set
@@ -175,6 +176,18 @@ CONTAINS
     call elmxx_t_start('elmxx_init')
     call elmxx_init(logunit_lnd, year, month, day)
     call elmxx_t_stop('elmxx_init')
+
+    ! History's base day for mdcur/mscur: the run's start date, which the
+    ! driver clock keeps as its startTime on a continue run too.
+    block
+      type(ESMF_Time) :: t0
+      integer :: rc0, y0, m0, d0, s0
+      call ESMF_ClockGet(EClock, startTime=t0, rc=rc0)
+      call chkrc(rc0, 'lnd::lnd_init_mct: ESMF_ClockGet startTime')
+      call ESMF_TimeGet(t0, yy=y0, mm=m0, dd=d0, s=s0, rc=rc0)
+      call chkrc(rc0, 'lnd::lnd_init_mct: ESMF_TimeGet startTime')
+      call elmxx_hist_set_base_date(y0, m0, d0, s0)
+    end block
 
     ! Restart (Stage 6): a continue or branch run carries ELMxx's step count
     ! on, so doalb's nstep-0/1 special cases do not fire again; the state

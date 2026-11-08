@@ -21,14 +21,18 @@ module elmxxHistMod
   use elmxxSpmdMod , only : masterproc, iam, npes
   use elmxxIO      , only : pio_subsystem, io_type
   use elmxxSubgridMod, only : num_landunits, lun_itype, lun_wtgcell, lun_gridcell, &
-                             istsoil, istdlak, isturb_tbd, isturb_md
+                             istsoil, istdlak, isturb_tbd, isturb_md, &
+                             num_patches, patch_column, patch_itype, patch_wtcol, &
+                             col_landunit
+  use elmxxSurfdataMod, only : natpft
   use elmxx_mod    , only : ELMxxType, ELMXX_SUCCESS, &
                              ELMxxHistoryActivateDefaults, ELMxxHistoryActivate, &
                              ELMxxHistoryActiveCount, ELMxxHistoryActiveName, &
                              ELMxxHistoryActiveUnits, ELMxxHistoryActiveLongName, &
                              ELMxxHistoryActiveIsAvg, ELMxxHistoryAccumulate, &
                              ELMxxHistoryNormalize, ELMxxHistoryGetField, &
-                             ELMxxHistoryReset, ELMxxHistoryActiveNlev
+                             ELMxxHistoryReset, ELMxxHistoryActiveNlev, &
+                             ELMxxHistoryActiveLevDim
   use pio
 
   implicit none
@@ -41,6 +45,7 @@ module elmxxHistMod
   public :: elmxx_hist_final
   public :: elmxx_hist_get_restart_state
   public :: elmxx_hist_set_restart_state
+  public :: elmxx_hist_set_base_date
 
   !--------------------------------------------------------------------------
   ! Module state. One instance only -- ELMxx runs one land model per
@@ -57,17 +62,32 @@ module elmxxHistMod
   character(len=256), allocatable :: field_long_name(:)
   logical            , allocatable :: field_is_avg(:)
   real(r8)           , allocatable :: hist_buf(:,:)   ! (n_local, nfields), pulled at month-end
-  integer            , allocatable :: field_nlev(:)   ! 0, or the field's levgrnd extent
+  integer            , allocatable :: field_nlev(:)   ! 0, or the field's level extent
+  integer            , allocatable :: field_levdim(:) ! 0, or its index into levdim_*
 
   ! A multi-level field's month-end values, (n_local, nlev). Single-level
-  ! fields stay in hist_buf; every multi-level field shares one level count
-  ! (hist_nlev, the file's levgrnd dimension) and one decomposition.
+  ! fields stay in hist_buf. Each level dimension the file carries (levgrnd,
+  ! levlak, and the subgrid ltype/natpft) has one size and one decomposition.
   type :: hist_lev_buf_t
      real(r8), allocatable :: v(:,:)
   end type hist_lev_buf_t
   type(hist_lev_buf_t), allocatable :: hist_buf2(:)    ! (nfields)
-  integer         :: hist_nlev = 0
-  type(io_desc_t) :: hist_iodesc2
+  integer, parameter :: MAX_LEVDIM = 8
+  integer            :: nlevdim = 0
+  character(len=16)  :: levdim_name(MAX_LEVDIM) = ' '
+  integer            :: levdim_n(MAX_LEVDIM) = 0
+  type(io_desc_t)    :: levdim_iodesc(MAX_LEVDIM)
+
+  ! ELM's time-constant subgrid fractions, written into every file:
+  ! PCT_LANDUNIT on ltype (ELM's max_lunit landunit types) and PCT_NAT_PFT
+  ! on natpft, both (n_local, n) in percent.
+  integer, parameter :: MAX_LUNIT = 9
+  integer :: ilev_ltype = 0, ilev_natpft = 0
+  real(r8), allocatable :: pct_landunit(:,:), pct_nat_pft(:,:)
+
+  ! The run's start date (the driver clock's startTime) as days since
+  ! 0001-01-01, ELM's base day for mdcur/mscur.
+  real(r8) :: hist_base_days = 0.0_r8
 
   real(r8), allocatable :: hist_lon(:), hist_lat(:), hist_area(:)  ! (n_local), time-constant
   integer , allocatable :: hist_dof(:)                             ! (n_local), 1-based lndgrid position
@@ -103,6 +123,38 @@ contains
   end subroutine elmxx_hist_set_restart_state
 
   !-----------------------------------------------------------------------
+  ! The run's start date, ELM's base day for mdcur/mscur. The driver clock's
+  ! startTime is the case's RUN_STARTDATE on a continue run too, so a
+  ! restarted run writes the same mdcur as a straight one.
+  !-----------------------------------------------------------------------
+  subroutine elmxx_hist_set_base_date(year, month, day, tod)
+    integer, intent(in) :: year, month, day, tod
+    hist_base_days = elmxx_hist_days_since_epoch(year, month, day, tod)
+  end subroutine elmxx_hist_set_base_date
+
+  !-----------------------------------------------------------------------
+  ! Index of level dimension `name` with `n` levels, added on first use.
+  !-----------------------------------------------------------------------
+  function elmxx_hist_levdim(name, n) result(k)
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    integer :: k
+    do k = 1, nlevdim
+       if (trim(levdim_name(k)) == trim(name)) then
+          if (levdim_n(k) /= n) call shr_sys_abort('(elmxx_hist_levdim) ERROR: level '// &
+               'dimension '//trim(name)//' used with two different sizes')
+          return
+       end if
+    end do
+    if (nlevdim == MAX_LEVDIM) call shr_sys_abort('(elmxx_hist_levdim) ERROR: too many '// &
+         'level dimensions')
+    nlevdim = nlevdim + 1
+    k = nlevdim
+    levdim_name(k) = name
+    levdim_n(k) = n
+  end function elmxx_hist_levdim
+
+  !-----------------------------------------------------------------------
   subroutine elmxx_hist_init(elmxx_state, logunit, caseid, elmxx_hist_fincl, &
                              hist_year, month, day, n_local_cells, num_cells_global_in, &
                              natural_id_cells_owned, lonc_g, latc_g, areac_g)
@@ -122,8 +174,9 @@ contains
     integer             , intent(in) :: natural_id_cells_owned(:)  ! (n_local_cells,), full-grid indices
     real(r8)            , intent(in) :: lonc_g(:), latc_g(:), areac_g(:)  ! (ni*nj,)
 
-    integer :: ierr, i, is_avg
+    integer :: ierr, i, is_avg, l, c, p, g
     real(r8) :: re_km
+    character(len=16) :: levname
     character(len=*), parameter :: subname = '(elmxx_hist_init) '
 
     if (hist_init_done) call shr_sys_abort(subname//'ERROR: elmxx_hist_init called twice')
@@ -148,7 +201,8 @@ contains
     end if
 
     allocate(field_name(nfields), field_units(nfields), field_long_name(nfields), &
-             field_is_avg(nfields), field_nlev(nfields), hist_buf2(nfields))
+             field_is_avg(nfields), field_nlev(nfields), field_levdim(nfields), &
+             hist_buf2(nfields))
     do i = 1, nfields
        field_name(i) = ' '; field_units(i) = ' '; field_long_name(i) = ' '
        call ELMxxHistoryActiveName(elmxx_state, i-1, field_name(i), ierr)
@@ -162,13 +216,42 @@ contains
        field_is_avg(i) = (is_avg /= 0)
        field_nlev(i) = ELMxxHistoryActiveNlev(elmxx_state, i-1, ierr)
        if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistoryActiveNlev failed')
+       field_levdim(i) = 0
        if (field_nlev(i) > 0) then
-          if (hist_nlev == 0) hist_nlev = field_nlev(i)
-          if (field_nlev(i) /= hist_nlev) call shr_sys_abort(subname// &
-               'ERROR: multi-level fields with different level counts ('//trim(field_name(i))//')')
-          allocate(hist_buf2(i)%v(n_local, hist_nlev))
+          levname = ' '
+          call ELMxxHistoryActiveLevDim(elmxx_state, i-1, levname, ierr)
+          if (ierr /= ELMXX_SUCCESS .or. len_trim(levname) == 0) &
+               call shr_sys_abort(subname//'ERROR: ELMxxHistoryActiveLevDim failed for '// &
+               trim(field_name(i)))
+          field_levdim(i) = elmxx_hist_levdim(levname, field_nlev(i))
+          allocate(hist_buf2(i)%v(n_local, field_nlev(i)))
           hist_buf2(i)%v = 0.0_r8
        end if
+    end do
+
+    ! PCT_LANDUNIT / PCT_NAT_PFT, from the subgrid ELMxx built (ELM writes
+    ! them every month; they are constant without dynamic land use). Local
+    ! cell g of the subgrid is history cell g.
+    ilev_ltype  = elmxx_hist_levdim('ltype', MAX_LUNIT)
+    ilev_natpft = elmxx_hist_levdim('natpft', natpft)
+    allocate(pct_landunit(n_local, MAX_LUNIT), pct_nat_pft(n_local, natpft))
+    pct_landunit = 0.0_r8
+    pct_nat_pft  = 0.0_r8
+    do l = 1, num_landunits
+       g = lun_gridcell(l)
+       if (g < 1 .or. g > n_local) cycle
+       if (lun_itype(l) >= 1 .and. lun_itype(l) <= MAX_LUNIT) &
+            pct_landunit(g, lun_itype(l)) = pct_landunit(g, lun_itype(l)) + 100.0_r8*lun_wtgcell(l)
+    end do
+    do p = 1, num_patches
+       c = patch_column(p)
+       l = col_landunit(c)
+       if (lun_itype(l) /= istsoil) cycle
+       g = lun_gridcell(l)
+       if (g < 1 .or. g > n_local) cycle
+       if (patch_itype(p) >= 0 .and. patch_itype(p) < natpft) &
+            pct_nat_pft(g, patch_itype(p)+1) = pct_nat_pft(g, patch_itype(p)+1) + &
+            100.0_r8*patch_wtcol(p)
     end do
 
     allocate(hist_buf(n_local, nfields))
@@ -203,22 +286,23 @@ contains
     end do
     call PIO_initdecomp(pio_subsystem, PIO_real, (/num_global/), hist_dof, hist_iodesc)
 
-    ! The (lndgrid, levgrnd) decomposition: local element (i, l), stored at
+    ! Each (lndgrid, level) decomposition: local element (i, l), stored at
     ! (l-1)*n_local + i, is global (hist_dof(i), l).
-    if (hist_nlev > 0) then
+    do g = 1, nlevdim
        block
          integer, allocatable :: dof2(:)
-         integer :: l
-         allocate(dof2(n_local*hist_nlev))
-         do l = 1, hist_nlev
+         integer :: nl
+         nl = levdim_n(g)
+         allocate(dof2(n_local*nl))
+         do l = 1, nl
             do i = 1, n_local
                dof2((l-1)*n_local + i) = (l-1)*num_global + hist_dof(i)
             end do
          end do
-         call PIO_initdecomp(pio_subsystem, PIO_real, (/num_global, hist_nlev/), dof2, hist_iodesc2)
+         call PIO_initdecomp(pio_subsystem, PIO_real, (/num_global, nl/), dof2, levdim_iodesc(g))
          deallocate(dof2)
        end block
-    end if
+    end do
 
     hist_start_year  = hist_year
     hist_start_month = month
@@ -406,7 +490,7 @@ contains
     do ifld = 1, nfields
        if (field_nlev(ifld) > 0) then
           call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf2(ifld)%v, &
-               n_local*hist_nlev, ierr)
+               n_local*field_nlev(ifld), ierr)
        else
           call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf(:,ifld), &
                n_local, ierr)
@@ -434,8 +518,9 @@ contains
     type(file_desc_t) :: file
     type(var_desc_t)  :: vid_lon, vid_lat, vid_area, vid_time, vid_time_bounds
     type(var_desc_t), allocatable :: vid_field(:)
-    integer :: dimid_lndgrid, dimid_time, dimid_histint, dimid_levgrnd
-    integer :: ierr, ifld
+    type(var_desc_t)  :: vid_pctl, vid_pctp, vid_mcdate, vid_mcsec, vid_mdcur, vid_mscur
+    integer :: dimid_lndgrid, dimid_time, dimid_histint, dimid_lev(MAX_LEVDIM)
+    integer :: ierr, ifld, k, ival(1)
     character(len=256) :: fname
     character(len=16)  :: cdate
     real(r8) :: start_days, end_days, tb(2,1), tval(1)
@@ -454,10 +539,11 @@ contains
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim time failed')
     ierr = PIO_def_dim(file, 'hist_interval', 2, dimid_histint)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim hist_interval failed')
-    if (hist_nlev > 0) then
-       ierr = PIO_def_dim(file, 'levgrnd', hist_nlev, dimid_levgrnd)
-       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim levgrnd failed')
-    end if
+    do k = 1, nlevdim
+       ierr = PIO_def_dim(file, trim(levdim_name(k)), levdim_n(k), dimid_lev(k))
+       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim '// &
+            trim(levdim_name(k))//' failed')
+    end do
 
     ! Time-constant per-cell fields.
     ierr = PIO_def_var(file, 'lon', PIO_real, (/dimid_lndgrid/), vid_lon)
@@ -480,12 +566,40 @@ contains
     ierr = PIO_def_var(file, 'time_bounds', PIO_double, (/dimid_histint, dimid_time/), vid_time_bounds)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var time_bounds failed')
 
+    ! ELM's per-record date metadata, at the record's end time.
+    ierr = PIO_def_var(file, 'mcdate', PIO_int, (/dimid_time/), vid_mcdate)
+    ierr = PIO_put_att(file, vid_mcdate, 'long_name', 'current date (YYYYMMDD)')
+    ierr = PIO_def_var(file, 'mcsec', PIO_int, (/dimid_time/), vid_mcsec)
+    ierr = PIO_put_att(file, vid_mcsec, 'long_name', 'current seconds of current date')
+    ierr = PIO_put_att(file, vid_mcsec, 'units', 's')
+    ierr = PIO_def_var(file, 'mdcur', PIO_int, (/dimid_time/), vid_mdcur)
+    ierr = PIO_put_att(file, vid_mdcur, 'long_name', 'current day (from base day)')
+    ierr = PIO_def_var(file, 'mscur', PIO_int, (/dimid_time/), vid_mscur)
+    ierr = PIO_put_att(file, vid_mscur, 'long_name', 'current seconds of current day')
+
+    ! Subgrid fractions (time-constant, written per record as ELM does).
+    ierr = PIO_def_var(file, 'PCT_LANDUNIT', PIO_real, &
+         (/dimid_lndgrid, dimid_lev(ilev_ltype), dimid_time/), vid_pctl)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var PCT_LANDUNIT failed')
+    ierr = PIO_put_att(file, vid_pctl, 'units', '%')
+    ierr = PIO_put_att(file, vid_pctl, 'long_name', '% of each landunit on topounit')
+    ierr = PIO_put_att(file, vid_pctl, '_FillValue', HIST_FILL)
+    ierr = PIO_put_att(file, vid_pctl, 'missing_value', HIST_FILL)
+    ierr = PIO_def_var(file, 'PCT_NAT_PFT', PIO_real, &
+         (/dimid_lndgrid, dimid_lev(ilev_natpft), dimid_time/), vid_pctp)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var PCT_NAT_PFT failed')
+    ierr = PIO_put_att(file, vid_pctp, 'units', '%')
+    ierr = PIO_put_att(file, vid_pctp, 'long_name', &
+         '% of each PFT on the natural vegetation (i.e., soil) landunit')
+    ierr = PIO_put_att(file, vid_pctp, '_FillValue', HIST_FILL)
+    ierr = PIO_put_att(file, vid_pctp, 'missing_value', HIST_FILL)
+
     ! Accumulating fields.
     allocate(vid_field(nfields))
     do ifld = 1, nfields
        if (field_nlev(ifld) > 0) then
           ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, &
-               (/dimid_lndgrid, dimid_levgrnd, dimid_time/), vid_field(ifld))
+               (/dimid_lndgrid, dimid_lev(field_levdim(ifld)), dimid_time/), vid_field(ifld))
        else
           ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, (/dimid_lndgrid, dimid_time/), &
                vid_field(ifld))
@@ -516,6 +630,16 @@ contains
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var time failed')
     ierr = PIO_put_var(file, vid_time_bounds, (/1,1/), (/2,1/), tb)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var time_bounds failed')
+    ival(1) = end_year*10000 + end_month*100 + end_day
+    ierr = PIO_put_var(file, vid_mcdate, (/1/), ival(1))
+    ival(1) = end_tod
+    ierr = PIO_put_var(file, vid_mcsec, (/1/), ival(1))
+    ! Whole days and seconds since the base date, as ELM's get_curr_time.
+    ival(1) = int(end_days - hist_base_days + 1.0e-9_r8)
+    ierr = PIO_put_var(file, vid_mdcur, (/1/), ival(1))
+    ival(1) = nint((end_days - hist_base_days - real(ival(1), r8)) * 86400.0_r8)
+    ierr = PIO_put_var(file, vid_mscur, (/1/), ival(1))
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var date metadata failed')
 
     ! Time-constant, decomposed fields -- written into every file (each
     ! monthly file is self-contained), not once for the whole run.
@@ -530,14 +654,29 @@ contains
     call PIO_write_darray(file, vid_area, hist_iodesc, wbuf, ierr)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray area failed')
 
+    call PIO_setframe(file, vid_pctl, 1_PIO_OFFSET_KIND, ierr)
+    allocate(wbuf2(n_local*MAX_LUNIT))
+    wbuf2 = real(reshape(pct_landunit, (/n_local*MAX_LUNIT/)), r4)
+    call PIO_write_darray(file, vid_pctl, levdim_iodesc(ilev_ltype), wbuf2, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_LANDUNIT failed')
+    deallocate(wbuf2)
+    call PIO_setframe(file, vid_pctp, 1_PIO_OFFSET_KIND, ierr)
+    allocate(wbuf2(n_local*natpft))
+    wbuf2 = real(reshape(pct_nat_pft, (/n_local*natpft/)), r4)
+    call PIO_write_darray(file, vid_pctp, levdim_iodesc(ilev_natpft), wbuf2, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_NAT_PFT failed')
+    deallocate(wbuf2)
+
     do ifld = 1, nfields
        call PIO_setframe(file, vid_field(ifld), 1_PIO_OFFSET_KIND, ierr)
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_setframe failed for '//trim(field_name(ifld)))
        if (field_nlev(ifld) > 0) then
-          if (.not. allocated(wbuf2)) allocate(wbuf2(n_local*hist_nlev))
-          wbuf2 = real(reshape(hist_buf2(ifld)%v, (/n_local*hist_nlev/)), r4)
-          call PIO_write_darray(file, vid_field(ifld), hist_iodesc2, wbuf2, ierr)
+          allocate(wbuf2(n_local*field_nlev(ifld)))
+          wbuf2 = real(reshape(hist_buf2(ifld)%v, (/n_local*field_nlev(ifld)/)), r4)
+          call PIO_write_darray(file, vid_field(ifld), levdim_iodesc(field_levdim(ifld)), &
+               wbuf2, ierr)
+          deallocate(wbuf2)
        else
           wbuf = real(hist_buf(:,ifld), r4)
           call PIO_write_darray(file, vid_field(ifld), hist_iodesc, wbuf, ierr)
@@ -591,7 +730,7 @@ contains
     type(ELMxxType), intent(in) :: elmxx_state
     integer         , intent(in) :: year, month, day, tod
     integer         , intent(in) :: logunit
-    integer :: ierr
+    integer :: ierr, k
 
     if (.not. hist_init_done) return
 
@@ -607,7 +746,9 @@ contains
     end if
 
     call PIO_freedecomp(pio_subsystem, hist_iodesc)
-    if (hist_nlev > 0) call PIO_freedecomp(pio_subsystem, hist_iodesc2)
+    do k = 1, nlevdim
+       call PIO_freedecomp(pio_subsystem, levdim_iodesc(k))
+    end do
     hist_init_done = .false.
 
   end subroutine elmxx_hist_final
