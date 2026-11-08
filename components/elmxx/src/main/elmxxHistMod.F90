@@ -28,7 +28,7 @@ module elmxxHistMod
                              ELMxxHistoryActiveUnits, ELMxxHistoryActiveLongName, &
                              ELMxxHistoryActiveIsAvg, ELMxxHistoryAccumulate, &
                              ELMxxHistoryNormalize, ELMxxHistoryGetField, &
-                             ELMxxHistoryReset
+                             ELMxxHistoryReset, ELMxxHistoryActiveNlev
   use pio
 
   implicit none
@@ -57,6 +57,17 @@ module elmxxHistMod
   character(len=256), allocatable :: field_long_name(:)
   logical            , allocatable :: field_is_avg(:)
   real(r8)           , allocatable :: hist_buf(:,:)   ! (n_local, nfields), pulled at month-end
+  integer            , allocatable :: field_nlev(:)   ! 0, or the field's levgrnd extent
+
+  ! A multi-level field's month-end values, (n_local, nlev). Single-level
+  ! fields stay in hist_buf; every multi-level field shares one level count
+  ! (hist_nlev, the file's levgrnd dimension) and one decomposition.
+  type :: hist_lev_buf_t
+     real(r8), allocatable :: v(:,:)
+  end type hist_lev_buf_t
+  type(hist_lev_buf_t), allocatable :: hist_buf2(:)    ! (nfields)
+  integer         :: hist_nlev = 0
+  type(io_desc_t) :: hist_iodesc2
 
   real(r8), allocatable :: hist_lon(:), hist_lat(:), hist_area(:)  ! (n_local), time-constant
   integer , allocatable :: hist_dof(:)                             ! (n_local), 1-based lndgrid position
@@ -137,7 +148,7 @@ contains
     end if
 
     allocate(field_name(nfields), field_units(nfields), field_long_name(nfields), &
-             field_is_avg(nfields))
+             field_is_avg(nfields), field_nlev(nfields), hist_buf2(nfields))
     do i = 1, nfields
        field_name(i) = ' '; field_units(i) = ' '; field_long_name(i) = ' '
        call ELMxxHistoryActiveName(elmxx_state, i-1, field_name(i), ierr)
@@ -149,6 +160,15 @@ contains
        is_avg = ELMxxHistoryActiveIsAvg(elmxx_state, i-1, ierr)
        if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistoryActiveIsAvg failed')
        field_is_avg(i) = (is_avg /= 0)
+       field_nlev(i) = ELMxxHistoryActiveNlev(elmxx_state, i-1, ierr)
+       if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistoryActiveNlev failed')
+       if (field_nlev(i) > 0) then
+          if (hist_nlev == 0) hist_nlev = field_nlev(i)
+          if (field_nlev(i) /= hist_nlev) call shr_sys_abort(subname// &
+               'ERROR: multi-level fields with different level counts ('//trim(field_name(i))//')')
+          allocate(hist_buf2(i)%v(n_local, hist_nlev))
+          hist_buf2(i)%v = 0.0_r8
+       end if
     end do
 
     allocate(hist_buf(n_local, nfields))
@@ -182,6 +202,23 @@ contains
        hist_dof(i) = iam + 1 + (i-1)*npes
     end do
     call PIO_initdecomp(pio_subsystem, PIO_real, (/num_global/), hist_dof, hist_iodesc)
+
+    ! The (lndgrid, levgrnd) decomposition: local element (i, l), stored at
+    ! (l-1)*n_local + i, is global (hist_dof(i), l).
+    if (hist_nlev > 0) then
+       block
+         integer, allocatable :: dof2(:)
+         integer :: l
+         allocate(dof2(n_local*hist_nlev))
+         do l = 1, hist_nlev
+            do i = 1, n_local
+               dof2((l-1)*n_local + i) = (l-1)*num_global + hist_dof(i)
+            end do
+         end do
+         call PIO_initdecomp(pio_subsystem, PIO_real, (/num_global, hist_nlev/), dof2, hist_iodesc2)
+         deallocate(dof2)
+       end block
+    end if
 
     hist_start_year  = hist_year
     hist_start_month = month
@@ -323,7 +360,7 @@ contains
     integer         , intent(in) :: year, month, day, tod
     integer         , intent(in) :: logunit
 
-    integer :: ierr, ifld
+    integer :: ierr
     character(len=*), parameter :: subname = '(elmxx_hist_write_if_month_end) '
 
     if (.not. hist_init_done) return
@@ -340,13 +377,7 @@ contains
     call ELMxxHistoryNormalize(elmxx_state, ierr)
     if (ierr /= ELMXX_SUCCESS) call shr_sys_abort(subname//'ERROR: ELMxxHistoryNormalize failed')
 
-    do ifld = 1, nfields
-       call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf(:,ifld), &
-            n_local, ierr)
-       if (ierr /= ELMXX_SUCCESS) &
-            call shr_sys_abort(subname//'ERROR: ELMxxHistoryGetField failed for '// &
-            trim(field_name(ifld)))
-    end do
+    call elmxx_hist_pull(elmxx_state)
 
     call elmxx_hist_write_file(hist_start_year, hist_start_month, hist_start_day, &
                                year, month, day, tod, logunit)
@@ -360,6 +391,32 @@ contains
     hist_start_year = year; hist_start_month = month; hist_start_day = day
 
   end subroutine elmxx_hist_write_if_month_end
+
+  !-----------------------------------------------------------------------
+  subroutine elmxx_hist_pull(elmxx_state)
+    !
+    ! Copy every active field's normalized accumulator into the staging
+    ! buffers: hist_buf for single-level fields, hist_buf2 for multi-level.
+    !
+    implicit none
+    type(ELMxxType), intent(in) :: elmxx_state
+    integer :: ierr, ifld
+    character(len=*), parameter :: subname = '(elmxx_hist_pull) '
+
+    do ifld = 1, nfields
+       if (field_nlev(ifld) > 0) then
+          call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf2(ifld)%v, &
+               n_local*hist_nlev, ierr)
+       else
+          call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf(:,ifld), &
+               n_local, ierr)
+       end if
+       if (ierr /= ELMXX_SUCCESS) &
+            call shr_sys_abort(subname//'ERROR: ELMxxHistoryGetField failed for '// &
+            trim(field_name(ifld)))
+    end do
+
+  end subroutine elmxx_hist_pull
 
   !-----------------------------------------------------------------------
   subroutine elmxx_hist_write_file(start_year, start_month, start_day, &
@@ -377,12 +434,12 @@ contains
     type(file_desc_t) :: file
     type(var_desc_t)  :: vid_lon, vid_lat, vid_area, vid_time, vid_time_bounds
     type(var_desc_t), allocatable :: vid_field(:)
-    integer :: dimid_lndgrid, dimid_time, dimid_histint
+    integer :: dimid_lndgrid, dimid_time, dimid_histint, dimid_levgrnd
     integer :: ierr, ifld
     character(len=256) :: fname
     character(len=16)  :: cdate
     real(r8) :: start_days, end_days, tb(2,1), tval(1)
-    real(r4), allocatable :: wbuf(:)
+    real(r4), allocatable :: wbuf(:), wbuf2(:)
     character(len=*), parameter :: subname = '(elmxx_hist_write_file) '
 
     write(cdate,'(i4.4,"-",i2.2)') start_year, start_month
@@ -397,6 +454,10 @@ contains
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim time failed')
     ierr = PIO_def_dim(file, 'hist_interval', 2, dimid_histint)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim hist_interval failed')
+    if (hist_nlev > 0) then
+       ierr = PIO_def_dim(file, 'levgrnd', hist_nlev, dimid_levgrnd)
+       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim levgrnd failed')
+    end if
 
     ! Time-constant per-cell fields.
     ierr = PIO_def_var(file, 'lon', PIO_real, (/dimid_lndgrid/), vid_lon)
@@ -422,8 +483,13 @@ contains
     ! Accumulating fields.
     allocate(vid_field(nfields))
     do ifld = 1, nfields
-       ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, (/dimid_lndgrid, dimid_time/), &
-            vid_field(ifld))
+       if (field_nlev(ifld) > 0) then
+          ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, &
+               (/dimid_lndgrid, dimid_levgrnd, dimid_time/), vid_field(ifld))
+       else
+          ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, (/dimid_lndgrid, dimid_time/), &
+               vid_field(ifld))
+       end if
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_def_var failed for '//trim(field_name(ifld)))
        ierr = PIO_put_att(file, vid_field(ifld), 'units', trim(field_units(ifld)))
@@ -468,12 +534,19 @@ contains
        call PIO_setframe(file, vid_field(ifld), 1_PIO_OFFSET_KIND, ierr)
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_setframe failed for '//trim(field_name(ifld)))
-       wbuf = real(hist_buf(:,ifld), r4)
-       call PIO_write_darray(file, vid_field(ifld), hist_iodesc, wbuf, ierr)
+       if (field_nlev(ifld) > 0) then
+          if (.not. allocated(wbuf2)) allocate(wbuf2(n_local*hist_nlev))
+          wbuf2 = real(reshape(hist_buf2(ifld)%v, (/n_local*hist_nlev/)), r4)
+          call PIO_write_darray(file, vid_field(ifld), hist_iodesc2, wbuf2, ierr)
+       else
+          wbuf = real(hist_buf(:,ifld), r4)
+          call PIO_write_darray(file, vid_field(ifld), hist_iodesc, wbuf, ierr)
+       end if
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_write_darray failed for '//trim(field_name(ifld)))
     end do
     deallocate(wbuf)
+    if (allocated(wbuf2)) deallocate(wbuf2)
     deallocate(vid_field)
 
     call PIO_closefile(file)
@@ -526,16 +599,7 @@ contains
        call ELMxxHistoryNormalize(elmxx_state, ierr)
        if (ierr /= ELMXX_SUCCESS) &
             call shr_sys_abort('(elmxx_hist_final) ERROR: ELMxxHistoryNormalize failed')
-       block
-         integer :: ifld
-         do ifld = 1, nfields
-            call ELMxxHistoryGetField(elmxx_state, trim(field_name(ifld)), hist_buf(:,ifld), &
-                 n_local, ierr)
-            if (ierr /= ELMXX_SUCCESS) &
-                 call shr_sys_abort('(elmxx_hist_final) ERROR: ELMxxHistoryGetField failed for '// &
-                 trim(field_name(ifld)))
-         end do
-       end block
+       call elmxx_hist_pull(elmxx_state)
        call elmxx_hist_write_file(hist_start_year, hist_start_month, hist_start_day, &
                                   year, month, day, tod, logunit)
        call ELMxxHistoryReset(elmxx_state, ierr)
@@ -543,6 +607,7 @@ contains
     end if
 
     call PIO_freedecomp(pio_subsystem, hist_iodesc)
+    if (hist_nlev > 0) call PIO_freedecomp(pio_subsystem, hist_iodesc2)
     hist_init_done = .false.
 
   end subroutine elmxx_hist_final
