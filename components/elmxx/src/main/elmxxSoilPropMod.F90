@@ -187,7 +187,16 @@ contains
           ! organic/organic_max < 1, dropping the square inflates the organic
           ! influence on every hydraulic property in the top layers.
           ! (SoilStateType.F90, "om_frac = (organic3d/organic_max)**2").
-          om_frac = min(col_organic(c, jsrc) / organic_max, 1.0_r8)**2.0_r8
+          ! Below the surfdata's layers ELM carries sand and clay down but
+          ! not organic matter: om_frac is 0 there (SoilStateType.F90, the
+          ! default non-more_vertlayers branch). Carrying a peat layer 10
+          ! down made the blended sucsat negative at depth, because
+          ! om_sucsat falls below zero past about 25 m.
+          if (j <= nlevsoi) then
+             om_frac = min(col_organic(c, j) / organic_max, 1.0_r8)**2.0_r8
+          else
+             om_frac = 0.0_r8
+          end if
           ! ELM SoilStateType: "No organic matter for urban". The urban
           ! roads take these properties (elmxxUrbanMod); natural columns are
           ! untouched.
