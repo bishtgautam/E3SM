@@ -90,7 +90,7 @@ contains
     !
     implicit none
     integer, intent(in) :: logunit, month, day
-    integer :: c, g
+    integer :: c, g, nfill
 
     if (nlevsoi <= 0 .or. num_columns <= 0 .or. num_patches <= 0) then
        call shr_sys_abort('(elmxx_surface_state_init) ERROR: surface subgrid is not ready')
@@ -101,13 +101,32 @@ contains
     allocate(patch_lai(num_patches), patch_sai(num_patches), &
              patch_height_top(num_patches), patch_height_bot(num_patches))
 
+    nfill = 0
     do c = 1, num_columns
        g = lun_gridcell(col_landunit(c))
        col_pct_sand(c,:) = pct_sand(g,:)
        col_pct_clay(c,:) = pct_clay(g,:)
+       ! ELM's rule (SoilStateType.F90, InitCold): a cell whose top layer has
+       ! neither sand nor clay must have none in any layer, and then gets 1%
+       ! sand and 1% clay throughout. Some datasets carry such cells (the
+       ! global 1 km urban set does); the thermal properties divide by
+       ! sand + clay.
+       if (col_pct_sand(c,1) + col_pct_clay(c,1) == 0.0_r8) then
+          if (any(col_pct_sand(c,:) + col_pct_clay(c,:) /= 0.0_r8)) then
+             call shr_sys_abort('(elmxx_surface_state_init) ERROR: sand + clay is '// &
+                  'zero at the surface but not below it')
+          end if
+          col_pct_sand(c,:) = 1.0_r8
+          col_pct_clay(c,:) = 1.0_r8
+          nfill = nfill + 1
+       end if
        col_organic(c,:)  = organic(g,:)
        col_soil_color(c) = soil_color(g)
     end do
+    if (nfill > 0) then
+       write(logunit,*) '(elmxx_surface_state_init) rank ', iam, ': ', nfill, &
+                        ' columns with no sand or clay set to 1% each, as ELM does'
+    end if
 
     surface_state_built = .true.
 
