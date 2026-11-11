@@ -66,5 +66,5 @@ components/emulators/build
 **/Testing/**
 **/.cache/**
 
-# ELMxx planning docs -- intentionally untracked (local working notes)
-components/elmxx/plans/
+# kELM planning docs -- intentionally untracked (local working notes)
+components/kelm/plans/

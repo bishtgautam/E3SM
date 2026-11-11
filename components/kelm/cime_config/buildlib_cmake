@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+"""
+build kelm library
+"""
+import sys, os
+
+_CIMEROOT = os.environ.get("CIMEROOT")
+if _CIMEROOT is None:
+    raise SystemExit("ERROR: must set CIMEROOT environment variable")
+
+_LIBDIR = os.path.join(_CIMEROOT, "scripts", "Tools")
+sys.path.append(_LIBDIR)
+
+from standard_script_setup import *
+from CIME.buildlib         import parse_input
+from CIME.case             import Case
+from CIME.utils            import expect, run_bld_cmd_ensure_logging
+
+logger = logging.getLogger(__name__)
+
+###############################################################################
+def buildlib(bldroot, installpath, case):
+###############################################################################
+    casebuild = case.get_value("CASEBUILD")
+    caseroot  = case.get_value("CASEROOT")
+    srcroot   = case.get_value("SRCROOT")
+
+    #-------------------------------------------------------
+    # create Filepath in bldroot; unlike most other components,
+    # kelm makes its Filepath right here.
+    #-------------------------------------------------------
+
+    #-------------------------------------------------------
+    # The kELM Kokkos/C++ library lives in a git submodule. Its Fortran
+    # bindings (kelm_mod.F90, kELMKokkos.F90) are compiled as part of the
+    # library by components/cmake/build_model.cmake, not listed here -- adding
+    # them to Filepath as well would compile them twice and produce duplicate
+    # module files.
+    #
+    # Fail early and legibly if the submodule was never initialized, rather
+    # than letting CMake fail later with a confusing missing-directory error.
+    #-------------------------------------------------------
+    kelm_lib_dir = os.path.join(srcroot, "components", "kelm",
+                                 "external_models", "kelm")
+    expect(
+        os.path.isfile(os.path.join(kelm_lib_dir, "CMakeLists.txt")),
+        "kELM C++ library not found at {}.\n"
+        "Initialize the submodule:\n"
+        "    cd {} && git submodule update --init --recursive "
+        "components/kelm/external_models/kelm".format(kelm_lib_dir, srcroot),
+    )
+
+    filepaths = \
+ """{caseroot}/SourceMods/src.kelm
+{srcroot}/components/kelm/src/main
+{srcroot}/components/kelm/src/cpl
+""".format(caseroot=caseroot, srcroot=srcroot)
+
+    with open(os.path.join(casebuild, "kelmconf", "Filepath"), "w") as fd:
+        fd.write(filepaths)
+
+    with open(os.path.join(casebuild, "kelmconf", "CIME_cppdefs"), "w") as fd:
+        fd.write("")
+
+###############################################################################
+def _main_func():
+###############################################################################
+    caseroot, libroot, bldroot = parse_input(sys.argv)
+    with Case(caseroot, read_only=False) as case:
+        buildlib(bldroot, libroot, case)
+
+###############################################################################
+
+if __name__ == "__main__":
+    _main_func()

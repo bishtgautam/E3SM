@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet type="text/xsl" href="namelist_defaults.xsl"?>
+
+<namelist_defaults>
+
+<!--
+Values to use by default for creation of KELM model namelists.
+The element names are the same as the corresponding namelist
+variables.  Values that depend on the model configuration use
+attributes to express the dependency.
+-->
+
+<!-- Default kelm namelist -->
+
+<do_kelm>.true.</do_kelm>
+
+<!-- fatmlndfrc has no default: it is always set from LND_DOMAIN_PATH/LND_DOMAIN_FILE -->
+
+<!-- fsurdat has no default: KELM has no -clm_usr_name equivalent to derive one
+     from a naming convention, so it must be given explicitly in user_nl_kelm -->
+
+<!-- Off: the probe resets the first step's physics to the cold-start seed -->
+<kelm_check_boundary>.false.</kelm_check_boundary>
+<kelm_timer_level>0</kelm_timer_level>
+<kelm_stage2_snapshot>.false.</kelm_stage2_snapshot>
+<kelm_check_soft_fail>.false.</kelm_check_soft_fail>
+<kelm_kernel_reports>.false.</kelm_kernel_reports>
+<kelm_do_albedo>.true.</kelm_do_albedo>
+<kelm_stomata_closed>.false.</kelm_stomata_closed>
+<kelm_do_photosynthesis>.true.</kelm_do_photosynthesis>
+<kelm_co2_ppmv>284.7</kelm_co2_ppmv>
+
+<!-- Every kernel always runs, so the inputs they need default to the files
+     ELM itself resolves for this configuration (relative to DIN_LOC_ROOT) -->
+<fparamfile>lnd/clm2/paramdata/clm_params_c180301.nc</fparamfile>
+<fsnowoptics>lnd/clm2/snicardata/snicar_optics_5bnd_mam_c160322.nc</fsnowoptics>
+<fsnowaging>lnd/clm2/snicardata/snicar_drdt_bst_fit_60_c070416.nc</fsnowaging>
+
+</namelist_defaults>

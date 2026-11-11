@@ -1,0 +1,278 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet type="text/xsl" href="namelist_definition.xsl"?>
+
+<namelist_definition>
+
+<!-- ========================================================================================  -->
+<!-- KELM Namelist -->
+<!-- ========================================================================================  -->
+
+<entry id="do_kelm"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .true.
+If .true., kelm will run
+</entry>
+
+<entry id="fatmlndfrc"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Default: ' '
+Full pathname of the land domain (fraction) file. Set from the xml variables
+LND_DOMAIN_PATH and LND_DOMAIN_FILE. KELM reads the grid dimensions, cell
+center coordinates, cell areas, mask and land fraction from this file, and
+hands them to the coupler as the land domain.
+</entry>
+
+<entry id="fsurdat"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Default: ' '
+Full pathname of the surface dataset. KELM reads the subgrid composition
+(PCT_NATVEG, PCT_NAT_PFT, PCT_URBAN, PCT_LAKE, PCT_GLACIER, PCT_WETLAND,
+PCT_CROP), the soil properties (PCT_SAND, PCT_CLAY, ORGANIC, SOIL_COLOR,
+FMAX) and the satellite-phenology streams (MONTHLY_LAI, MONTHLY_SAI,
+MONTHLY_HEIGHT_TOP, MONTHLY_HEIGHT_BOT) from this file.
+
+Unlike ELM, KELM has no -clm_usr_name machinery to derive this from a naming
+convention, so it must be set explicitly -- normally in user_nl_kelm.
+</entry>
+
+<entry id="fsnowoptics"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+SNICAR snow optics lookup table (Mie parameters for ice grains).
+Both this and fsnowaging must be set for SNICAR to run; with either blank
+snow albedo stays at the cold-start 0.6 constant and grain aging is a no-op.
+Default: lnd/clm2/snicardata/snicar_optics_5bnd_mam_c160322.nc (ELM's
+default, under DIN_LOC_ROOT)
+</entry>
+
+<entry id="fsnowaging"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+SNICAR snow grain aging lookup table (best-fit tau, kappa, drdsdt0).
+Default: lnd/clm2/snicardata/snicar_drdt_bst_fit_60_c070416.nc (ELM's
+default, under DIN_LOC_ROOT)
+</entry>
+
+<entry id="kelm_nrevsn"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Full pathname of an kELM restart file (*.kelm.r.*.nc) to start a BRANCH run
+from -- ELM's nrevsn. Required when RUN_TYPE=branch; ignored otherwise. A
+CONTINUE_RUN takes its file from rpointer.lnd instead.
+Default: ' '
+</entry>
+
+<entry id="finidat"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Full pathname of an ELM restart file to read as an initial condition.
+
+READ-ONLY, and it reads an ELM file -- kELM's own restarts (Stage 6) are
+read by CONTINUE_RUN or kelm_nrevsn, not here. This exists to start kELM from
+ELM's exact state so the two can be stepped once from a bit-identical
+starting point, which is the only way to separate a coupling error from an
+arithmetic one -- the replay tests seed each kernel from ELM and so bypass
+the coupling by construction.
+
+The soil grid is not taken from this file; it comes from the surface dataset
+and is identical by construction.
+Default: ' '
+</entry>
+
+<entry id="kelm_stage2_snapshot"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., write kelm_stage2_rank*.dat from every rank, at init and again every
+step, for tools/compare_stage2_init.py to check a run against its ELM twin at the
+run's last date. It costs about 17 KB of text per cell per step, so leave it off
+except on small validation cases.
+</entry>
+
+<entry id="kelm_timer_level"
+       type="integer"
+       category="kelm"
+       group="kelm_inparm" >
+Default: 0
+Detail level of the timers inside kELM's C++ (Pacer, on the driver's GPTL;
+they appear in the run's timing files with the "l:kELM::" prefix). 0 leaves
+them off; 1 times the launches and phases inside each step that the Fortran
+timers (canflux, hbuf, ...) cover; 2 adds finer pieces. Each active timer
+fences Kokkos, which serialises a GPU run, so leave this at 0 except when
+profiling.
+</entry>
+
+<entry id="kelm_check_boundary"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., round-trip a per-entity fingerprint through the Kokkos views at the
+end of the first step and check that every packed slot returns what was
+written to it. DESTRUCTIVE now that the kernels run: the probe restores the
+cold-start seed afterwards, which discards the first step's physics (and a
+finidat initial state). Turn it on only for a run whose results you intend to
+throw away.
+This validates the Fortran/Kokkos boundary plumbing: extents matching the views
+kELMCreate allocated, no setter silently rejected, both the int and double
+paths.
+
+The map SEMANTICS -- bijection, landunit types, patch-to-column agreement --
+are checked separately at init and are not controlled by this switch, because
+they need no Kokkos and cost nothing.
+</entry>
+
+<entry id="kelm_check_soft_fail"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .false., a boundary-check mismatch aborts the run. If .true., it is reported
+and the run continues.
+
+Abort is the right default while the boundary is being brought up: a wrong
+index map is silent corruption and every kernel added later builds on it. Set
+.true. only when a long run must survive a known mismatch during kernel
+bring-up.
+</entry>
+
+<entry id="kelm_kernel_reports"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., write the per-kernel diagnostic tables to lnd.log -- the
+"(kelm_kernels_report) rank ..." blocks (SurfaceRadiation, CanopyHydrology,
+CanopyTemperature and the surface fluxes, with min/max and NaN counts) and the
+SurfaceAlbedo report -- on step 1 and twice a model day after that. They were
+for bringing kernels up against ELM; leave them off otherwise.
+
+All kELM kernels always run; there is no namelist switch for them. The
+library can still run a chosen subset (kelmKernelMod's kelm_kernels_parse)
+for kernel-by-kernel checks against ELM.
+</entry>
+
+<entry id="kelm_do_albedo"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: .true.
+Run the ported SurfaceAlbedo at the end of each timestep, as ELM does.
+When .false. the albedos stay at ELM's cold-start constants (0.2 ground and
+canopy, 0.6 snow), which is correct for step one and increasingly wrong after
+that -- there is no solar-zenith dependence, no snow aging and no wetness
+effect. Requires fparamfile, since the two-stream reads the canopy optical
+parameters from it.
+</entry>
+
+<entry id="kelm_do_photosynthesis"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: .true.
+Run the ported Photosynthesis (Farquhar/Collatz with Ball-Berry) inside the
+CanopyFluxes Newton iteration, so stomatal resistance is computed at every
+iterate instead of read from a caller-supplied table.
+
+Requires kelm_do_albedo, because the leaf-to-canopy vcmax scaling
+(vcmaxcintsun/sha) is SurfaceAlbedo's output, and requires fparamfile for the
+PFT parameters. Both are checked at initialization.
+
+Supersedes kelm_stomata_closed: with photosynthesis on, the placeholder
+resistances are ignored.
+</entry>
+
+<entry id="kelm_co2_ppmv"
+       type="real"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: 284.7
+Atmospheric CO2 concentration [ppmv], used to form the CO2 partial pressure
+the leaf model needs. ELM takes the same number from its own namelist under
+co2_type = 'constant'; 284.7 is what the I1850 twins use, so the default
+matches them.
+</entry>
+
+<entry id="kelm_stomata_closed"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: .false.
+Pin the per-iteration stomatal resistances CanopyFluxes reads at ELM's
+closed-stomata limit, rsmax0 = 2e4 s/m, instead of leaving them at zero.
+
+A PLACEHOLDER for the unported Photosynthesis, and wrong in a known
+direction. Zero resistance is not "no stomatal model" -- it is stomata held
+wide open, so transpiration is unbounded from above. This setting puts the
+error at the other extreme, near-zero transpiration, so that the two runs
+bracket the truth instead of one of them silently looking plausible. Turn it
+on to grade the SoilWater profile without a confounding root sink; delete it
+when Photosynthesis lands.
+</entry>
+
+<entry id="fparamfile"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Default: lnd/clm2/paramdata/clm_params_c180301.nc (ELM's default for this
+configuration, under DIN_LOC_ROOT)
+Full pathname of the PFT parameter file (ELM's clm_params). KELM reads only
+the fields a ported kernel needs -- roota_par/rootb_par for the root profile,
+smpso/smpsc for stomatal response, tc_stress for the cold cutoff on root water
+uptake, z0mr/displar/dleaf for the canopy aerodynamic chain, and
+xl/rhol/rhos/taul/taus for the two-stream canopy optics -- rather than the
+whole file, so that every field read has a consumer.
+
+Required, since the kernels always run; init aborts without it. z0mr,
+displar and dleaf are not optional: unseeded they read zero, which drives ustar and rb to zero and NaNs
+every canopy flux, so they are checked at read time. Use the same
+file as the ELM twin, or the two models are not comparable.
+</entry>
+
+<entry id="kelm_hist_fincl"
+       type="char*256"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: '' (just the C++-side default field list)
+Comma-separated list of ADDITIONAL history fields to activate, beyond the
+default set RegisterHistoryField marks default_active in History.cpp (TG,
+TV, H2OSNO, FSA, EFLX_LH_TOT, FSH, QOVER, QDRAI today). Not a full
+restatement of the field list -- an empty string means exactly the C++-side
+defaults, not "no history."
+
+An unknown name, or a name already active by default, aborts at
+kelm_hist_init rather than being silently ignored.
+</entry>
+
+</namelist_definition>
