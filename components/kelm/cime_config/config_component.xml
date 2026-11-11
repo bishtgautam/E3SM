@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet type="text/xsl" href="definitions_variables.xsl" ?>
+
+<definitions_variables>
+
+  <entry id="COMP_LND">
+    <type>char</type>
+    <valid_values>kelm</valid_values>
+    <default_value>kelm</default_value>
+    <group>case_comp</group>
+    <file>env_case.xml</file>
+    <desc>Name of land component</desc>
+  </entry>
+
+  <entry id="KELM_NAMELIST_OPTS">
+    <type>char</type>
+    <valid_values></valid_values>
+    <default_value></default_value>
+    <group>run_component_kelm</group>
+    <file>env_run.xml</file>
+    <desc>KELM-specific namelist settings for the KELM build-namelist.
+      KELM_NAMELIST_OPTS is normally set as a compset variable and in general
+      should not be modified for supported compsets. It is recommended that if
+      you want to modify this value for your experiment, you should use your own
+      user-defined component sets via using create_newcase with a compset_file
+      argument.</desc>
+  </entry>
+
+  <entry id="ELM_USRDAT_NAME">
+    <type>char</type>
+    <default_value>UNSET</default_value>
+    <group>run_component_kelm</group>
+    <file>env_run.xml</file>
+    <desc>Dataset name for user-created datasets, used with the ELM_USRDAT grid.
+
+      The entry id deliberately keeps ELM's name rather than an KELM-specific
+      one: cime_config/config_grids.xml resolves the ELM_USRDAT domain file as
+      domain.lnd.${ELM_USRDAT_NAME}_navy.nc, and that file is shared across
+      components. Renaming the variable here would mean forking the grid
+      definition. The ELM_USRDAT grid alias itself already matches KELM
+      compsets, since its regex is compset="(DATM|SATM).+ELM" and _KELM_
+      contains ELM.
+
+      Unlike ELM, KELM does not feed this to a -clm_usr_name option -- it has
+      its own build-namelist and resolves fsurdat itself. The only consumer is
+      the domain path above. The default is UNSET, matching ELM.</desc>
+  </entry>
+
+  <description>
+    <desc compset="_KELM">KELM:</desc>
+  </description>
+
+  <help>
+    =========================================
+    KELM naming conventions
+    =========================================
+    KELM is the Kokkos port of the E3SM Land Model (ELM). It is selected with
+    the LND compset token KELM, e.g.
+
+      2000_DATM%QIA_KELM_SICE_SOCN_SROF_SGLC_SWAV
+
+    Note that KELM writes its namelist to lnd_in, the same file name used by
+    ELM, since namelist files are named after the component class.
+  </help>
+
+</definitions_variables>

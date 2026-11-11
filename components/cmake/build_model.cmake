@@ -340,80 +340,80 @@ macro(build_model COMP_CLASS COMP_NAME)
           target_include_directories(${TARGET_NAME} PRIVATE ${MOAB_INCLUDE_DIRS})
         endif()
       endif()
-      if (COMP_NAME STREQUAL "elmxx")
-        # ELMxx's Kokkos/C++ library, built from its submodule as part of this
+      if (COMP_NAME STREQUAL "kelm")
+        # kELM's Kokkos/C++ library, built from its submodule as part of this
         # build. Kokkos itself comes from EKAT: uses_kokkos() in
-        # cime/CIME/build.py returns true for COMP_LND=elmxx, so USE_KOKKOS is
+        # cime/CIME/build.py returns true for COMP_LND=kelm, so USE_KOKKOS is
         # set, EKAT is built in the sharedlibs, and Kokkos::kokkos exists by the
-        # time we get here. ELMxx's own CMakeLists detects that target and skips
-        # its bundled copy (see the ELMXX_STANDALONE guard there); both are the
+        # time we get here. kELM's own CMakeLists detects that target and skips
+        # its bundled copy (see the KELM_STANDALONE guard there); both are the
         # same E3SM-Project/kokkos fork at 4.5.1.
         if (NOT TARGET Kokkos::kokkos)
           message(FATAL_ERROR
-            "elmxx requires Kokkos, but target Kokkos::kokkos does not exist. "
+            "kelm requires Kokkos, but target Kokkos::kokkos does not exist. "
             "USE_KOKKOS should have been set for this case by uses_kokkos() in "
             "cime/CIME/build.py.")
         endif()
-        set(ELMXX_LIB_DIR "${PROJECT_SOURCE_DIR}/elmxx/external_models/elmxx")
-        if (NOT EXISTS "${ELMXX_LIB_DIR}/CMakeLists.txt")
+        set(KELM_LIB_DIR "${PROJECT_SOURCE_DIR}/kelm/external_models/kelm")
+        if (NOT EXISTS "${KELM_LIB_DIR}/CMakeLists.txt")
           message(FATAL_ERROR
-            "ELMxx C++ library not found at ${ELMXX_LIB_DIR}. Initialize the "
+            "kELM C++ library not found at ${KELM_LIB_DIR}. Initialize the "
             "submodule with: git submodule update --init --recursive "
-            "components/elmxx/external_models/elmxx")
+            "components/kelm/external_models/kelm")
         endif()
-        # ELMxx's C++ timers go through Pacer, on the driver's GPTL (whose
+        # kELM's C++ timers go through Pacer, on the driver's GPTL (whose
         # gptl.h is installed in the shared include directory). Pacer is
-        # compiled into libelmxx; a second user of share/pacer in the same
+        # compiled into libkelm; a second user of share/pacer in the same
         # executable would want a shared pacer target instead.
-        set(ELMXX_PACER_DIR "${PROJECT_SOURCE_DIR}/../share/pacer")
-        set(ELMXX_GPTL_INCLUDE_DIRS "${INSTALL_SHAREDPATH}/include")
-        add_subdirectory(${ELMXX_LIB_DIR} elmxx-lib)
-        # elmxx         -> libelmxx.a         (C++ kernels + C API)
-        # elmxx_fortran -> libelmxx_fortran.a (iso_c_binding wrappers; supplies
-        #                  the elmxx_mod and elmxx_kokkos_interface .mod files
-        #                  that components/elmxx/src/main/elmxxMod.F90 uses)
-        target_link_libraries(${TARGET_NAME} PRIVATE elmxx_fortran elmxx)
-        # elmxxMod.F90 does `use elmxx_mod` / `use elmxx_kokkos_interface`, so
-        # this target needs ELMxx's Fortran module directory on its include
+        set(KELM_PACER_DIR "${PROJECT_SOURCE_DIR}/../share/pacer")
+        set(KELM_GPTL_INCLUDE_DIRS "${INSTALL_SHAREDPATH}/include")
+        add_subdirectory(${KELM_LIB_DIR} kelm-lib)
+        # kelm         -> libkelm.a         (C++ kernels + C API)
+        # kelm_fortran -> libkelm_fortran.a (iso_c_binding wrappers; supplies
+        #                  the kelm_mod and kelm_kokkos_interface .mod files
+        #                  that components/kelm/src/main/kelmMod.F90 uses)
+        target_link_libraries(${TARGET_NAME} PRIVATE kelm_fortran kelm)
+        # kelmMod.F90 does `use kelm_mod` / `use kelm_kokkos_interface`, so
+        # this target needs kELM's Fortran module directory on its include
         # path. Read it off the target rather than reconstructing the path, so
-        # it stays correct if ELMxx changes where it writes .mod files.
-        get_target_property(ELMXX_MOD_DIR elmxx_fortran Fortran_MODULE_DIRECTORY)
-        if (NOT ELMXX_MOD_DIR)
+        # it stays correct if kELM changes where it writes .mod files.
+        get_target_property(KELM_MOD_DIR kelm_fortran Fortran_MODULE_DIRECTORY)
+        if (NOT KELM_MOD_DIR)
           message(FATAL_ERROR
-            "elmxx_fortran has no Fortran_MODULE_DIRECTORY property; cannot "
-            "locate ELMxx .mod files.")
+            "kelm_fortran has no Fortran_MODULE_DIRECTORY property; cannot "
+            "locate kELM .mod files.")
         endif()
-        target_include_directories(${TARGET_NAME} PRIVATE "${ELMXX_MOD_DIR}")
-        add_dependencies(${TARGET_NAME} elmxx_fortran)
+        target_include_directories(${TARGET_NAME} PRIVATE "${KELM_MOD_DIR}")
+        add_dependencies(${TARGET_NAME} kelm_fortran)
 
         # Standalone perf driver (plan Stage 6.8): the coupled path without
         # the coupler, linked against this very lnd library so its compilers,
         # flags and libraries are the case's. Not part of case.build; build it
-        # after one with `make elmxx_perf` in ${EXEROOT}/cmake-bld, which
-        # writes ${EXEROOT}/elmxx_perf.
-        set(ELMXX_PERF_DIR "${PROJECT_SOURCE_DIR}/elmxx/src/perf")
-        add_executable(elmxx_perf EXCLUDE_FROM_ALL
-          "${ELMXX_PERF_DIR}/elmxxPerfForcingMod.F90"
-          "${ELMXX_PERF_DIR}/elmxxPerfCheckMod.F90"
-          "${ELMXX_PERF_DIR}/elmxx_perf.F90")
-        set_target_properties(elmxx_perf PROPERTIES
-          Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/elmxx_perf_mod")
-        target_include_directories(elmxx_perf PRIVATE
-          "${CMAKE_CURRENT_BINARY_DIR}" "${ELMXX_MOD_DIR}" ${INCLDIR})
-        separate_arguments(ELMXX_PERF_CPPDEFS UNIX_COMMAND "${CPPDEFS}")
-        target_compile_definitions(elmxx_perf PRIVATE ${ELMXX_PERF_CPPDEFS})
+        # after one with `make kelm_perf` in ${EXEROOT}/cmake-bld, which
+        # writes ${EXEROOT}/kelm_perf.
+        set(KELM_PERF_DIR "${PROJECT_SOURCE_DIR}/kelm/src/perf")
+        add_executable(kelm_perf EXCLUDE_FROM_ALL
+          "${KELM_PERF_DIR}/kelmPerfForcingMod.F90"
+          "${KELM_PERF_DIR}/kelmPerfCheckMod.F90"
+          "${KELM_PERF_DIR}/kelm_perf.F90")
+        set_target_properties(kelm_perf PROPERTIES
+          Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/kelm_perf_mod")
+        target_include_directories(kelm_perf PRIVATE
+          "${CMAKE_CURRENT_BINARY_DIR}" "${KELM_MOD_DIR}" ${INCLDIR})
+        separate_arguments(KELM_PERF_CPPDEFS UNIX_COMMAND "${CPPDEFS}")
+        target_compile_definitions(kelm_perf PRIVATE ${KELM_PERF_CPPDEFS})
         find_package(NETCDF REQUIRED)
-        target_link_libraries(elmxx_perf ${TARGET_NAME} elmxx_fortran elmxx csm_share netcdf)
+        target_link_libraries(kelm_perf ${TARGET_NAME} kelm_fortran kelm csm_share netcdf)
         if (USE_KOKKOS)
-          target_link_libraries(elmxx_perf Kokkos::kokkos)
+          target_link_libraries(kelm_perf Kokkos::kokkos)
         endif()
         if (NOT DEFINED ENV{SKIP_BLAS})
-          target_link_libraries(elmxx_perf LAPACK::LAPACK)
+          target_link_libraries(kelm_perf LAPACK::LAPACK)
         endif()
         if (E3SM_LINK_WITH_FORTRAN)
-          set_target_properties(elmxx_perf PROPERTIES LINKER_LANGUAGE Fortran)
+          set_target_properties(kelm_perf PROPERTIES LINKER_LANGUAGE Fortran)
         else()
-          set_target_properties(elmxx_perf PROPERTIES LINKER_LANGUAGE CXX)
+          set_target_properties(kelm_perf PROPERTIES LINKER_LANGUAGE CXX)
         endif()
       endif()
       if (COMP_NAME STREQUAL "ww3")
