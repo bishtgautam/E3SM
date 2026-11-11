@@ -296,32 +296,36 @@ if ($LND_GRID eq "null") {
     }
     add_default($nl, 'fatmlndfrc', 'val'=>"$LND_DOMAIN_PATH/$LND_DOMAIN_FILE");
 
-    # Stage 3 Fortran<->Kokkos boundary check. On by default and fatal by
-    # default: a wrong index map is silent, and every kernel builds on it.
+    # Stage 3 Fortran<->Kokkos boundary check. Off by default: the probe
+    # resets the first step's physics to the cold-start seed.
     add_default($nl, 'elmxx_check_boundary');
     add_default($nl, 'elmxx_stage2_snapshot');
     add_default($nl, 'elmxx_check_soft_fail');
     add_default($nl, 'elmxx_timer_level');
 
-    # Stage 4 kernel activation. Empty by default -- the timestep stays a
-    # no-op until kernels are named explicitly.
-    add_default($nl, 'elmxx_kernels', 'nofail'=>1);
+    # Every kernel always runs (no namelist switch). The per-kernel
+    # diagnostic tables in lnd.log are off by default.
+    add_default($nl, 'elmxx_kernel_reports');
     add_default($nl, 'elmxx_do_albedo');
 
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'elmxx_stomata_closed');
 
-    # Photosynthesis inside the CanopyFluxes iteration; off by default.
+    # Photosynthesis inside the CanopyFluxes iteration; on by default.
     add_default($nl, 'elmxx_do_photosynthesis');
     add_default($nl, 'elmxx_co2_ppmv');
+
+    # Inputs the kernels need, defaulting to ELM's files under DIN_LOC_ROOT.
+    add_default($nl, 'fparamfile');
+    add_default($nl, 'fsnowoptics');
+    add_default($nl, 'fsnowaging');
 
     # History output. Empty by default -- additions/overrides beyond the
     # C++-side default field list (RegisterHistoryField's default_active),
     # not a full restatement of it.
     add_default($nl, 'elmxx_hist_fincl', 'nofail'=>1);
 
-    # PFT parameter file. No default and no naming convention to derive one,
-    # same as fsurdat; needed once root water stress is in play.
+    # PFT parameter file: required, since the kernels always run.
     if (defined $nl->get_value('fparamfile')) {
         print "ELMXX parameter file is " . $nl->get_value('fparamfile') . " \n";
     } else {

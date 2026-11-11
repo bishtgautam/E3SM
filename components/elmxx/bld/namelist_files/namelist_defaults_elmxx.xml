@@ -20,16 +20,21 @@ attributes to express the dependency.
 <!-- fsurdat has no default: ELMXX has no -clm_usr_name equivalent to derive one
      from a naming convention, so it must be given explicitly in user_nl_elmxx -->
 
-<elmxx_check_boundary>.true.</elmxx_check_boundary>
+<!-- Off: the probe resets the first step's physics to the cold-start seed -->
+<elmxx_check_boundary>.false.</elmxx_check_boundary>
 <elmxx_timer_level>0</elmxx_timer_level>
 <elmxx_stage2_snapshot>.false.</elmxx_stage2_snapshot>
 <elmxx_check_soft_fail>.false.</elmxx_check_soft_fail>
-<elmxx_do_albedo>.false.</elmxx_do_albedo>
+<elmxx_kernel_reports>.false.</elmxx_kernel_reports>
+<elmxx_do_albedo>.true.</elmxx_do_albedo>
 <elmxx_stomata_closed>.false.</elmxx_stomata_closed>
-<elmxx_do_photosynthesis>.false.</elmxx_do_photosynthesis>
+<elmxx_do_photosynthesis>.true.</elmxx_do_photosynthesis>
 <elmxx_co2_ppmv>284.7</elmxx_co2_ppmv>
 
-<!-- elmxx_kernels defaults to empty: no kernel is activated unless asked for -->
-<elmxx_kernels></elmxx_kernels>
+<!-- Every kernel always runs, so the inputs they need default to the files
+     ELM itself resolves for this configuration (relative to DIN_LOC_ROOT) -->
+<fparamfile>lnd/clm2/paramdata/clm_params_c180301.nc</fparamfile>
+<fsnowoptics>lnd/clm2/snicardata/snicar_optics_5bnd_mam_c160322.nc</fsnowoptics>
+<fsnowaging>lnd/clm2/snicardata/snicar_drdt_bst_fit_60_c070416.nc</fsnowaging>
 
 </namelist_defaults>

@@ -2,13 +2,13 @@ module elmxxKernelMod
 
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
-  ! Stage 4: activate ELMxx's Kokkos kernels one at a time.
+  ! Activation and dispatch of ELMxx's Kokkos kernels.
   !
-  ! `elmxx_kernels` is a comma-separated list of the short names below; a
-  ! kernel not named simply does not run. THERE IS NO FORTRAN ALTERNATIVE TO
-  ! FALL BACK ON -- ELMxx is written from scratch -- so the timestep is
-  ! incomplete until every kernel is on, and intermediate runs are diagnostic
-  ! only. That is by design (plan, Stage 4), not a defect.
+  ! The model runs every kernel (elmxx_kernels_activate_all); there is no
+  ! namelist switch. elmxx_kernels_parse still takes a comma-separated list
+  ! of the short names below, so a subset can be run to check kernels one at
+  ! a time against ELM; a kernel not named does not run, and THERE IS NO
+  ! FORTRAN ALTERNATIVE TO FALL BACK ON, so such a run is diagnostic only.
   !
   ! PREREQUISITES ARE ENFORCED, NOT ASSUMED. Every kernel reads state that
   ! something else has to have produced: another kernel, Stage 3's seeding, or
@@ -209,6 +209,7 @@ module elmxxKernelMod
   logical, public :: kernel_active(NKERNEL) = .false.
   logical, public :: any_kernel_active      = .false.
 
+  public :: elmxx_kernels_activate_all
   public :: elmxx_kernels_parse
   public :: elmxx_kernels_run
   public :: elmxx_kernels_report
@@ -533,9 +534,30 @@ contains
   end function blocked_reason
 
   !-----------------------------------------------------------------------
+  subroutine elmxx_kernels_activate_all(logunit)
+    !
+    ! Activate every kernel: what the model always runs. Goes through
+    ! elmxx_kernels_parse so the prerequisite and grouping checks still apply.
+    !
+    implicit none
+    integer, intent(in) :: logunit
+    character(len=NKERNEL*(len(kernel_name)+1)) :: spec
+    integer :: k
+
+    spec = trim(kernel_name(1))
+    do k = 2, NKERNEL
+       spec = trim(spec)//','//trim(kernel_name(k))
+    end do
+    call elmxx_kernels_parse(spec, logunit)
+
+  end subroutine elmxx_kernels_activate_all
+
+  !-----------------------------------------------------------------------
   subroutine elmxx_kernels_parse(spec, logunit)
     !
-    ! Turn the namelist string into the active flags.
+    ! Turn a comma-separated list of kernel names into the active flags.
+    ! The model activates all of them (elmxx_kernels_activate_all); a subset
+    ! is for checking kernels one at a time against ELM.
     !
     ! An unrecognised or blocked name aborts. Silently ignoring a name the
     ! user asked for would mean a run that looks like it exercised a kernel

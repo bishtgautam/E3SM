@@ -55,7 +55,8 @@ convention, so it must be set explicitly -- normally in user_nl_elmxx.
 SNICAR snow optics lookup table (Mie parameters for ice grains).
 Both this and fsnowaging must be set for SNICAR to run; with either blank
 snow albedo stays at the cold-start 0.6 constant and grain aging is a no-op.
-Default: ' '
+Default: lnd/clm2/snicardata/snicar_optics_5bnd_mam_c160322.nc (ELM's
+default, under DIN_LOC_ROOT)
 </entry>
 
 <entry id="fsnowaging"
@@ -65,7 +66,8 @@ Default: ' '
        group="elmxx_inparm"
        valid_values="" >
 SNICAR snow grain aging lookup table (best-fit tau, kappa, drdsdt0).
-Default: ' '
+Default: lnd/clm2/snicardata/snicar_drdt_bst_fit_60_c070416.nc (ELM's
+default, under DIN_LOC_ROOT)
 </entry>
 
 <entry id="elmxx_nrevsn"
@@ -128,9 +130,13 @@ profiling.
        type="logical"
        category="elmxx"
        group="elmxx_inparm" >
-Default: .true.
+Default: .false.
 If .true., round-trip a per-entity fingerprint through the Kokkos views at the
-end of step 1 and check that every packed slot returns what was written to it.
+end of the first step and check that every packed slot returns what was
+written to it. DESTRUCTIVE now that the kernels run: the probe restores the
+cold-start seed afterwards, which discards the first step's physics (and a
+finidat initial state). Turn it on only for a run whose results you intend to
+throw away.
 This validates the Fortran/Kokkos boundary plumbing: extents matching the views
 ELMxxCreate allocated, no setter silently rejected, both the int and double
 paths.
@@ -154,33 +160,20 @@ index map is silent corruption and every kernel added later builds on it. Set
 bring-up.
 </entry>
 
-<entry id="elmxx_kernels"
-       type="char*256"
+<entry id="elmxx_kernel_reports"
+       type="logical"
        category="elmxx"
        group="elmxx_inparm" >
-Default: '' (no kernels active)
-Comma-separated list of ELMxx Kokkos kernels to activate, in any order --
-they always RUN in driver order, since each reads what the ones before it
-wrote. Valid names, in that driver order:
+Default: .false.
+If .true., write the per-kernel diagnostic tables to lnd.log -- the
+"(elmxx_kernels_report) rank ..." blocks (SurfaceRadiation, CanopyHydrology,
+CanopyTemperature and the surface fluxes, with min/max and NaN counts) and the
+SurfaceAlbedo report -- on step 1 and twice a model day after that. They were
+for bringing kernels up against ELM; leave them off otherwise.
 
-  canhydro, cansunshade, surfrad, urbanrad, cantemp, baregrnd,
-  canflux, urbanflux, lakeflux, laketemp, soiltemp, soilflux,
-  surfrunoff, rootwater, lakehydro, hydrodrain
-
-This is ELM's driver order, taken from elm_driver.F90 -- CanopyHydrology
-first, CanopySunShadeFractions before SurfaceRadiation, LakeHydrology before
-HydrologyDrainage.
-
-There is no Fortran alternative to switch away from: a kernel that is not
-named simply does not run, so the timestep stays incomplete until all of them
-are on. Intermediate runs are diagnostic only.
-
-An unknown name aborts, and so does a name whose prerequisites are not met.
-The eleven kernels 1x1_brazil needs are all runnable; urbanrad/urbanflux still
-need UrbanAlbedo, and the three lake kernels need the lake state allocation.
-A kernel run on unset inputs would read zeros and produce plausible-looking
-garbage rather than failing, which is why this is enforced at init instead of
-being left to inspection.
+All ELMxx kernels always run; there is no namelist switch for them. The
+library can still run a chosen subset (elmxxKernelMod's elmxx_kernels_parse)
+for kernel-by-kernel checks against ELM.
 </entry>
 
 <entry id="elmxx_do_albedo"
@@ -188,7 +181,7 @@ being left to inspection.
        category="elmxx"
        group="elmxx_inparm"
        valid_values="" >
-Default: .false.
+Default: .true.
 Run the ported SurfaceAlbedo at the end of each timestep, as ELM does.
 When .false. the albedos stay at ELM's cold-start constants (0.2 ground and
 canopy, 0.6 snow), which is correct for step one and increasingly wrong after
@@ -202,7 +195,7 @@ parameters from it.
        category="elmxx"
        group="elmxx_inparm"
        valid_values="" >
-Default: .false.
+Default: .true.
 Run the ported Photosynthesis (Farquhar/Collatz with Ball-Berry) inside the
 CanopyFluxes Newton iteration, so stomatal resistance is computed at every
 iterate instead of read from a caller-supplied table.
@@ -251,7 +244,8 @@ when Photosynthesis lands.
        input_pathname="abs"
        group="elmxx_inparm"
        valid_values="" >
-Default: ''
+Default: lnd/clm2/paramdata/clm_params_c180301.nc (ELM's default for this
+configuration, under DIN_LOC_ROOT)
 Full pathname of the PFT parameter file (ELM's clm_params). ELMXX reads only
 the fields a ported kernel needs -- roota_par/rootb_par for the root profile,
 smpso/smpsc for stomatal response, tc_stress for the cold cutoff on root water
@@ -259,8 +253,8 @@ uptake, z0mr/displar/dleaf for the canopy aerodynamic chain, and
 xl/rhol/rhos/taul/taus for the two-stream canopy optics -- rather than the
 whole file, so that every field read has a consumer.
 
-Required once any canopy kernel is active. z0mr, displar and dleaf are not
-optional: unseeded they read zero, which drives ustar and rb to zero and NaNs
+Required, since the kernels always run; init aborts without it. z0mr,
+displar and dleaf are not optional: unseeded they read zero, which drives ustar and rb to zero and NaNs
 every canopy flux, so they are checked at read time. Use the same
 file as the ELM twin, or the two models are not comparable.
 </entry>
@@ -274,11 +268,11 @@ Default: '' (just the C++-side default field list)
 Comma-separated list of ADDITIONAL history fields to activate, beyond the
 default set RegisterHistoryField marks default_active in History.cpp (TG,
 TV, H2OSNO, FSA, EFLX_LH_TOT, FSH, QOVER, QDRAI today). Not a full
-restatement of the field list, unlike elmxx_kernels above -- an empty string
-means exactly the C++-side defaults, not "no history."
+restatement of the field list -- an empty string means exactly the C++-side
+defaults, not "no history."
 
 An unknown name, or a name already active by default, aborts at
-elmxx_hist_init -- same enforced-rather-than-silent policy as elmxx_kernels.
+elmxx_hist_init rather than being silently ignored.
 </entry>
 
 </namelist_definition>
