@@ -79,7 +79,7 @@ module elmxxMod
   use elmxxUrbanMod          , only : elmxx_urban_init, elmxx_urban_diag_dump, &
                                       elmxx_urban_clean, urban_built, elmxx_urban_diag_step, &
                                       elmxx_urban_apply_finidat
-  use elmxxKernelMod         , only : elmxx_kernels_parse, elmxx_kernels_run, &
+  use elmxxKernelMod         , only : elmxx_kernels_activate_all, elmxx_kernels_run, &
                                       elmxx_wbal_report, &
                                       elmxx_kernels_report, elmxx_report_cantemp, &
                                       elmxx_report_fluxes, elmxx_report_surfrad, &
@@ -176,9 +176,9 @@ module elmxxMod
   logical, public :: elmxx_stomata_closed = .false.
 
   ! Run the ported Photosynthesis inside the CanopyFluxes Newton iteration.
-  ! Off by default, like elmxx_do_albedo. Requires elmxx_do_albedo (vcmaxcint
+  ! On by default, like elmxx_do_albedo. Requires elmxx_do_albedo (vcmaxcint
   ! is SurfaceAlbedo's output) and fparamfile, both checked at init.
-  logical, public :: elmxx_do_photosynthesis = .false.
+  logical, public :: elmxx_do_photosynthesis = .true.
   ! Atmospheric CO2 [ppmv]. ELM takes this from its own namelist with
   ! co2_type = 'constant'; the I1850 twin uses 284.7.
   real(r8), public :: elmxx_co2_ppmv = 284.7_r8
@@ -212,9 +212,12 @@ module elmxxMod
   ! C++ timers inside the Fortran-timed steps (src/utils/Timers.h in the
   ! library): 0 off, 1 the launches and phases of each step, 2 finer.
   integer           , public :: elmxx_timer_level     = 0
-  ! Stage 4: comma-separated kernel names; empty means the timestep is a no-op.
-  character(len=256), public :: elmxx_kernels = ' '
-  ! PFT parameter file (ELM's clm_params). Needed once root water stress runs.
+  ! Per-kernel diagnostic tables ("(elmxx_kernels_report) rank ..." and the
+  ! SurfaceAlbedo report), written on step 1 and twice a model day. Off by
+  ! default: they were for bringing kernels up against ELM one at a time.
+  logical           , public :: elmxx_kernel_reports  = .false.
+  ! PFT parameter file (ELM's clm_params). Required: the kernels, all of which
+  ! always run, read their PFT parameters from it.
   character(len=256), public :: fparamfile = ' '
   ! History output. Additions/overrides BEYOND the C++-side default field
   ! list (RegisterHistoryField's default_active) -- empty means just the
@@ -288,10 +291,11 @@ contains
 
     namelist /elmxx_inparm/ do_elmxx, fatmlndfrc, fsurdat, &
                             elmxx_check_boundary, elmxx_check_soft_fail, &
-                            elmxx_stage2_snapshot, elmxx_kernels, fparamfile, elmxx_do_albedo, &
+                            elmxx_stage2_snapshot, fparamfile, elmxx_do_albedo, &
                             elmxx_stomata_closed, elmxx_do_photosynthesis, &
                             elmxx_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
-                            elmxx_hist_fincl, elmxx_nrevsn, elmxx_timer_level
+                            elmxx_hist_fincl, elmxx_nrevsn, elmxx_timer_level, &
+                            elmxx_kernel_reports
 
     ! defaults
     do_elmxx   = .true.
@@ -304,11 +308,11 @@ contains
     elmxx_check_boundary  = .false.
     elmxx_stage2_snapshot = .false.
     elmxx_check_soft_fail = .false.
-    elmxx_kernels         = ' '
+    elmxx_kernel_reports  = .false.
     fparamfile            = ' '
-    elmxx_do_albedo       = .false.
+    elmxx_do_albedo       = .true.
     elmxx_stomata_closed  = .false.
-    elmxx_do_photosynthesis = .false.
+    elmxx_do_photosynthesis = .true.
     elmxx_co2_ppmv        = 284.7_r8
     elmxx_hist_fincl      = ' '
     elmxx_timer_level     = 0
@@ -351,7 +355,7 @@ contains
     call mpi_bcast (elmxx_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_stage2_snapshot, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
-    call mpi_bcast (elmxx_kernels, len(elmxx_kernels), MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (elmxx_kernel_reports , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (fparamfile   , len(fparamfile)   , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (elmxx_hist_fincl, len(elmxx_hist_fincl), MPI_CHARACTER, 0, mpicom_lnd, ier)
     ! These four went unbroadcast until 2026-10-04: every rank but 0 ran with
@@ -371,8 +375,12 @@ contains
        write(logunit,*) '   elmxx_check_boundary  = ', elmxx_check_boundary
        write(logunit,*) '   elmxx_stage2_snapshot = ', elmxx_stage2_snapshot
        write(logunit,*) '   elmxx_check_soft_fail = ', elmxx_check_soft_fail
-       write(logunit,*) '   elmxx_kernels         = ', trim(elmxx_kernels)
+       write(logunit,*) '   elmxx_kernel_reports  = ', elmxx_kernel_reports
+       write(logunit,*) '   elmxx_do_albedo       = ', elmxx_do_albedo
+       write(logunit,*) '   elmxx_do_photosynthesis = ', elmxx_do_photosynthesis
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
+       write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
+       write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
        write(logunit,*) '   elmxx_hist_fincl      = ', trim(elmxx_hist_fincl)
        write(logunit,*) '   elmxx_timer_level     = ', elmxx_timer_level
        call shr_sys_flush(logunit)
@@ -707,10 +715,20 @@ contains
           call elmxx_urban_apply_finidat(elmxx_state, logunit)
        end if
 
-       ! Parse after seeding, so a blocked kernel's abort names a
-       ! prerequisite that genuinely could not be met rather than one that
-       ! merely had not been met yet at this point in init.
-       call elmxx_kernels_parse(elmxx_kernels, logunit)
+       ! Every kernel runs; there is no namelist switch. The library can
+       ! still run a chosen subset -- elmxx_kernels_parse takes a list of
+       ! names -- for kernel-by-kernel checks against ELM. Activated after
+       ! seeding, so a blocked kernel's abort names a prerequisite that
+       ! genuinely could not be met rather than one not yet met at this point.
+       !
+       ! fparamfile is required: without it the per-patch PFT parameters are
+       ! never seeded, and zero is a legal value that turns into NaN several
+       ! kernels later (dleaf = 0 makes CanopyFluxes' rb zero).
+       if (len_trim(fparamfile) == 0) then
+          call shr_sys_abort(subname//' ERROR: fparamfile is not set; the '// &
+               'ELMxx kernels need the PFT parameters')
+       end if
+       call elmxx_kernels_activate_all(logunit)
 
        ! The five soil/hydrology kernels' surface is NOT built here. It needs
        ! the coupling timestep, and elmxx_init does not have it -- dt is an
@@ -1159,7 +1177,8 @@ contains
                   call shr_sys_abort('(elmxx_run) ERROR: ComputeSurfaceAlbedoUrban failed')
              call elmxx_t_stop('urbsurfalb')
           end if
-          if ((nstep == 1 .or. mod(nstep, 24) == 0) .and. elmxx_perf_ncells == 0) then
+          if (elmxx_kernel_reports .and. (nstep == 1 .or. mod(nstep, 24) == 0) &
+              .and. elmxx_perf_ncells == 0) then
              call elmxx_surface_albedo_report(logunit)
           end if
        end if
@@ -1170,7 +1189,8 @@ contains
        ! radiation kernel that appears to do nothing. Sampling half a day out
        ! catches daylight. It also gives the surface fluxes a day/night
        ! contrast, which is worth having for free.
-       if ((nstep == 1 .or. mod(nstep, 24) == 0) .and. elmxx_perf_ncells == 0) then
+       if (elmxx_kernel_reports .and. (nstep == 1 .or. mod(nstep, 24) == 0) &
+           .and. elmxx_perf_ncells == 0) then
           call elmxx_report_surfrad(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_kernels_report(elmxx_state, n_kokkos_patch, logunit)
           call elmxx_report_cantemp(elmxx_state, n_kokkos_col, logunit)
