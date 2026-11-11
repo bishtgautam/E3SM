@@ -86,6 +86,11 @@ module elmxxSubgridMod
   integer, public :: num_columns   = 0
   integer, public :: num_patches   = 0
 
+  ! Summed over ranks; valid on the master only (an MPI_Reduce to rank 0).
+  integer, public :: num_landunits_global = 0
+  integer, public :: num_columns_global   = 0
+  integer, public :: num_patches_global   = 0
+
   integer , public, pointer :: lun_gridcell(:) => null()  ! 1-based local cell index
   integer , public, pointer :: lun_itype(:)    => null()  ! istsoil, isturb_tbd, ...
   real(r8), public, pointer :: lun_wtgcell(:)  => null()  ! weight on the gridcell (0-1)
@@ -244,6 +249,9 @@ contains
     call mpi_reduce(mine, total, 3, MPI_INTEGER, MPI_SUM, 0, mpicom_lnd, ier)
 
     if (masterproc) then
+       num_landunits_global = total(1)
+       num_columns_global   = total(2)
+       num_patches_global   = total(3)
        write(logunit,*) subname,'GLOBAL total landunits = ',total(1)
        write(logunit,*) subname,'GLOBAL total columns   = ',total(2)
        write(logunit,*) subname,'GLOBAL total patches   = ',total(3)

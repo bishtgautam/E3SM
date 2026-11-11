@@ -17,6 +17,7 @@ module lnd_comp_mct
   use seq_infodata_mod, only : seq_infodata_type, seq_infodata_PutData, seq_infodata_GetData
   use seq_comm_mct    , only : seq_comm_inst, seq_comm_name, seq_comm_suffix
   use seq_timemgr_mod , only : seq_timemgr_EClockDateInSync, seq_timemgr_RestartAlarmIsOn
+  use seq_timemgr_mod , only : seq_timemgr_EClockGetData
   use shr_kind_mod    , only : IN=>SHR_KIND_IN, R8=>SHR_KIND_R8, CS=>SHR_KIND_CS, CL=>SHR_KIND_CL
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use shr_file_mod    , only : shr_file_getunit, shr_file_getlogunit, shr_file_getloglevel
@@ -28,7 +29,7 @@ module lnd_comp_mct
   use elmxxMod        , only : elmxx_restart_set_start, elmxx_restart_write
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use elmxxMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
-  use elmxxMod        , only : elmxx_caseid, elmxx_timer_level
+  use elmxxMod        , only : elmxx_caseid, elmxx_timer_level, elmxx_perf_ncells
   use elmxx_kokkos_interface, only : ELMxxTimersInitialize
   use elmxxHistMod    , only : elmxx_hist_set_base_date
   use elmxxMod        , only : nlon_g, nlat_g, lonc_g, latc_g, areac_g, maskc_g, fracc_g
@@ -70,6 +71,7 @@ module lnd_comp_mct
   private :: lnd_SetgsMap_mct
   private :: lnd_domain_mct
   private :: get_step_size, get_clock_date
+  private :: log_define_run, log_time_manager
   private :: chkrc
 
   !--------------------------------------------------------------------------
@@ -138,7 +140,8 @@ CONTAINS
           logunit_lnd = shr_file_getUnit()
           call shr_file_setIO('lnd_modelio.nml'//trim(inst_suffix),logunit_lnd)
        end if
-       write(logunit_lnd,*) "ELMxx model initialization"
+       ! ELM's banner (elm lnd_comp_mct.F90), naming ELMxx.
+       write(logunit_lnd,'(a)') "(lnd_init_mct) :ELMxx land model initialization"
     else
        logunit_lnd = shrlogunit
     end if
@@ -164,6 +167,8 @@ CONTAINS
        call shr_file_setLogLevel(shrloglev)
        return
     end if
+
+    if (masterproc) call log_define_run(infodata)
 
     call get_clock_date(EClock, month, day, year)
 
@@ -215,6 +220,8 @@ CONTAINS
       end if
     end block
 
+    if (masterproc) call log_time_manager(EClock)
+
     !----------------------------------------------------------------------------
     ! Register the ELMxx decomposition and domain with the coupler
     !----------------------------------------------------------------------------
@@ -245,7 +252,6 @@ CONTAINS
     ! Reset shr logging to original values
     !----------------------------------------------------------------------------
 
-    if (masterproc) write(logunit_lnd,F00) 'lnd_init_mct done'
     ! Initial albedo pass, as ELM does in initialize2. SurfaceRadiation reads
     ! the PREVIOUS step's albedo, and doalb is false on the first two driver
     ! passes, so without this step 0 would run on cold-start constants and
@@ -263,6 +269,33 @@ CONTAINS
          call elmxx_init_albedo(logunit_lnd, nextsw_cday_i, declin_i)
       end if
     end block
+
+    ! End-of-initialization lines, as ELM writes them (elm_initializeMod.F90
+    ! and elm lnd_comp_mct.F90). ELMxx steps at the coupling interval, so its
+    ! own step size is dtime_sync and the two always align.
+    if (masterproc) then
+       block
+         integer :: i, dt, rc1, cyr, cmon, cdy, ctod
+         type(ESMF_Time) :: t_now
+         call ESMF_ClockGet(EClock, currTime=t_now, rc=rc1)
+         call chkrc(rc1, 'lnd::lnd_init_mct: ESMF_ClockGet currTime')
+         call ESMF_TimeGet(t_now, yy=cyr, mm=cmon, dd=cdy, s=ctod, rc=rc1)
+         call chkrc(rc1, 'lnd::lnd_init_mct: ESMF_TimeGet currTime')
+         dt = get_step_size(EClock)
+         write(logunit_lnd,*) 'Successfully initialized the land model'
+         if (elmxx_from_restart) then
+            write(logunit_lnd,*) 'begin continuation run at:'
+         else
+            write(logunit_lnd,*) 'begin initial run at: '
+         end if
+         write(logunit_lnd,*) '   nstep= ',elmxx_nstep, ' year= ',cyr,' month= ',cmon, &
+              ' day= ',cdy,' seconds= ',ctod
+         write(logunit_lnd,*)
+         write(logunit_lnd,'(72a1)') ("*",i=1,60)
+         write(logunit_lnd,*)
+         write(logunit_lnd,*) 'dtime_sync= ',dt,' dtime_elm= ',dt,' mod = ',mod(dt,dt)
+       end block
+    end if
 
     call shr_sys_flush(logunit_lnd)
 
@@ -302,6 +335,7 @@ CONTAINS
     logical  :: dosend, doalb_step
     integer  :: rc, cyr, cmon, cday, ctod, cymd
     integer  :: hist_year, hist_month, hist_day, hist_tod
+    character(len=256) :: step_date  ! model date for the per-step log lines
     !-------------------------------------------------------------------------------
 
     if (.not. do_elmxx) return
@@ -388,12 +422,26 @@ CONTAINS
        call ESMF_TimeGet(elmxx_clock_time + elmxx_step, mm=month, dd=day, rc=rc)
        call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet phenology date')
 
+       ! ELM's per-step lines (elm_driver.F90). Both carry the clock as it
+       ! reads during the step, which is what ELM prints on both lines too.
+       if (masterproc .and. elmxx_perf_ncells == 0) then
+          call ESMF_TimeGet(elmxx_clock_time, timeString=step_date, rc=rc)
+          call chkrc(rc, 'lnd::lnd_run_mct: ESMF_TimeGet timeString')
+          write(logunit_lnd,*) 'Beginning timestep   : ',trim(step_date)
+          call shr_sys_flush(logunit_lnd)
+       end if
+
        call elmxx_t_start('elmxx_run')
        call elmxx_run(logunit_lnd, coupling_dt_in_sec, month, day, &
                       nextsw_cday, declinp1, doalb=doalb_step, &
                       hist_year=hist_year, hist_month=hist_month, &
                       hist_day=hist_day, hist_tod=hist_tod)
        call elmxx_t_stop('elmxx_run')
+
+       if (masterproc .and. elmxx_perf_ncells == 0) then
+          write(logunit_lnd,*) '   Completed timestep: ',trim(step_date)
+          call shr_sys_flush(logunit_lnd)
+       end if
 
        ! Restart at the end of the coupling interval the alarm rings in, dated
        ! with this step's end time (ELM: rstwr = rstwr_sync .and. dosend).
@@ -635,6 +683,79 @@ CONTAINS
     if (present(year)) year = yy
 
   end subroutine get_clock_date
+
+  !===============================================================================
+
+  subroutine log_define_run(infodata)
+
+    ! The "define run:" block of ELM's control_print (controlMod.F90), filled
+    ! from the coupler's infodata the way ELM fills it. Master only.
+
+    type(seq_infodata_type), intent(in) :: infodata
+
+    character(len=CL) :: case_desc, model_version, username, hostname
+    character(len=CS) :: start_type, run_type
+
+    call seq_infodata_GetData(infodata, case_desc=case_desc, &
+         model_version=model_version, username=username, hostname=hostname, &
+         start_type=start_type)
+
+    ! ELM's runtyp names for its nsrest values.
+    select case (trim(start_type))
+    case ('continue')
+       run_type = 'restart'
+    case ('branch')
+       run_type = 'branch'
+    case default
+       run_type = 'initial'
+    end select
+
+    write(logunit_lnd,*) 'define run:'
+    write(logunit_lnd,*) '   source                = ','E3SM Land Model (ELMxx)'
+    write(logunit_lnd,*) '   model_version         = ',trim(model_version)
+    write(logunit_lnd,*) '   run type              = ',trim(run_type)
+    write(logunit_lnd,*) '   case title            = ',trim(case_desc)
+    write(logunit_lnd,*) '   username              = ',trim(username)
+    write(logunit_lnd,*) '   hostname              = ',trim(hostname)
+    call shr_sys_flush(logunit_lnd)
+
+  end subroutine log_define_run
+
+  !===============================================================================
+
+  subroutine log_time_manager(EClock)
+
+    ! ELM's timemgr_print block (elm_time_manager.F90), taken from the
+    ! coupler clock that ELMxx steps on. ELM's "Ending step number" is left
+    ! out: ELM never sets it either and prints its fill value. Master only.
+
+    type(ESMF_Clock), intent(in) :: EClock
+
+    character(len=CS) :: calendar
+    integer :: dtime, start_ymd, start_tod, stop_ymd, stop_tod
+    integer :: ref_ymd, ref_tod, curr_ymd, curr_tod
+
+    call seq_timemgr_EClockGetData(EClock, calendar=calendar, dtime=dtime, &
+         start_ymd=start_ymd, start_tod=start_tod, stop_ymd=stop_ymd, &
+         stop_tod=stop_tod, ref_ymd=ref_ymd, ref_tod=ref_tod, &
+         curr_ymd=curr_ymd, curr_tod=curr_tod)
+
+    write(logunit_lnd,*)' ******** CLM Time Manager Configuration ********'
+    write(logunit_lnd,*)'  Calendar type:            ',trim(calendar)
+    write(logunit_lnd,*)'  Timestep size (seconds):  ', dtime
+    write(logunit_lnd,*)'  Start date (yr mon day tod):     ', start_ymd/10000, &
+         mod(start_ymd/100,100), mod(start_ymd,100), start_tod
+    write(logunit_lnd,*)'  Stop date (yr mon day tod):      ', stop_ymd/10000, &
+         mod(stop_ymd/100,100), mod(stop_ymd,100), stop_tod
+    write(logunit_lnd,*)'  Reference date (yr mon day tod): ', ref_ymd/10000, &
+         mod(ref_ymd/100,100), mod(ref_ymd,100), ref_tod
+    write(logunit_lnd,*)'  Current step number:      ', elmxx_nstep
+    write(logunit_lnd,*)'  Current date (yr mon day tod):   ', curr_ymd/10000, &
+         mod(curr_ymd/100,100), mod(curr_ymd,100), curr_tod
+    write(logunit_lnd,*)' ************************************************'
+    call shr_sys_flush(logunit_lnd)
+
+  end subroutine log_time_manager
 
   !===============================================================================
 

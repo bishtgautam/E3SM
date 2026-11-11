@@ -30,7 +30,9 @@ module elmxxMod
   use elmxxSubgridMod , only : elmxx_build_subgrid, elmxx_subgrid_clean, &
                                subgrid_built, num_landunits, num_columns, &
                                num_patches, lun_itype, col_landunit, &
-                               istsoil, isturb_tbd, isturb_hd, isturb_md
+                               istsoil, isturb_tbd, isturb_hd, isturb_md, &
+                               num_landunits_global, num_columns_global, &
+                               num_patches_global
   use elmxxSurfaceStateMod, only : elmxx_surface_state_init, &
                                    elmxx_surface_state_clean, &
                                    elmxx_phenology_weights
@@ -398,7 +400,11 @@ contains
     character(len=*), parameter :: subname = '(elmxx_init) '
 
     if (masterproc) then
-       write(logunit,*) 'ELMxx model initialization'
+       ! ELM's opening line (elm_initializeMod.F90); ELMxx's closing pair,
+       ! "Successfully initialized the land model", is in lnd_init_mct.
+       write(logunit,*)
+       write(logunit,*) 'Attempting to initialize the land model .....'
+       write(logunit,*)
        call shr_sys_flush(logunit)
     end if
 
@@ -518,6 +524,20 @@ contains
        call elmxx_t_stop('elmxx_read_surfdata')
        call elmxx_report_composition(logunit)
        call elmxx_build_subgrid(logunit, num_cells_owned)
+       ! ELM's subgrid summary (decompInitMod.F90), for the lines ELMxx has:
+       ! no topounits, cohorts, clumps or per-level gsMaps.
+       if (masterproc) then
+          write(logunit,*)
+          write(logunit,*)' Surface Grid Characteristics'
+          write(logunit,*)'   longitude points          = ',nlon_g
+          write(logunit,*)'   latitude points           = ',nlat_g
+          write(logunit,*)'   total number of gridcells = ',num_cells_global
+          write(logunit,*)'   total number of landunits = ',num_landunits_global
+          write(logunit,*)'   total number of columns   = ',num_columns_global
+          write(logunit,*)'   total number of pfts      = ',num_patches_global
+          write(logunit,*)
+          call shr_sys_flush(logunit)
+       end if
        call elmxx_surface_state_init(logunit, month, day)
        call elmxx_build_filters(logunit, num_cells_owned)
        if (elmxx_stage2_snapshot .and. elmxx_perf_ncells == 0) then
@@ -697,10 +717,6 @@ contains
        ! argument to elmxx_run. Built on the first step instead; see there.
     end if
 
-    if (masterproc) then
-       write(logunit,*) 'ELMxx model initialization completed'
-       call shr_sys_flush(logunit)
-    end if
 
 
     !-----------------------------------------------------------------------
@@ -1198,10 +1214,7 @@ contains
        call elmxx_t_stop('elm_drv_io')
     end if
 
-    if (masterproc .and. elmxx_perf_ncells == 0) then
-       write(logunit,*) 'ELMxx step ',nstep,' dt = ',coupling_dt_in_sec,' s (no-op)'
-       call shr_sys_flush(logunit)
-    end if
+    ! The per-step log lines are lnd_run_mct's, in ELM's format.
 
   end subroutine elmxx_run
 
