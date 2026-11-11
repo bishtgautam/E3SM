@@ -133,10 +133,19 @@ contains
     integer :: kdim_id(0:NKIND)
     real(c_double), allocatable :: buf(:)
     character(len=CL) :: fname
+    character(len=16) :: rdate   ! YYYY-MM-DD-SSSSS, as ELM logs it
     character(len=*), parameter :: subname = '(elmxx_rest_write) '
 
     write(fname,'(a,".elmxx.r.",i4.4,"-",i2.2,"-",i2.2,"-",i5.5,".nc")') &
          trim(caseid), yr, mon, day, tod
+
+    ! ELM's restart lines (restFileMod.F90) bracket ELMxx's own summary.
+    if (masterproc) then
+       write(rdate,'(i4.4,"-",i2.2,"-",i2.2,"-",i5.5)') yr, mon, day, tod
+       write(logunit,*)'writing restart file ',trim(fname),' for model date = ',rdate
+       write(logunit,*)
+       call shr_sys_flush(logunit)
+    end if
 
     call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
     allocate(vid(nfld))
@@ -209,6 +218,12 @@ contains
     if (masterproc) then
        write(logunit,'(a,a,a,i0,a,i0,a,i0)') subname, trim(fname), ': ', &
             nwritten, ' fields, nstep ', nstep, ', npes ', npes
+       write(logunit,*) 'Successfully wrote local restart file ',trim(fname)
+       write(logunit,'(72a1)') ("-",i=1,60)
+       write(logunit,*)
+       write(logunit,*) 'Successfully wrote local restart pointer file'
+       write(logunit,*) 'Successfully wrote out restart data at nstep = ',nstep
+       write(logunit,'(72a1)') ("-",i=1,60)
        call shr_sys_flush(logunit)
     end if
 
