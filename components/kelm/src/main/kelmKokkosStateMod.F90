@@ -1216,8 +1216,8 @@ contains
     ! cosine of the solar zenith angle is derived there (on the cell) instead
     ! of crossing every step.
     !
-    ! Both kelm_kokkos_push_forcing and kelm_init_albedo call this; the
-    ! module-level guard makes the second call a no-op, whichever runs first.
+    ! kelm_kokkos_push_forcing calls this every step; the module-level guard
+    ! makes every call after the first a no-op.
     !
     implicit none
     type(kELMType), intent(in) :: elm

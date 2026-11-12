@@ -4,7 +4,7 @@ program kelm_perf
   ! !DESCRIPTION:
   ! Standalone perf driver for kELM (plan Stage 6.8). kELM-only.
   !
-  ! It runs the coupled model's own code path -- kelm_init, kelm_init_albedo,
+  ! It runs the coupled model's own code path -- kelm_init,
   ! kelm_run, kelm_final, everything lnd_comp_mct calls -- without the
   ! coupler, DATM or ESMF. The case's lnd_in (read from the working
   ! directory) picks the source cell(s), the input files and the kernels.
@@ -36,7 +36,7 @@ program kelm_perf
   use shr_orb_mod         , only : shr_orb_params, shr_orb_decl
   use shr_pio_mod         , only : shr_pio_init1, shr_pio_init2, shr_pio_finalize
   use kelmSpmdMod        , only : kelmSpmdInit, masterproc, iam, npes, mpicom_lnd
-  use kelmMod            , only : kelm_read_namelist, kelm_init, kelm_init_albedo, &
+  use kelmMod            , only : kelm_read_namelist, kelm_init, &
                                    kelm_run, kelm_final, kelm_restart_write, &
                                    kelm_state, kelm_caseid, inst_name, inst_suffix, &
                                    inst_index, num_cells_owned, num_cells_global, &
@@ -97,9 +97,6 @@ program kelm_perf
   t0 = mpi_wtime()
   call clock_at(0, yr, mon, day, tod, calday)
   call kelm_init(logunit, yr, mon, day)
-  call next_radiation_day(dt, nextsw_cday)
-  call shr_orb_decl(nextsw_cday, eccen, mvelpp, lambm0, obliqr, declinp1, eccf)
-  call kelm_init_albedo(logunit, nextsw_cday, declinp1)
   call kELMKokkosFence()
   t_init = mpi_wtime() - t0
 
