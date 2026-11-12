@@ -123,6 +123,27 @@ plan, Part 5.
 - Validation test names and namelist kernel tokens keep their current names
   (tests match instrumented ELM's diagnostic labels; tokens are user-facing).
 
+## One step is one library call (since 2026-11-11)
+
+The physics order of a step lives in the library, `kELMRunStep`
+(`external_models/kelm/src/main/kELMDriver.cpp`): root stress, photosynthesis
+forcing, the canopy/flux block, ground heat flux, the soil/hydrology block,
+then phenology and SurfaceAlbedo on doalb steps. `kelm_run` keeps what is the
+host's (forcing push, restart read, first-step lazy builds, one-time pushes,
+history, reports) and fills `kELMStepInputs`. A kernel added to the step goes
+into `kELMDriver.cpp`, not the Fortran.
+
+- Kernel switches go over once (`kelm_kernels_push` -> `kELMSetActiveKernels`);
+  the grouping rules (lake as a set, urbanrad+urbanflux, both need soiltemp)
+  are the library's.
+- KELM_DIAG snapshots, KELM_WBAL marks and the ELM-named phase timers
+  (`l:begwbal` .. `l:urbsurfalb`) come back through `kelm_step_hook`, a C
+  callback registered only when one of them is on. A new trace point is a
+  new `KELM_STAGE_*` in `kELM.h` plus a case in the hook.
+- Diagnostics recomputed every step for the export only (`u10_elm`, `fv`)
+  live in `FrictionVelocityDiagData` (`biogeophys/`), outside the containers
+  the restart registry generator scans, so they are not restarted.
+
 ## Coupler constraints -- do not "fix" these
 
 Read out of `driver-mct/main/seq_domain_mct.F90`; each one aborts the run if broken.
