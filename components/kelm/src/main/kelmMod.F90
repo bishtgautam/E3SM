@@ -34,22 +34,18 @@ module kelmMod
                                num_landunits_global, num_columns_global, &
                                num_patches_global
   use kelmSurfaceStateMod, only : kelm_surface_state_init, &
-                                   kelm_surface_state_clean, &
-                                   kelm_phenology_weights
+                                   kelm_surface_state_clean
   use kelmFilterMod      , only : kelm_build_filters, kelm_filters_clean
   use kelmInitCheckMod   , only : kelm_write_init_snapshot
   use kelmForcingMod , only : kelm_forcing_init, kelm_forcing_clean
 
   use kelm_mod              , only : kELMType, kELMCreate, kELMDestroy, KELM_SUCCESS, &
-                                      kELMComputeSoilMoistStressNatural, &
-                                      kELMComputeGroundHeatFluxAndDerivNatural, &
+                                      kELMStepInputs, kELMRunStep, kELMRunStepFailedKernel, &
                                       kELMSetGroundHeatFluxSb, &
                                       kELMComputeSurfaceAlbedoNatural, &
                                       kELMComputeSurfaceAlbedoLake, &
                                       kELMComputeSurfaceAlbedoUrban, &
-                                      kELMComputeForcingDerived, kELMAllocateCells, &
-                                      kELMComputePhotosynForcingNatural, &
-                                      kELMComputeSatellitePhenologyNatural
+                                      kELMComputeForcingDerived, kELMAllocateCells
   use kelmSoilPropMod       , only : kelm_soil_prop_init, kelm_soil_prop_clean, &
                                       nlevtot, nlevgrnd
   use kelmPftconMod         , only : kelm_read_pftcon, kelm_pftcon_clean, pftcon_read
@@ -79,13 +75,13 @@ module kelmMod
   use kelmUrbanMod          , only : kelm_urban_init, kelm_urban_diag_dump, &
                                       kelm_urban_clean, urban_built, kelm_urban_diag_step, &
                                       kelm_urban_apply_finidat
-  use kelmKernelMod         , only : kelm_kernels_activate_all, kelm_kernels_run, &
+  use kelmKernelMod         , only : kelm_kernels_activate_all, kelm_kernels_push, &
                                       kelm_wbal_report, &
                                       kelm_kernels_report, kelm_report_cantemp, &
                                       kelm_report_fluxes, kelm_report_surfrad, &
                                       K_SOILTEMP, K_SOILFLUX, K_SURFRUNOFF, &
                                       K_ROOTWATER, K_HYDRODRAIN, kernel_active, &
-                                      any_kernel_active
+                                      any_kernel_active, NKERNEL, kernel_name
   use kelmKokkosStateMod    , only : kelm_kokkos_state_init, &
                                       kelm_kokkos_check_map_invariants, &
                                       kelm_kokkos_seed_topology, &
@@ -244,6 +240,7 @@ module kelmMod
   logical, private :: ghf_sb_pushed = .false.
   logical, private :: photosyn_statics_pushed = .false.
   logical, private :: monthly_phen_pushed = .false.
+  logical, private :: kernels_pushed = .false.   ! kelm_kernels_push, once
   ! History's activation is deferred to kelm_run (see the comment at its
   ! call site there): it needs col_npfts/col_pfti/wtcol, which
   ! kelm_soil_kernel_init pushes on the first step, not kelm_init.
@@ -896,8 +893,8 @@ contains
     logical :: do_albedo_this_step
     logical :: doalb_in            ! the driver's doalb, independent of config
     integer :: ierr_rs
-    integer :: phm1, phm2
-    real(r8) :: phw1, phw2
+    integer :: kfail
+    type(kELMStepInputs) :: step_in
 
     doalb_in = .true.
     if (present(doalb)) doalb_in = doalb
@@ -988,29 +985,15 @@ contains
        call kelm_t_stop('kelm_push_forcing')
     end if
 
-    !-----------------------------------------------------------------------
-    ! Root water stress. btran depends on soil moisture and temperature, so it
-    ! is recomputed here rather than seeded once -- it would go stale the
-    ! moment hydrology starts evolving the soil column.
-    !-----------------------------------------------------------------------
-    if (root_built) then
-       ! Root water stress now runs on the device. The statics it needs are
-       ! pushed once; nothing crosses per step. This deletes the push_btran
-       ! crossing -- the one that silently dropped rootr and cost a month of
-       ! water.
-       if (.not. root_statics_pushed) then
-          call kelm_kokkos_push_root_statics(kelm_state, logunit)
-          root_statics_pushed = .true.
-       end if
-       call kELMComputeSoilMoistStressNatural(kelm_state, ierr_rs)
-       if (ierr_rs /= KELM_SUCCESS) &
-            call shr_sys_abort('(kelm_run) ERROR: ComputeSoilMoistStressNatural failed')
+    ! Root water stress's statics, pushed once; the stress itself is the
+    ! first thing kELMRunStep does.
+    if (root_built .and. .not. root_statics_pushed) then
+       call kelm_kokkos_push_root_statics(kelm_state, logunit)
+       root_statics_pushed = .true.
     end if
 
     !-----------------------------------------------------------------------
-    ! Stage 4: run the active kernels, in driver order. After forcing has
-    ! crossed, before the boundary probe -- the probe overwrites state fields
-    ! with fingerprints, so it has to come last in the step.
+    ! Stage 4: run the active kernels, in driver order.
     !-----------------------------------------------------------------------
     ! The five soil/hydrology kernels' surface, built on the first step
     ! because it needs dtime.
@@ -1052,144 +1035,80 @@ contains
        hist_state_init_done = .true.
     end if
 
+    ! The one-time pushes the step reads, then the step itself: since plan
+    ! Stage 6.9 R2 one library call, kELMRunStep (kELMDriver.cpp), runs root
+    ! stress, photosynthesis forcing, the kernels in ELM's driver order with
+    ! the ground heat flux between the canopy and soil blocks, then
+    ! satellite phenology and SurfaceAlbedo at the end of the step, where ELM
+    ! runs them (both gated on doalb). The KELM_DIAG snapshots, KELM_WBAL
+    ! marks and ELM-named timers between kernels come back through the step
+    ! hook (kelm_kernels_push).
+    !
+    ! PHOTOSYNTHESIS: vcmaxcint is SurfaceAlbedo's output at the END of the
+    ! step, so step one runs with the value kelm_init_albedo gave it.
     if (kokkos_state_built .and. any_kernel_active) then
-       ! The ground surface energy balance has to be formed AFTER the canopy
-       ! and radiation kernels of this step have run and BEFORE
-       ! SoilTemperature consumes it -- but kelm_kernels_run dispatches the
-       ! whole ordered set in one call. So the canopy half runs first, then
-       ! this, then the soil half. Splitting the dispatch is what makes the
-       ! ordering explicit rather than implicit in a comment.
-       ! PHOTOSYNTHESIS INPUTS GO HERE, before the first kernel block, because
-       ! canflux is in it and canflux is what consumes them. Placing this after
-       ! the kernels -- next to SurfaceAlbedo, where it superficially belongs
-       ! with the other end-of-step work -- would hand the canopy the previous
-       ! step's daylength and a t10 that had not seen this step's temperature.
-       !
-       ! vcmaxcint is SurfaceAlbedo's output and SurfaceAlbedo runs at the END
-       ! of the step, so on step one it does not exist yet. That is the same
-       ! temporal dependency the albedos themselves have, and ELM has it too --
-       ! its SurfaceAlbedo runs in initialize2 so step one has a value. kELM
-       ! has no such call, so step one runs with vcmaxcint = 0, which is one
-       ! step of no photosynthesis and is stated rather than hidden.
        if (kelm_do_photosynthesis) then
           if (.not. photosyn_built) then
              call kelm_photosyn_init(cell_lat, real(coupling_dt_in_sec, r8), logunit)
              call kelm_photosyn_seed(kelm_state, logunit)
           end if
-          ! Photosynthesis forcing runs on the device. Its statics -- gridcell
-          ! latitude and maximum daylength -- are pushed once. vcmaxcint used
-          ! to cross here too; SurfaceAlbedo now produces it on the device,
-          ! which is what let this move.
           if (.not. photosyn_statics_pushed) then
              call kelm_push_photosyn_statics(kelm_state, logunit)
              photosyn_statics_pushed = .true.
           end if
-          call kELMComputePhotosynForcingNatural(kelm_state, nstep, t10_period, &
-               declinp1, kelm_co2_ppmv, ierr_rs)
-          if (ierr_rs /= KELM_SUCCESS) &
-               call shr_sys_abort('(kelm_run) ERROR: ComputePhotosynForcingNatural failed')
        end if
-
-       ! State at the top of the step, before any kernel. ELM's matching
-       ! anchor is canhydro_in: -- its first kernel -- so these line up.
-       call kelm_diag_snapshot_state(kelm_state, nlevtot, nlevgrnd, 'kelm_in')
-
-       call kelm_urban_diag_step(kelm_state, 'kelm_urbin')
-       call kelm_kernels_run(kelm_state, real(coupling_dt_in_sec, r8), logunit, 1)
-       call kelm_urban_diag_step(kelm_state, 'kelm_urbflx')
-
-       if (soil_kernel_built) then
-          ! Ground surface energy balance and the three quantities that used
-          ! to be pushed with it now run on the device. This deletes the
-          ! soil_kernel_push crossing.
-          if (.not. ghf_sb_pushed) then
-             call kELMSetGroundHeatFluxSb(kelm_state, SHR_CONST_STEBOL, ierr_rs)
-             ghf_sb_pushed = .true.
-          end if
-          call kELMComputeGroundHeatFluxAndDerivNatural(kelm_state, ierr_rs)
-          if (ierr_rs /= KELM_SUCCESS) &
-               call shr_sys_abort('(kelm_run) ERROR: ComputeGroundHeatFluxAndDerivNatural failed')
+       if (soil_kernel_built .and. .not. ghf_sb_pushed) then
+          call kELMSetGroundHeatFluxSb(kelm_state, SHR_CONST_STEBOL, ierr_rs)
+          ghf_sb_pushed = .true.
        end if
-
-       call kelm_kernels_run(kelm_state, real(coupling_dt_in_sec, r8), logunit, 2)
-       call kelm_urban_diag_step(kelm_state, 'kelm_urbout')
-
-       call kelm_diag_snapshot_fluxes(kelm_state, 'kelm_out')
-
-       ! Read the wetted soil column back, so next step's Fortran-side btran
-       ! sees what the hydrology kernels just did rather than the cold start.
-       if (soil_kernel_built) then
-          ! soil_kernel_pull is gone. Its only per-step consumer was the
-          ! Fortran btran, which now runs on the device; the host-side
-          ! col_h2osoi_* arrays are used at INIT for seeding and nowhere else,
-          ! so nothing needs the soil column brought back every step.
+       ! The twelve monthly LAI/SAI fields, from the surface dataset; per step
+       ! only the date crosses (the library forms the weights).
+       if (subgrid_built .and. doalb_in .and. .not. monthly_phen_pushed) then
+          call kelm_push_monthly_phenology(kelm_state, logunit)
+          monthly_phen_pushed = .true.
        end if
+    end if
 
-       ! SURFACE ALBEDO RUNS HERE, AT THE END OF THE STEP, BECAUSE ELM RUNS IT
-       ! HERE (elm_driver.F90, gated on doalb). SurfaceRadiation therefore
-       ! never consumes an albedo computed in its own step -- it reads the
-       ! previous step's, and step one reads the InitCold constants
-       ! kelm_kokkos_seed_albedo supplied. Moving this to the top of the step
-       ! would also change which state the two-stream sees: t_veg, fwet and
-       ! h2osoi_vol have all been updated by now.
-       ! Phenology updates HERE, at the end of the step just before
-       ! SurfaceAlbedo, because that is where ELM does it (elm_driver.F90, the
-       ! non-CN non-FATES branch, gated on doalb -- immediately ahead of its
-       ! own SurfaceAlbedo call). Updating at the top of the step instead let
-       ! CanopyHydrology see leaf area a step before ELM's did, which showed up
-       ! as canopy water running one timestep ahead all run.
-       ! Phenology interpolates ON THE DEVICE. The twelve monthly fields are
-       ! pushed once from the surface dataset; per step only the two month
-       ! indices and their weights cross. This replaces push_phenology, which
-       ! shipped interpolated leaf area every doalb step.
-       if (subgrid_built .and. doalb_in) then
-          call kelm_t_start('ecosysdyn')
-          if (.not. monthly_phen_pushed) then
-             call kelm_push_monthly_phenology(kelm_state, logunit)
-             monthly_phen_pushed = .true.
-          end if
-          call kelm_phenology_weights(month, day, phm1, phm2, phw1, phw2)
-          call kELMComputeSatellitePhenologyNatural(kelm_state, phm1, phm2, phw1, phw2, ierr_rs)
-          if (ierr_rs /= KELM_SUCCESS) &
-               call shr_sys_abort('(kelm_run) ERROR: ComputeSatellitePhenologyNatural failed')
-          call kelm_t_stop('ecosysdyn')
+    if (kokkos_state_built) then
+       if (.not. kernels_pushed) then
+          call kelm_kernels_push(kelm_state, logunit)
+          kernels_pushed = .true.
        end if
-
-       if (do_albedo_this_step) then
-          ! coszen already came from kelm_kokkos_push_forcing, which derived
-          ! it on the device from these same two scalars at the top of the
-          ! step. SurfaceAlbedo is the only reader, so deriving it earlier in
-          ! the step changes no value.
-          call kelm_t_start('surfalb')
-          call kELMComputeSurfaceAlbedoNatural(kelm_state, ierr_rs)
-          if (ierr_rs /= KELM_SUCCESS) &
-               call shr_sys_abort('(kelm_run) ERROR: ComputeSurfaceAlbedoNatural failed')
-          if (lake_built) then
-             call kELMComputeSurfaceAlbedoLake(kelm_state, ierr_rs)
-             if (ierr_rs /= KELM_SUCCESS) &
-                  call shr_sys_abort('(kelm_run) ERROR: ComputeSurfaceAlbedoLake failed')
-          end if
-          call kelm_t_stop('surfalb')
-          ! UrbanAlbedo, with the albedo pass's next-step coszen (Stage 6.7).
-          if (urban_built) then
-             call kelm_t_start('urbsurfalb')
-             call kELMComputeSurfaceAlbedoUrban(kelm_state, ierr_rs)
-             if (ierr_rs /= KELM_SUCCESS) &
-                  call shr_sys_abort('(kelm_run) ERROR: ComputeSurfaceAlbedoUrban failed')
-             call kelm_t_stop('urbsurfalb')
-          end if
-          if (kelm_kernel_reports .and. (nstep == 1 .or. mod(nstep, 24) == 0) &
-              .and. kelm_perf_ncells == 0) then
-             call kelm_surface_albedo_report(logunit)
+       step_in%dtime             = real(coupling_dt_in_sec, r8)
+       step_in%declinp1          = declinp1
+       step_in%co2_ppmv          = kelm_co2_ppmv
+       step_in%nstep             = nstep
+       step_in%month             = month
+       step_in%day               = day
+       step_in%t10_period        = t10_period
+       step_in%doalb             = merge(1, 0, doalb_in)
+       step_in%do_albedo         = merge(1, 0, do_albedo_this_step)
+       step_in%do_photosynthesis = merge(1, 0, kelm_do_photosynthesis)
+       step_in%root_stress       = merge(1, 0, root_built)
+       step_in%soil_built        = merge(1, 0, soil_kernel_built)
+       step_in%subgrid_built     = merge(1, 0, subgrid_built)
+       step_in%lake_built        = merge(1, 0, lake_built)
+       step_in%urban_built       = merge(1, 0, urban_built)
+       call kELMRunStep(kelm_state, step_in, ierr_rs)
+       if (ierr_rs /= KELM_SUCCESS) then
+          kfail = kELMRunStepFailedKernel(kelm_state)
+          if (kfail >= 1 .and. kfail <= NKERNEL) then
+             call shr_sys_abort('(kelm_run) ERROR: kELMRunStep failed in kernel "'// &
+                  trim(kernel_name(kfail))//'"')
+          else
+             call shr_sys_abort('(kelm_run) ERROR: kELMRunStep failed (root stress, '// &
+                  'photosynthesis forcing, ground heat flux, phenology or albedo)')
           end if
        end if
-       ! Report on the first step, then TWICE daily -- not once. The extra
-       ! sample is what makes the radiation readable: step 48k lands at model
-       ! midnight, where incident shortwave is zero and every SurfaceRadiation
-       ! output is trivially zero, so a once-daily report would show a
-       ! radiation kernel that appears to do nothing. Sampling half a day out
-       ! catches daylight. It also gives the surface fluxes a day/night
-       ! contrast, which is worth having for free.
+    end if
+
+    if (kokkos_state_built .and. any_kernel_active) then
+       if (do_albedo_this_step .and. kelm_kernel_reports .and. &
+           (nstep == 1 .or. mod(nstep, 24) == 0) .and. kelm_perf_ncells == 0) then
+          call kelm_surface_albedo_report(logunit)
+       end if
+       ! Report on the first step, then TWICE daily: step 48k lands at model
+       ! midnight, where every SurfaceRadiation output is trivially zero.
        if (kelm_kernel_reports .and. (nstep == 1 .or. mod(nstep, 24) == 0) &
            .and. kelm_perf_ncells == 0) then
           call kelm_report_surfrad(kelm_state, n_kokkos_patch, logunit)
