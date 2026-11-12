@@ -264,7 +264,6 @@ module kelmMod
   public :: kelm_read_namelist
   public :: kelm_init
   public :: kelm_run
-  public :: kelm_init_albedo
   public :: kelm_final
   public :: kelm_restart_set_start
   public :: kelm_restart_write
@@ -1045,7 +1044,9 @@ contains
     ! hook (kelm_kernels_push).
     !
     ! PHOTOSYNTHESIS: vcmaxcint is SurfaceAlbedo's output at the END of the
-    ! step, so step one runs with the value kelm_init_albedo gave it.
+    ! step, and ELM runs no SurfaceAlbedo at initialization (only elm_drv
+    ! calls it, on doalb steps), so neither model has one before the first
+    ! albedo step; the albedos until then are InitCold's (0.2).
     if (kokkos_state_built .and. any_kernel_active) then
        if (kelm_do_photosynthesis) then
           if (.not. photosyn_built) then
@@ -1158,50 +1159,6 @@ contains
 
   end subroutine kelm_run
 
-  !-----------------------------------------------------------------------
-  subroutine kelm_init_albedo(logunit, nextsw_cday, declinp1)
-    !
-    ! One SurfaceAlbedo pass at the end of initialisation, mirroring ELM's
-    ! initialize2. Without it kELM enters step 0 with no albedo and no
-    ! vcmaxcint, while ELM enters with both -- and because doalb is false on
-    ! ELM's own nstep 0 and 1 passes, nothing would fill them in until step 2.
-    !
-    implicit none
-    integer , intent(in) :: logunit
-    real(r8), intent(in) :: nextsw_cday, declinp1
-    integer :: ierr_ia
-
-    if (.not. kokkos_state_built) return
-    if (.not. kelm_do_albedo) return
-
-    ! Uses the same device kernel as the run loop -- the Fortran path read a
-    ! soil moisture that is never updated (H11), so it has no business
-    ! setting the initial albedo either.
-    ! Zenith only: this runs before the first forcing push, so air density
-    ! has nothing to be derived from yet and the flag skips it.
-    call kelm_kokkos_push_latlon(kelm_state, cell_lat, cell_lon, logunit)
-    call kELMComputeForcingDerived(kelm_state, nextsw_cday, declinp1, 0, ierr_ia)
-    if (ierr_ia /= KELM_SUCCESS) &
-         call shr_sys_abort('(kelm_init_albedo) ERROR: ComputeForcingDerived failed')
-    call kELMComputeSurfaceAlbedoNatural(kelm_state, ierr_ia)
-    if (ierr_ia /= KELM_SUCCESS) &
-         call shr_sys_abort('(kelm_init_albedo) ERROR: ComputeSurfaceAlbedoNatural failed')
-    if (lake_built) then
-       call kELMComputeSurfaceAlbedoLake(kelm_state, ierr_ia)
-       if (ierr_ia /= KELM_SUCCESS) &
-            call shr_sys_abort('(kelm_init_albedo) ERROR: ComputeSurfaceAlbedoLake failed')
-    end if
-    if (urban_built) then
-       call kELMComputeSurfaceAlbedoUrban(kelm_state, ierr_ia)
-       if (ierr_ia /= KELM_SUCCESS) &
-            call shr_sys_abort('(kelm_init_albedo) ERROR: ComputeSurfaceAlbedoUrban failed')
-    end if
-    if (masterproc) then
-       write(logunit,*) 'kELM: initial SurfaceAlbedo pass complete'
-       call shr_sys_flush(logunit)
-    end if
-
-  end subroutine kelm_init_albedo
 
 
   !-----------------------------------------------------------------------

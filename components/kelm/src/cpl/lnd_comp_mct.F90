@@ -26,7 +26,6 @@ module lnd_comp_mct
   use shr_file_mod    , only : shr_file_freeunit
   use kelmSpmdMod    , only : masterproc, mpicom_lnd, iam, npes, LNDID, kelmSpmdInit
   use kelmMod        , only : kelm_read_namelist, kelm_init, kelm_run, kelm_final
-  use kelmMod        , only : kelm_init_albedo
   use kelmMod        , only : kelm_restart_set_start, kelm_restart_write
   use shr_orb_mod     , only : shr_orb_decl, SHR_ORB_UNDEF_REAL
   use kelmMod        , only : num_cells_owned, num_cells_global, natural_id_cells_owned
@@ -255,23 +254,6 @@ CONTAINS
     ! Reset shr logging to original values
     !----------------------------------------------------------------------------
 
-    ! Initial albedo pass, as ELM does in initialize2. SurfaceRadiation reads
-    ! the PREVIOUS step's albedo, and doalb is false on the first two driver
-    ! passes, so without this step 0 would run on cold-start constants and
-    ! photosynthesis would have no vcmaxcint until step 2.
-    block
-      type(seq_infodata_type), pointer :: infodata_i
-      real(r8) :: nextsw_cday_i, declin_i, eccen_i, obliqr_i, lambm0_i, mvelpp_i, eccf_i
-      call seq_cdata_setptrs(cdata, infodata=infodata_i)
-      call seq_infodata_GetData(infodata_i, nextsw_cday=nextsw_cday_i, &
-           orb_eccen=eccen_i, orb_mvelpp=mvelpp_i, &
-           orb_lambm0=lambm0_i, orb_obliqr=obliqr_i)
-      if (nextsw_cday_i > 0._r8) then
-         call shr_orb_decl(nextsw_cday_i, eccen_i, mvelpp_i, lambm0_i, obliqr_i, &
-              declin_i, eccf_i)
-         call kelm_init_albedo(logunit_lnd, nextsw_cday_i, declin_i)
-      end if
-    end block
 
     ! The export at init, as ELM's lnd_init_mct sends one: the atmosphere's
     ! first radiation step reads these albedos and Sl_t.
