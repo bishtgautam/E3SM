@@ -38,7 +38,7 @@ module lnd_comp_mct
   use kelm_cpl_indices, only : kelm_cpl_indices_set
   use kelmForcingMod  , only : kelm_import
   use kelmTimerMod    , only : kelm_timers_on, kelm_t_start, kelm_t_stop
-  use kelmMod         , only : kelm_state
+  use kelmMod         , only : kelm_state, kelm_restart_load_export
   use kelmLndExportMod, only : kelm_lnd_export_init, kelm_kokkos_pull_lnd2atm, kelm_lnd_export
 
   !
@@ -275,8 +275,9 @@ CONTAINS
 
     ! The export at init, as ELM's lnd_init_mct sends one: the atmosphere's
     ! first radiation step reads these albedos and Sl_t.
+    ! A continue/branch run sends the export its restart carries.
     call kelm_lnd_export_init(kelm_state, num_cells_owned, l2x_l, logunit_lnd)
-    call kelm_kokkos_pull_lnd2atm(kelm_state)
+    if (.not. kelm_restart_load_export(logunit_lnd)) call kelm_kokkos_pull_lnd2atm(kelm_state)
     call kelm_lnd_export(l2x_l%rattr)
 
     ! End-of-initialization lines, as ELM writes them (elm_initializeMod.F90
