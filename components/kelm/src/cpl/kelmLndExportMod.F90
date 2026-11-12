@@ -10,8 +10,8 @@ module kelmLndExportMod
   ! lnd_export signs and units, line for line.
   !
   ! Fields kELM does not produce are zero, and say so in lnd.log at init:
-  ! dust (Fall_flxdst1..4) and Sl_u10withgusts are not supported; Sl_u10,
-  ! Sl_fv, Flrl_Tqsur/Tqsub are plan step E2. Fields that only exist when a
+  ! dust (Fall_flxdst1..4) and Sl_u10withgusts are not supported;
+  ! Flrl_Tqsur/Tqsub (MOSART heat only) are not produced yet. Fields that only exist when a
   ! process kELM does not model is configured (dry deposition, MEGAN,
   ! methane, NH3, soil water to the atmosphere, sediment) abort at init.
   !-----------------------------------------------------------------------
@@ -38,6 +38,10 @@ module kelmLndExportMod
   public :: kelm_lnd_export_init
   public :: kelm_kokkos_pull_lnd2atm
   public :: kelm_lnd_export
+  public :: kelm_lnd2atm_ready
+  public :: kelm_lnd2atm_cell_table
+  public :: kelm_lnd2atm_load_cell_table
+  public :: NFIELD
 
   ! Field order of the library's table (Lnd2AtmData, HistData.h :: L2A).
   integer, parameter :: L_FIRE = 1, L_H2OSNO = 2, &
@@ -45,7 +49,8 @@ module kelmLndExportMod
                         L_TREF = 7, L_QREF = 8, L_RAM1 = 9, L_TAUX = 10, L_TAUY = 11, &
                         L_LH = 12, L_SH = 13, L_EVAP = 14, L_FSA = 15, &
                         L_QSUR = 16, L_QSURP = 17, L_QSUB = 18, L_QSUBP = 19, &
-                        L_QGWL = 20, L_QICE = 21, L_COSZEN = 22, NFIELD = 22
+                        L_QGWL = 20, L_QICE = 21, L_COSZEN = 22, &
+                        L_FV = 23, L_U10 = 24, NFIELD = 24
 
   real(r8), allocatable :: lnd2atm(:,:)   ! (n_kokkos_col, NFIELD), lnd2atm's sign
   integer , allocatable :: cell_of_kcol(:) ! natural column -> local cell (l2x index)
@@ -131,12 +136,12 @@ contains
 
     if (masterproc) then
        write(logunit,*) subname,'l2x fields filled: Sl_t Sl_snowh Sl_avsdr Sl_anidr Sl_avsdf ', &
-            'Sl_anidf Sl_tref Sl_qref Sl_ram1 Fall_taux Fall_tauy Fall_lat Fall_sen Fall_lwup ', &
+            'Sl_anidf Sl_tref Sl_qref Sl_ram1 Sl_fv Sl_u10 Fall_taux Fall_tauy Fall_lat Fall_sen Fall_lwup ', &
             'Fall_evap Fall_swnet Flrl_rofsur Flrl_rofsub Flrl_rofgwl Flrl_rofi coszen_str'
        write(logunit,*) subname,'l2x fields zero, as ELM sends them in SP without irrigation: ', &
             'Flrl_wslake Flrl_demand Flrl_rofdto Fall_fco2_lnd Flrl_inundinf'
        write(logunit,*) subname,'l2x fields zero, NOT PRODUCED by kELM: Fall_flxdst1..4 and ', &
-            'Sl_u10withgusts (not supported); Sl_u10 Sl_fv Flrl_Tqsur Flrl_Tqsub (not yet)'
+            'Sl_u10withgusts (not supported); Flrl_Tqsur Flrl_Tqsub (not yet)'
        call shr_sys_flush(logunit)
     end if
 
@@ -185,6 +190,8 @@ contains
        l2x(index_l2x_Sl_tref,i)   =  lnd2atm(kc,L_TREF)
        l2x(index_l2x_Sl_qref,i)   =  lnd2atm(kc,L_QREF)
        l2x(index_l2x_Sl_ram1,i)   =  lnd2atm(kc,L_RAM1)
+       l2x(index_l2x_Sl_fv,i)     =  lnd2atm(kc,L_FV)
+       l2x(index_l2x_Sl_u10,i)    =  lnd2atm(kc,L_U10)
        l2x(index_l2x_Fall_taux,i) = -lnd2atm(kc,L_TAUX)
        l2x(index_l2x_Fall_tauy,i) = -lnd2atm(kc,L_TAUY)
        l2x(index_l2x_Fall_lat,i)  = -lnd2atm(kc,L_LH)
@@ -204,6 +211,46 @@ contains
          call shr_sys_abort('(kelm_lnd_export) ERROR: spval in the export')
 
   end subroutine kelm_lnd_export
+
+  !-----------------------------------------------------------------------
+  logical function kelm_lnd2atm_ready()
+    kelm_lnd2atm_ready = export_ready
+  end function kelm_lnd2atm_ready
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_lnd2atm_cell_table(elm, tab)
+    !
+    ! The table the coupler would get from the current state, by local cell:
+    ! what the restart carries (kelmRestMod), so a continue run's export at
+    ! init is the one the writing run would have sent next.
+    !
+    implicit none
+    type(kELMType), intent(in)  :: elm
+    real(r8)      , intent(out) :: tab(:,:)   ! (ncells, NFIELD)
+    integer :: kc
+
+    call kelm_kokkos_pull_lnd2atm(elm)
+    do kc = 1, size(cell_of_kcol)
+       tab(cell_of_kcol(kc), :) = lnd2atm(kc, :)
+    end do
+
+  end subroutine kelm_lnd2atm_cell_table
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_lnd2atm_load_cell_table(tab)
+    !
+    ! Take the table from a restart (by local cell) in place of computing it.
+    !
+    implicit none
+    real(r8), intent(in) :: tab(:,:)   ! (ncells, NFIELD)
+    integer :: kc
+
+    if (.not. export_ready) call shr_sys_abort('(kelm_lnd2atm_load_cell_table) ERROR: not initialized')
+    do kc = 1, size(cell_of_kcol)
+       lnd2atm(kc, :) = tab(cell_of_kcol(kc), :)
+    end do
+
+  end subroutine kelm_lnd2atm_load_cell_table
 
   !-----------------------------------------------------------------------
   subroutine refuse(l2x, fldname)

@@ -55,6 +55,8 @@ module kelmRestMod
   use kelmLakeMod        , only : n_lake, cell_of_klake
   use kelmKokkosStateMod , only : n_kokkos_col, n_kokkos_patch, n_kokkos_urb, &
                                    col_of_kcol, patch_of_kpatch, lun_of_kurb
+  use kelmLndExportMod  , only : kelm_lnd2atm_ready, kelm_lnd2atm_cell_table, &
+                                   NL2A => NFIELD
   use kelm_mod    , only : kELMType, KELM_SUCCESS, &
                             kELMRestartFieldCount, kELMRestartFieldInfo, &
                             kELMRestartFieldGet, kELMRestartFieldSet, &
@@ -68,6 +70,7 @@ module kelmRestMod
   public :: kelm_rest_write
   public :: kelm_rest_read
   public :: kelm_rest_peek_nstep
+  public :: kelm_rest_read_lnd2atm
   public :: kelm_rest_rpointer_read
 
   integer, parameter :: NAMELEN = 128
@@ -123,7 +126,10 @@ contains
     integer         , intent(in) :: logunit
 
     type(file_desc_t) :: file
-    type(var_desc_t)  :: vid_scalar(5)
+    type(var_desc_t)  :: vid_scalar(5), vid_l2a
+    logical :: with_l2a
+    real(r8), allocatable :: tab(:,:)
+    integer :: e, k
     type(var_desc_t), allocatable :: vid(:)
     type(field_t), allocatable :: f(:)
     integer :: nfld, i, ierr, d1, d2, nwritten
@@ -174,6 +180,17 @@ contains
        if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: def_var '//trim(f(i)%name))
     end do
 
+    ! The coupler export of the state being written (kELM-only): a continue
+    ! run sends it at init, as ELM sends the export of its restart state.
+    ! Not a registry field, and read only for the init export, so restarts
+    ! written before it existed still read.
+    with_l2a = kelm_lnd2atm_ready() .and. kdim_id(KIND_CELL) >= 0
+    if (with_l2a) then
+       ierr = PIO_def_var(file, 'rst:lnd2atm', PIO_double, &
+                          (/dimid_for(NL2A), kdim_id(KIND_CELL)/), vid_l2a)
+       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: def_var rst:lnd2atm')
+    end if
+
     ierr = PIO_def_var(file, 'rst:nstep'           , PIO_int, vid_scalar(1))
     ierr = PIO_def_var(file, 'rst:hist_nacs'       , PIO_int, vid_scalar(2))
     ierr = PIO_def_var(file, 'rst:hist_start_year' , PIO_int, vid_scalar(3))
@@ -200,6 +217,20 @@ contains
        deallocate(buf)
        nwritten = nwritten + 1
     end do
+
+    if (with_l2a) then
+       allocate(tab(ncell, NL2A), buf(max(ncell*NL2A, 1)))
+       call kelm_lnd2atm_cell_table(elm, tab)
+       buf = 0.0_c_double
+       do e = 1, ncell
+          do k = 1, NL2A
+             buf((e-1)*NL2A + k) = tab(e, k)
+          end do
+       end do
+       call PIO_write_darray(file, vid_l2a, dec_iodesc(decomp_for(KIND_CELL, NL2A)), buf, ierr)
+       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: write rst:lnd2atm')
+       deallocate(tab, buf)
+    end if
 
     call kelm_hist_get_restart_state(nacs_f, hy, hm, hd)
     nacs_c = kELMHistoryGetNacs(elm, st)
@@ -343,6 +374,52 @@ contains
     end function read_int
 
   end subroutine kelm_rest_read
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_rest_read_lnd2atm(elm, fname, ncell, ncell_global, tab, found)
+    !
+    ! The coupler export table a restart carries (rst:lnd2atm), by local
+    ! cell, for a continue run's export at init: the state itself is read
+    ! later, at the top of the first kelm_run. found is false for a restart
+    ! written before the table existed. Collective.
+    !
+    type(kELMType) , intent(in)  :: elm
+    character(len=*), intent(in)  :: fname
+    integer         , intent(in)  :: ncell, ncell_global
+    real(r8)        , intent(out) :: tab(:,:)   ! (ncell, NL2A)
+    logical         , intent(out) :: found
+
+    type(file_desc_t) :: file
+    type(var_desc_t)  :: vdesc
+    type(field_t), allocatable :: f(:)
+    integer :: nfld, ierr, e, k
+    real(c_double), allocatable :: buf(:)
+    character(len=*), parameter :: subname = '(kelm_rest_read_lnd2atm) '
+
+    tab = 0.0_r8
+    call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
+    ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot open '//trim(fname))
+    call PIO_seterrorhandling(file, PIO_BCAST_ERROR)
+    ierr = PIO_inq_varid(file, 'rst:lnd2atm', vdesc)
+    call PIO_seterrorhandling(file, PIO_INTERNAL_ERROR)
+    found = (ierr == PIO_NOERR)
+    if (found) then
+       if (.not. kmap(KIND_CELL)%built) call build_kindmap(KIND_CELL, ncell, ncell, ncell_global)
+       allocate(buf(max(ncell*NL2A, 1)))
+       call PIO_read_darray(file, vdesc, dec_iodesc(decomp_for(KIND_CELL, NL2A)), buf, ierr)
+       if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: read rst:lnd2atm')
+       do e = 1, ncell
+          do k = 1, NL2A
+             tab(e, k) = buf((e-1)*NL2A + k)
+          end do
+       end do
+       deallocate(buf)
+    end if
+    call PIO_closefile(file)
+    call layout_end()
+
+  end subroutine kelm_rest_read_lnd2atm
 
   !-----------------------------------------------------------------------
   subroutine layout_begin(elm, f, nfld, ncell, ncell_global, skip_hist, subname)

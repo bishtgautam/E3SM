@@ -271,6 +271,7 @@ module kelmMod
   public :: kelm_final
   public :: kelm_restart_set_start
   public :: kelm_restart_write
+  public :: kelm_restart_load_export
 
 contains
 
@@ -1435,5 +1436,41 @@ contains
     call kelm_rest_write(kelm_state, kelm_caseid, inst_suffix, yr, mon, day, tod, &
                           nstep, num_cells_owned, num_cells_global, logunit)
   end subroutine kelm_restart_write
+
+  !-----------------------------------------------------------------------
+  logical function kelm_restart_load_export(logunit)
+    !
+    ! On a continue or branch run, give the export the table the restart
+    ! carries, so the coupler's first l2x is the writing run's next one (ELM
+    ! exports its restart state at init). False on a startup, and for a
+    ! restart written before the table existed: the init export then comes
+    ! from the cold start, and lnd.log says so. Collective.
+    !
+    use kelmRestMod     , only : kelm_rest_read_lnd2atm
+    use kelmLndExportMod, only : kelm_lnd2atm_load_cell_table, NL2A => NFIELD
+    integer, intent(in) :: logunit
+    real(r8), allocatable :: tab(:,:)
+    logical :: found
+
+    kelm_restart_load_export = .false.
+    if (.not. rest_read_pending) return
+    allocate(tab(num_cells_owned, NL2A))
+    call kelm_rest_read_lnd2atm(kelm_state, rest_read_file, num_cells_owned, &
+                                num_cells_global, tab, found)
+    if (found) then
+       call kelm_lnd2atm_load_cell_table(tab)
+       kelm_restart_load_export = .true.
+       if (masterproc) then
+          write(logunit,*) '(kelm_restart_load_export) export at init taken from ', &
+               trim(rest_read_file)
+          call shr_sys_flush(logunit)
+       end if
+    else if (masterproc) then
+       write(logunit,*) '(kelm_restart_load_export) WARNING: ',trim(rest_read_file), &
+            ' carries no rst:lnd2atm; the export at init is the cold start''s'
+       call shr_sys_flush(logunit)
+    end if
+    deallocate(tab)
+  end function kelm_restart_load_export
 
 end module kelmMod
