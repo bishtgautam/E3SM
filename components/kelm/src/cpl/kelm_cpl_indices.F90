@@ -85,6 +85,22 @@ module kelm_cpl_indices
   integer, public :: index_l2x_Fall_lwup   = 0  ! upward longwave (W/m2)
   integer, public :: index_l2x_Fall_evap   = 0  ! evaporation (kg/m2/s)
   integer, public :: index_l2x_Fall_swnet  = 0  ! net shortwave absorbed (W/m2)
+  integer, public :: index_l2x_Sl_u10withgusts = 0 ! 10m wind with gustiness (m/s); not produced
+  integer, public :: index_l2x_Fall_flxdst1 = 0  ! dust flux, 4 bins (kg/m2/s); not produced
+  integer, public :: index_l2x_Fall_flxdst2 = 0
+  integer, public :: index_l2x_Fall_flxdst3 = 0
+  integer, public :: index_l2x_Fall_flxdst4 = 0
+  integer, public :: index_l2x_Flrl_wslake  = 0  ! lake water storage change (kg/m2/s)
+  ! ---- lnd -> rof ----
+  integer, public :: index_l2x_Flrl_rofsur  = 0  ! surface runoff (kg/m2/s)
+  integer, public :: index_l2x_Flrl_rofgwl  = 0  ! glacier, wetland and lake runoff (kg/m2/s)
+  integer, public :: index_l2x_Flrl_rofsub  = 0  ! subsurface runoff (kg/m2/s)
+  integer, public :: index_l2x_Flrl_rofdto  = 0  ! direct-to-ocean runoff (kg/m2/s)
+  integer, public :: index_l2x_Flrl_rofi    = 0  ! ice runoff (kg/m2/s)
+  integer, public :: index_l2x_Flrl_demand  = 0  ! irrigation demand (kg/m2/s)
+  integer, public :: index_l2x_Flrl_Tqsur   = 0  ! surface runoff temperature (K)
+  integer, public :: index_l2x_Flrl_Tqsub   = 0  ! subsurface runoff temperature (K)
+  integer, public :: index_l2x_coszen_str   = 0  ! cosine of the solar zenith angle
 
   logical, public :: cpl_indices_set = .false.
 
@@ -155,6 +171,23 @@ contains
     call setx(l2x, 'Fall_lwup'  , index_l2x_Fall_lwup)
     call setx(l2x, 'Fall_evap'  , index_l2x_Fall_evap)
     call setx(l2x, 'Fall_swnet' , index_l2x_Fall_swnet)
+    call setx(l2x, 'Sl_u10withgusts', index_l2x_Sl_u10withgusts)
+    call setx(l2x, 'Fall_flxdst1', index_l2x_Fall_flxdst1)
+    call setx(l2x, 'Fall_flxdst2', index_l2x_Fall_flxdst2)
+    call setx(l2x, 'Fall_flxdst3', index_l2x_Fall_flxdst3)
+    call setx(l2x, 'Fall_flxdst4', index_l2x_Fall_flxdst4)
+    call setx(l2x, 'Flrl_wslake', index_l2x_Flrl_wslake)
+
+    ! ---- lnd -> rof ----
+    call setx(l2x, 'Flrl_rofsur', index_l2x_Flrl_rofsur)
+    call setx(l2x, 'Flrl_rofgwl', index_l2x_Flrl_rofgwl)
+    call setx(l2x, 'Flrl_rofsub', index_l2x_Flrl_rofsub)
+    call setx(l2x, 'Flrl_rofdto', index_l2x_Flrl_rofdto)
+    call setx(l2x, 'Flrl_rofi'  , index_l2x_Flrl_rofi)
+    call setx(l2x, 'Flrl_demand', index_l2x_Flrl_demand)
+    call setx(l2x, 'Flrl_Tqsur' , index_l2x_Flrl_Tqsur)
+    call setx(l2x, 'Flrl_Tqsub' , index_l2x_Flrl_Tqsub)
+    call setx(l2x, 'coszen_str' , index_l2x_coszen_str)
 
     cpl_indices_set = .true.
 

@@ -6,8 +6,9 @@ module lnd_comp_mct
   !
   ! Structured after components/rdycore/src/cpl/rof_comp_mct.F90. kELM presents
   ! itself to the coupler as a present, prognostic land model: it registers a
-  ! real decomposition and a real domain, but its time stepping is a no-op and
-  ! it exports zeros until the Kokkos port is wired in.
+  ! real decomposition and a real domain, steps the Kokkos physics, and
+  ! exports ELM's l2x fields (kelm_lnd_export) at init and after each
+  ! coupling interval.
   !-----------------------------------------------------------------------
 
   use esmf
@@ -37,6 +38,8 @@ module lnd_comp_mct
   use kelm_cpl_indices, only : kelm_cpl_indices_set
   use kelmForcingMod  , only : kelm_import
   use kelmTimerMod    , only : kelm_timers_on, kelm_t_start, kelm_t_stop
+  use kelmMod         , only : kelm_state
+  use kelmLndExportMod, only : kelm_lnd_export_init, kelm_kokkos_pull_lnd2atm, kelm_lnd_export
 
   !
   ! !PUBLIC TYPES:
@@ -270,6 +273,12 @@ CONTAINS
       end if
     end block
 
+    ! The export at init, as ELM's lnd_init_mct sends one: the atmosphere's
+    ! first radiation step reads these albedos and Sl_t.
+    call kelm_lnd_export_init(kelm_state, num_cells_owned, l2x_l, logunit_lnd)
+    call kelm_kokkos_pull_lnd2atm(kelm_state)
+    call kelm_lnd_export(l2x_l%rattr)
+
     ! End-of-initialization lines, as ELM writes them (elm_initializeMod.F90
     ! and elm lnd_comp_mct.F90). kELM steps at the coupling interval, so its
     ! own step size is dtime_sync and the two always align.
@@ -309,8 +318,8 @@ CONTAINS
   !
   ! !DESCRIPTION:
   !     Advance kELM by one coupling interval. Atmospheric forcing is imported
-  !     from x2l_l; l2x_l is still left as initialized (zero) because no physics
-  !     runs yet to produce anything to send back.
+  !     from x2l_l; l2x_l is filled once, after the last model step of the
+  !     interval (ELM's lnd_export follows its substep loop too).
   !===============================================================================
 
   subroutine lnd_run_mct( EClock, cdata, x2l_l, l2x_l )
@@ -455,6 +464,11 @@ CONTAINS
        kelm_nstep = kelm_nstep + 1
        kelm_clock_time = kelm_clock_time + kelm_step
     end do
+
+    call kelm_t_start('lc_lnd_export')
+    call kelm_kokkos_pull_lnd2atm(kelm_state)
+    call kelm_lnd_export(l2x_l%rattr)
+    call kelm_t_stop('lc_lnd_export')
 
   end subroutine lnd_run_mct
 
