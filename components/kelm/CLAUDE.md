@@ -77,6 +77,7 @@ Check `run/lnd.log.*` for the kELM banner and per-rank cell counts, and
 | File | Role |
 |---|---|
 | `src/cpl/lnd_comp_mct.F90` | MCT layer: `lnd_{init,run,final}_mct`, gsMap, domain |
+| `src/cpl/kelmLndExportMod.F90` | l2x export: ELM's `lnd_export` signs/units over the library's `lnd2atm` cell means (`Lnd2Atm.cpp`) |
 | `src/main/kelmMod.F90`    | Decomposition + namelist + `kelm_{init,run,final}` |
 | `src/main/kelmIO.F90`     | PIO read of the land domain file |
 | `src/main/kelmSpmdMod.F90`| `mpicom_lnd`, `iam`, `npes`, `masterproc`, `LNDID` |
@@ -482,6 +483,17 @@ case" run turned out to be the wrong binary.
 **`case.build` needs `export SDKROOT=$(xcrun --show-sdk-path)` on this laptop.**
 Without it the PIO configure fails with `ld: library 'System' not found` —
 before any kELM code is compiled, so it looks unrelated to your change.
+
+**`case.build` must compile with Apple clang, not Homebrew's.** `mpic++` calls
+whichever `clang++` is first on `PATH`. With `/opt/homebrew/opt/llvm/bin` first,
+Kokkos's `Kokkos::LIBDL` target puts `-isystem <SDK>/usr/include` on kELM's C++
+line and clang 22 fails in `<cstdio>` ("didn't find libc++'s <stdio.h>"). Drop
+Homebrew's llvm from `PATH` for the build; `which clang++` must be `/usr/bin`.
+
+**The coupler's `cpl.hl2x` files are float32** (`seq_io_mod` writes `PIO_REAL`),
+so `l2x` can be checked against kELM's own h0 only to float32 rounding, and
+`ncdump` prints floats to 7 digits unless given `-p 9,17`. On nhcell's full f19
+grid they are ~90 MB a day: a 2-month run fills ~5 GB.
 
 **A new source file needs `./case.build --clean-all`**; `--clean lnd` is not
 enough and fails on a missing `.mod`. So does any `env_build` change.

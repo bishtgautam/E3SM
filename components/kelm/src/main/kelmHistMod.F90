@@ -46,6 +46,7 @@ module kelmHistMod
   public :: kelm_hist_get_restart_state
   public :: kelm_hist_set_restart_state
   public :: kelm_hist_set_base_date
+  public :: kelm_hist_check_natveg_weight
 
   !--------------------------------------------------------------------------
   ! Module state. One instance only -- kELM runs one land model per
