@@ -54,7 +54,9 @@ module kelmKokkosStateMod
                                     patch_height_top, &
                                col_soil_color
   use kelmSurfdataMod, only : topo_std, topo_slope, monthly_lai, monthly_sai, &
-                               monthly_height_top, monthly_height_bot
+                               monthly_height_top, monthly_height_bot, &
+                               top_stdev_elev, top_sky_view, top_terrain_config, &
+                               top_sinsl_cosas, top_sinsl_sinas
   use kelm_kokkos_interface, only : kELMKokkosIsLayoutRight
   use kelmRootMod    , only : rt_btran => btran, rt_rootr => rootr, &
                                rt_rootfr => rootfr, root_built
@@ -74,6 +76,7 @@ module kelmKokkosStateMod
                                forc_swvdr, forc_swndr, forc_swvdf, forc_swndf, &
                                forc_aer, nforcaer
   use kelm_mod       , only : kELMType, KELM_SUCCESS, &
+                               kELMSetUseTopSolarRad, &
                                kELMSetPatchColumn, &
                                kELMSetElai, kELMSetEsai, kELMSetHtop, &
                                kELMSetRootrPatch, kELMSetRootfr, &
@@ -176,6 +179,7 @@ module kelmKokkosStateMod
   public :: kelm_kokkos_seed_topology
   public :: kelm_kokkos_seed_state
   public :: kelm_kokkos_seed_canopy_hydrology
+  public :: kelm_kokkos_push_top_solar_rad
   public :: kelm_kokkos_seed_soil_properties
   public :: kelm_kokkos_seed_albedo
   public :: kelm_kokkos_seed_pftpar
@@ -892,6 +896,41 @@ contains
     call shr_sys_flush(logunit)
 
   end subroutine kelm_kokkos_seed_canopy_hydrology
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_kokkos_push_top_solar_rad(elm, logunit)
+    !
+    ! TOP sub-grid topographic solar radiation (ELM: use_top_solar_rad):
+    ! push the five per-cell terrain parameters kelm_read_surfdata read
+    ! (ELM: surfrd_get_topo_for_solar_rad -> grc_pp) and switch TOP on in
+    ! SurfaceAlbedo. Called only when use_top_solar_rad is set. Static, so
+    ! once at init; a restart carries them too (cell:stdev_elev, ...).
+    !
+    implicit none
+    type(kELMType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr
+    character(len=*), parameter :: subname = '(kelm_kokkos_push_top_solar_rad) '
+
+    call require_built(subname)
+    if (.not. associated(top_stdev_elev)) then
+       call shr_sys_abort(subname//'ERROR: TOP fields were not read from fsurdat')
+    end if
+    call cell_set_1d(elm, 'cell:stdev_elev'    , top_stdev_elev)
+    call cell_set_1d(elm, 'cell:sky_view'      , top_sky_view)
+    call cell_set_1d(elm, 'cell:terrain_config', top_terrain_config)
+    call cell_set_1d(elm, 'cell:sinsl_cosas'   , top_sinsl_cosas)
+    call cell_set_1d(elm, 'cell:sinsl_sinas'   , top_sinsl_sinas)
+    call kELMSetUseTopSolarRad(elm, .true., ierr)
+    call check(ierr, subname, 'UseTopSolarRad')
+
+    if (masterproc) then
+       write(logunit,*) subname,'TOP on: stdev_elev ', minval(top_stdev_elev),' .. ', &
+            maxval(top_stdev_elev),' m; sky_view ',minval(top_sky_view),' .. ',maxval(top_sky_view)
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine kelm_kokkos_push_top_solar_rad
 
   !-----------------------------------------------------------------------
   subroutine kelm_kokkos_push_root_statics(elm, logunit)

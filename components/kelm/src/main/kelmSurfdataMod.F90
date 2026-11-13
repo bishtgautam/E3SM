@@ -107,6 +107,17 @@ module kelmSurfdataMod
   real(r8), public, pointer :: topo_slope(:)    => null()  ! (ncells) SLOPE, degrees
 
   !--------------------------------------------------------------------------
+  ! TOP sub-grid topographic solar radiation (ELM: use_top_solar_rad), per
+  ! owned cell. Read only when the caller asks (read_top); ELM:
+  ! surfrdMod :: surfrd_get_topo_for_solar_rad.
+  !--------------------------------------------------------------------------
+  real(r8), public, pointer :: top_stdev_elev(:)     => null()  ! STDEV_ELEV (or STD_ELEV), m
+  real(r8), public, pointer :: top_sky_view(:)       => null()  ! SKY_VIEW, -
+  real(r8), public, pointer :: top_terrain_config(:) => null()  ! TERRAIN_CONFIG, -
+  real(r8), public, pointer :: top_sinsl_cosas(:)    => null()  ! SINSL_COSAS, -
+  real(r8), public, pointer :: top_sinsl_sinas(:)    => null()  ! SINSL_SINAS, -
+
+  !--------------------------------------------------------------------------
   ! Soil properties, per owned cell
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: pct_sand(:,:)    => null()  ! (ncells, nlevsoi)
@@ -182,7 +193,7 @@ module kelmSurfdataMod
 contains
 
   !-----------------------------------------------------------------------
-  subroutine kelm_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed)
+  subroutine kelm_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed, read_top)
     !
     ! !DESCRIPTION:
     ! Read the surface dataset and keep the rows for the cells this rank owns.
@@ -194,6 +205,7 @@ contains
     integer         , intent(in) :: gsize        ! ni*nj, for cross-checking
     integer         , intent(in) :: cell_ids(:)  ! 1-based global grid IDs owned here
     logical         , intent(in) :: read_decomposed ! false if cell_ids repeat
+    logical, optional, intent(in) :: read_top     ! also read the TOP fields
     !
     type(file_desc_t) :: ncid
     integer           :: dimid, status
@@ -279,6 +291,28 @@ contains
     ! ---- topography ----
     call read_gc_real1d(ncid, fname, 'STD_ELEV'   , ngrid, cell_ids, topo_std)
     call read_gc_real1d(ncid, fname, 'SLOPE'      , ngrid, cell_ids, topo_slope)
+
+    ! ---- TOP solar radiation (ELM: surfrd_get_topo_for_solar_rad) ----
+    ! STDEV_ELEV, falling back to STD_ELEV as ELM does; the other four are
+    ! required (read_gc_real1d aborts naming a missing one).
+    if (present(read_top)) then
+       if (read_top) then
+          allocate(top_stdev_elev(ncells), top_sky_view(ncells), &
+                   top_terrain_config(ncells), top_sinsl_cosas(ncells), &
+                   top_sinsl_sinas(ncells))
+          if (has_var(ncid, 'STDEV_ELEV')) then
+             call read_gc_real1d(ncid, fname, 'STDEV_ELEV', ngrid, cell_ids, top_stdev_elev)
+          else
+             if (masterproc) write(iulog,*) trim(subname), &
+                  ': WARNING: STDEV_ELEV not on fsurdat; using STD_ELEV for TOP'
+             call read_gc_real1d(ncid, fname, 'STD_ELEV', ngrid, cell_ids, top_stdev_elev)
+          end if
+          call read_gc_real1d(ncid, fname, 'SKY_VIEW'      , ngrid, cell_ids, top_sky_view)
+          call read_gc_real1d(ncid, fname, 'TERRAIN_CONFIG', ngrid, cell_ids, top_terrain_config)
+          call read_gc_real1d(ncid, fname, 'SINSL_COSAS'   , ngrid, cell_ids, top_sinsl_cosas)
+          call read_gc_real1d(ncid, fname, 'SINSL_SINAS'   , ngrid, cell_ids, top_sinsl_sinas)
+       end if
+    end if
 
     ! ---- soil properties ----
     call read_gc_real2d(ncid, fname, 'PCT_SAND', ngrid, nlevsoi, cell_ids, pct_sand)
@@ -838,6 +872,8 @@ contains
     if (associated(pct_nat_pft)) deallocate(pct_nat_pft)
     if (associated(topo_std))    deallocate(topo_std)
     if (associated(topo_slope))  deallocate(topo_slope)
+    if (associated(top_stdev_elev)) deallocate(top_stdev_elev, top_sky_view, &
+         top_terrain_config, top_sinsl_cosas, top_sinsl_sinas)
     if (associated(pct_sand))    deallocate(pct_sand)
     if (associated(pct_clay))    deallocate(pct_clay)
     if (associated(organic))     deallocate(organic)
