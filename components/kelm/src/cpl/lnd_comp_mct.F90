@@ -39,6 +39,8 @@ module lnd_comp_mct
   use kelmTimerMod    , only : kelm_timers_on, kelm_t_start, kelm_t_stop
   use kelmMod         , only : kelm_state, kelm_restart_load_export
   use kelmLndExportMod, only : kelm_lnd_export_init, kelm_kokkos_pull_lnd2atm, kelm_lnd_export
+  use kelm_mod        , only : kELMSeedEflxLwradOutColdStart
+  use shr_const_mod   , only : SHR_CONST_STEBOL
 
   !
   ! !PUBLIC TYPES:
@@ -110,6 +112,7 @@ CONTAINS
     type(mct_gsMap)        , pointer :: gsMap_lnd
     type(mct_gGrid)        , pointer :: dom_l
     integer :: shrlogunit                     ! original log unit
+    integer :: ierr_seed                      ! kELMSeedEflxLwradOutColdStart status
     integer :: shrloglev                      ! original log level
     integer :: mpicom_loc                     ! local mpi communicator
     integer :: month, day, year
@@ -259,7 +262,14 @@ CONTAINS
     ! first radiation step reads these albedos and Sl_t.
     ! A continue/branch run sends the export its restart carries.
     call kelm_lnd_export_init(kelm_state, num_cells_owned, l2x_l, logunit_lnd)
-    if (.not. kelm_restart_load_export(logunit_lnd)) call kelm_kokkos_pull_lnd2atm(kelm_state)
+    if (.not. kelm_restart_load_export(logunit_lnd)) then
+       ! Cold start: ELM's veg_ef_init sets every patch's outgoing longwave to
+       ! sb * t_grnd**4 before the first lnd2atm reads it (the export's Sl_t
+       ! and Fall_lwup, and under fineTOP the first step's terrain longwave).
+       call kELMSeedEflxLwradOutColdStart(kelm_state, SHR_CONST_STEBOL, ierr_seed)
+       if (ierr_seed /= 0) call shr_sys_abort('lnd_init_mct: kELMSeedEflxLwradOutColdStart failed')
+       call kelm_kokkos_pull_lnd2atm(kelm_state)
+    end if
     call kelm_lnd_export(l2x_l%rattr)
 
     ! End-of-initialization lines, as ELM writes them (elm_initializeMod.F90

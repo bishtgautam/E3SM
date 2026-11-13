@@ -118,6 +118,18 @@ module kelmSurfdataMod
   real(r8), public, pointer :: top_sinsl_sinas(:)    => null()  ! SINSL_SINAS, -
 
   !--------------------------------------------------------------------------
+  ! fineTOP grid-scale topographic radiation (ELM: use_finetop_rad), per
+  ! owned cell. Read only when the caller asks (read_finetop); ELM:
+  ! surfrdMod :: surfrd_finetop_data.
+  !--------------------------------------------------------------------------
+  integer , public, parameter :: ndir_horizon_angle = 8   ! ELM: elm_varpar
+  real(r8), public, pointer :: ft_slope_deg(:)            => null()  ! SLOPE_DEG, degrees
+  real(r8), public, pointer :: ft_aspect_deg(:)           => null()  ! ASPECT_DEG, degrees
+  real(r8), public, pointer :: ft_sky_view_factor(:)      => null()  ! SKY_VIEW_FACTOR, -
+  real(r8), public, pointer :: ft_terrain_config_factor(:)=> null()  ! TERRAIN_CONFIG_FACTOR, -
+  real(r8), public, pointer :: ft_horizon_angle_deg(:,:)  => null()  ! HORIZON_ANGLE_DEG (ncells, ndir), degrees
+
+  !--------------------------------------------------------------------------
   ! Soil properties, per owned cell
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: pct_sand(:,:)    => null()  ! (ncells, nlevsoi)
@@ -193,7 +205,8 @@ module kelmSurfdataMod
 contains
 
   !-----------------------------------------------------------------------
-  subroutine kelm_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed, read_top)
+  subroutine kelm_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed, read_top, &
+                                read_finetop)
     !
     ! !DESCRIPTION:
     ! Read the surface dataset and keep the rows for the cells this rank owns.
@@ -206,6 +219,7 @@ contains
     integer         , intent(in) :: cell_ids(:)  ! 1-based global grid IDs owned here
     logical         , intent(in) :: read_decomposed ! false if cell_ids repeat
     logical, optional, intent(in) :: read_top     ! also read the TOP fields
+    logical, optional, intent(in) :: read_finetop ! also read the fineTOP fields
     !
     type(file_desc_t) :: ncid
     integer           :: dimid, status
@@ -311,6 +325,24 @@ contains
           call read_gc_real1d(ncid, fname, 'TERRAIN_CONFIG', ngrid, cell_ids, top_terrain_config)
           call read_gc_real1d(ncid, fname, 'SINSL_COSAS'   , ngrid, cell_ids, top_sinsl_cosas)
           call read_gc_real1d(ncid, fname, 'SINSL_SINAS'   , ngrid, cell_ids, top_sinsl_sinas)
+       end if
+    end if
+
+    ! ---- fineTOP radiation (ELM: surfrd_finetop_data) ----
+    if (present(read_finetop)) then
+       if (read_finetop) then
+          if (get_dimlen(ncid, fname, 'ndir_horizon_angle') /= ndir_horizon_angle) then
+             call shr_sys_abort(subname//' ERROR: ndir_horizon_angle on '//trim(fname)// &
+                  ' does not match ELM''s 8')
+          end if
+          allocate(ft_slope_deg(ncells), ft_aspect_deg(ncells), ft_sky_view_factor(ncells), &
+                   ft_terrain_config_factor(ncells), ft_horizon_angle_deg(ncells, ndir_horizon_angle))
+          call read_gc_real1d(ncid, fname, 'SLOPE_DEG'            , ngrid, cell_ids, ft_slope_deg)
+          call read_gc_real1d(ncid, fname, 'ASPECT_DEG'           , ngrid, cell_ids, ft_aspect_deg)
+          call read_gc_real1d(ncid, fname, 'SKY_VIEW_FACTOR'      , ngrid, cell_ids, ft_sky_view_factor)
+          call read_gc_real1d(ncid, fname, 'TERRAIN_CONFIG_FACTOR', ngrid, cell_ids, ft_terrain_config_factor)
+          call read_gc_real2d(ncid, fname, 'HORIZON_ANGLE_DEG', ngrid, ndir_horizon_angle, &
+                              cell_ids, ft_horizon_angle_deg)
        end if
     end if
 
@@ -874,6 +906,8 @@ contains
     if (associated(topo_slope))  deallocate(topo_slope)
     if (associated(top_stdev_elev)) deallocate(top_stdev_elev, top_sky_view, &
          top_terrain_config, top_sinsl_cosas, top_sinsl_sinas)
+    if (associated(ft_slope_deg)) deallocate(ft_slope_deg, ft_aspect_deg, ft_sky_view_factor, &
+         ft_terrain_config_factor, ft_horizon_angle_deg)
     if (associated(pct_sand))    deallocate(pct_sand)
     if (associated(pct_clay))    deallocate(pct_clay)
     if (associated(organic))     deallocate(organic)

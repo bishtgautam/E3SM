@@ -202,6 +202,14 @@ contains
     ierr = PIO_enddef(file)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: enddef '//trim(fname))
 
+    ! The export table first: computing it is lnd2atm, which also refreshes
+    ! state the registry writes below (fineTOP keeps last step's gridcell
+    ! albedo and longwave on the cell, cell:l2a_*). Written after the fields.
+    if (with_l2a) then
+       allocate(tab(ncell, NL2A))
+       call kelm_lnd2atm_cell_table(elm, tab)
+    end if
+
     nwritten = 0
     do i = 1, nfld
        if (.not. f(i)%active) cycle
@@ -219,8 +227,7 @@ contains
     end do
 
     if (with_l2a) then
-       allocate(tab(ncell, NL2A), buf(max(ncell*NL2A, 1)))
-       call kelm_lnd2atm_cell_table(elm, tab)
+       allocate(buf(max(ncell*NL2A, 1)))
        buf = 0.0_c_double
        do e = 1, ncell
           do k = 1, NL2A
