@@ -1160,7 +1160,8 @@ CONTAINS
           call shr_mpi_bcast(fldList,mpicom)
 
           call mct_avect_clean(avFile)
-          call mct_aVect_init(avFile,rlist=fldList,lsize=nx*ny*nz)
+          ! Each rank reads and keeps only its own points for every time slice.
+          call mct_aVect_init(avFile,rlist=fldList,lsize=lsize*nz)
 
           call mct_gsmap_orderedPoints(gsMap,my_task,gsmOP)
 
@@ -1200,7 +1201,9 @@ CONTAINS
              call shr_mpi_bcast(sfldName,mpicom,'sfldName')
              rcode = pio_inq_varid(pioid,trim(sfldName),varid)
              rcode = pio_inq_vartype(pioid, varid, vtype)
-             call pio_setframe(pioid,varid,frame)
+             ! No pio_setframe: the decomposition spans the time dimension,
+             ! so every frame is read at once. Setting a frame makes SCORPIO
+             ! read a single record and reject the 3-D decomposition.
              if(vtype == PIO_DOUBLE) then
                 call pio_read_darray(pioid, varid, pio_iodesc_r8_local, avFile%rattr(k,:), rcode)
              else if(vtype == PIO_REAL) then
