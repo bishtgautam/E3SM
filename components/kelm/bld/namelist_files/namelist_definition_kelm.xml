@@ -126,6 +126,20 @@ fences Kokkos, which serialises a GPU run, so leave this at 0 except when
 profiling.
 </entry>
 
+<entry id="use_top_solar_rad"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., account for the sub-grid topographic effect on surface solar
+radiation (TOP; Hao et al. 2021), as ELM's switch of the same name does: the
+natural and lake patch albedos and canopy transmission are adjusted from the
+cell's sky view factor, terrain configuration factor, elevation standard
+deviation and slope/aspect. fsurdat must carry STDEV_ELEV (or STD_ELEV),
+SKY_VIEW, TERRAIN_CONFIG, SINSL_COSAS and SINSL_SINAS. Urban is not adjusted,
+as in ELM. ELM's fineTOP (use_finetop_rad) is not ported.
+</entry>
+
 <entry id="kelm_check_boundary"
        type="logical"
        category="kelm"

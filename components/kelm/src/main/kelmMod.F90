@@ -87,6 +87,7 @@ module kelmMod
                                       kelm_kokkos_seed_topology, &
                                       kelm_kokkos_seed_state, &
                                       kelm_kokkos_seed_canopy_hydrology, &
+                                      kelm_kokkos_push_top_solar_rad, &
                                       kelm_kokkos_seed_albedo, &
                                       kelm_kokkos_seed_pftpar, &
                                       kelm_kokkos_seed_stomata_closed, &
@@ -212,6 +213,11 @@ module kelmMod
   ! SurfaceAlbedo report), written on step 1 and twice a model day. Off by
   ! default: they were for bringing kernels up against ELM one at a time.
   logical           , public :: kelm_kernel_reports  = .false.
+  ! TOP sub-grid topographic solar radiation, ELM's switch of the same name
+  ! (Hao et al. 2021): fsurdat must carry STDEV_ELEV (or STD_ELEV), SKY_VIEW,
+  ! TERRAIN_CONFIG, SINSL_COSAS and SINSL_SINAS. ELM's fineTOP
+  ! (use_finetop_rad) is not ported.
+  logical           , public :: use_top_solar_rad    = .false.
   ! PFT parameter file (ELM's clm_params). Required: the kernels, all of which
   ! always run, read their PFT parameters from it.
   character(len=256), public :: fparamfile = ' '
@@ -292,7 +298,7 @@ contains
                             kelm_stomata_closed, kelm_do_photosynthesis, &
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
-                            kelm_kernel_reports
+                            kelm_kernel_reports, use_top_solar_rad
 
     ! defaults
     do_kelm   = .true.
@@ -306,6 +312,7 @@ contains
     kelm_stage2_snapshot = .false.
     kelm_check_soft_fail = .false.
     kelm_kernel_reports  = .false.
+    use_top_solar_rad    = .false.
     fparamfile            = ' '
     kelm_do_albedo       = .true.
     kelm_stomata_closed  = .false.
@@ -362,6 +369,7 @@ contains
     call mpi_bcast (kelm_do_photosynthesis, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_co2_ppmv         , 1, MPI_REAL8  , 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_timer_level      , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
+    call mpi_bcast (use_top_solar_rad     , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
 
     if (masterproc) then
        write(logunit,*) ' '
@@ -375,6 +383,7 @@ contains
        write(logunit,*) '   kelm_kernel_reports  = ', kelm_kernel_reports
        write(logunit,*) '   kelm_do_albedo       = ', kelm_do_albedo
        write(logunit,*) '   kelm_do_photosynthesis = ', kelm_do_photosynthesis
+       write(logunit,*) '   use_top_solar_rad      = ', use_top_solar_rad
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
        write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
@@ -525,7 +534,8 @@ contains
     if (len_trim(fsurdat) > 0) then
        call kelm_t_start('kelm_read_surfdata')
        call kelm_read_surfdata(logunit, fsurdat, num_cells_grid, &
-                                natural_id_cells_owned, kelm_perf_ncells == 0)
+                                natural_id_cells_owned, kelm_perf_ncells == 0, &
+                                read_top=use_top_solar_rad)
        call kelm_t_stop('kelm_read_surfdata')
        call kelm_report_composition(logunit)
        call kelm_build_subgrid(logunit, num_cells_owned)
@@ -639,6 +649,7 @@ contains
        call kelm_kokkos_seed_topology(kelm_state, logunit)
        call kelm_kokkos_seed_state(kelm_state, logunit)
        call kelm_kokkos_seed_canopy_hydrology(kelm_state, logunit)
+       if (use_top_solar_rad) call kelm_kokkos_push_top_solar_rad(kelm_state, logunit)
        call kelm_kokkos_seed_albedo(kelm_state, logunit)
 
        ! Constant for the whole run, so seeded once here rather than per step.

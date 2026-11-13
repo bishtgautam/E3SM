@@ -307,6 +307,7 @@ if ($LND_GRID eq "null") {
     # diagnostic tables in lnd.log are off by default.
     add_default($nl, 'kelm_kernel_reports');
     add_default($nl, 'kelm_do_albedo');
+    add_default($nl, 'use_top_solar_rad');
 
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'kelm_stomata_closed');
