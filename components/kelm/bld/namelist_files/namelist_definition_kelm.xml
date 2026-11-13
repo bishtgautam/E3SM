@@ -140,6 +140,21 @@ SKY_VIEW, TERRAIN_CONFIG, SINSL_COSAS and SINSL_SINAS. Urban is not adjusted,
 as in ELM. ELM's fineTOP (use_finetop_rad) is not ported.
 </entry>
 
+<entry id="use_finetop_rad"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., account for fine (grid)-scale topographic effects on the surface
+radiation balance (fineTOP; Hao et al. 2022), as ELM's switch of the same
+name does: the incident shortwave and longwave are adjusted for each cell's
+slope, aspect, horizon, sky view and surrounding terrain; albedo uses the
+incidence angle on the slope; emitted longwave is per unit slope area; and
+the coupler gets the apparent albedo. fsurdat must carry SLOPE_DEG,
+ASPECT_DEG, SKY_VIEW_FACTOR, TERRAIN_CONFIG_FACTOR and HORIZON_ANGLE_DEG
+(ndir_horizon_angle = 8). Cannot be combined with use_top_solar_rad.
+</entry>
+
 <entry id="kelm_check_boundary"
        type="logical"
        category="kelm"

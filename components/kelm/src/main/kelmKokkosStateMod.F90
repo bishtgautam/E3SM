@@ -56,7 +56,9 @@ module kelmKokkosStateMod
   use kelmSurfdataMod, only : topo_std, topo_slope, monthly_lai, monthly_sai, &
                                monthly_height_top, monthly_height_bot, &
                                top_stdev_elev, top_sky_view, top_terrain_config, &
-                               top_sinsl_cosas, top_sinsl_sinas
+                               top_sinsl_cosas, top_sinsl_sinas, &
+                               ft_slope_deg, ft_aspect_deg, ft_sky_view_factor, &
+                               ft_terrain_config_factor, ft_horizon_angle_deg
   use kelm_kokkos_interface, only : kELMKokkosIsLayoutRight
   use kelmRootMod    , only : rt_btran => btran, rt_rootr => rootr, &
                                rt_rootfr => rootfr, root_built
@@ -77,6 +79,7 @@ module kelmKokkosStateMod
                                forc_aer, nforcaer
   use kelm_mod       , only : kELMType, KELM_SUCCESS, &
                                kELMSetUseTopSolarRad, &
+                               kELMSetUseFinetopRad, kELMTopographicEffectsOnRadiation, &
                                kELMSetPatchColumn, &
                                kELMSetElai, kELMSetEsai, kELMSetHtop, &
                                kELMSetRootrPatch, kELMSetRootfr, &
@@ -180,6 +183,8 @@ module kelmKokkosStateMod
   public :: kelm_kokkos_seed_state
   public :: kelm_kokkos_seed_canopy_hydrology
   public :: kelm_kokkos_push_top_solar_rad
+  public :: kelm_kokkos_push_finetop_rad
+  logical, private :: finetop_on = .false.   ! kelm_kokkos_push_finetop_rad was called
   public :: kelm_kokkos_seed_soil_properties
   public :: kelm_kokkos_seed_albedo
   public :: kelm_kokkos_seed_pftpar
@@ -933,6 +938,42 @@ contains
   end subroutine kelm_kokkos_push_top_solar_rad
 
   !-----------------------------------------------------------------------
+  subroutine kelm_kokkos_push_finetop_rad(elm, logunit)
+    !
+    ! fineTOP grid-scale topographic radiation (ELM: use_finetop_rad): push
+    ! the cell's terrain kelm_read_surfdata read (ELM: surfrd_finetop_data ->
+    ! grc_pp) and switch fineTOP on. From then on kelm_kokkos_push_forcing
+    ! adjusts each step's radiation forcing before any surface gathers it.
+    !
+    implicit none
+    type(kELMType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr
+    character(len=*), parameter :: subname = '(kelm_kokkos_push_finetop_rad) '
+
+    call require_built(subname)
+    if (.not. associated(ft_slope_deg)) then
+       call shr_sys_abort(subname//'ERROR: fineTOP fields were not read from fsurdat')
+    end if
+    call cell_set_1d(elm, 'cell:slope_deg'            , ft_slope_deg)
+    call cell_set_1d(elm, 'cell:aspect_deg'           , ft_aspect_deg)
+    call cell_set_1d(elm, 'cell:sky_view_factor'      , ft_sky_view_factor)
+    call cell_set_1d(elm, 'cell:terrain_config_factor', ft_terrain_config_factor)
+    call cell_set_2d(elm, 'cell:horizon_angle_deg'    , ft_horizon_angle_deg)
+    call kELMSetUseFinetopRad(elm, .true., ierr)
+    call check(ierr, subname, 'UseFinetopRad')
+    finetop_on = .true.
+
+    if (masterproc) then
+       write(logunit,*) subname,'fineTOP on: slope ', minval(ft_slope_deg),' .. ', &
+            maxval(ft_slope_deg),' deg; sky view ',minval(ft_sky_view_factor),' .. ', &
+            maxval(ft_sky_view_factor)
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine kelm_kokkos_push_finetop_rad
+
+  !-----------------------------------------------------------------------
   subroutine kelm_kokkos_push_root_statics(elm, logunit)
     !
     ! One-time push of what the C++ root water stress kernel needs and cannot
@@ -1365,6 +1406,13 @@ contains
 
     ! ---- static geometry, once ----
     call kelm_kokkos_push_latlon(elm, lat, lon, logunit)
+
+    ! fineTOP: adjust the cell's radiation for its terrain before any surface
+    ! gathers it (ELM: topographic_effects_on_radiation, in elm_drv_init).
+    if (finetop_on) then
+       call kELMTopographicEffectsOnRadiation(elm, nextsw_cday, declin, ierr)
+       call check(ierr, subname, 'TopographicEffectsOnRadiation')
+    end if
 
     ! ---- the natural surface's copies, then the device-side derivation ----
     call kELMGatherNaturalForcing(elm, ierr)

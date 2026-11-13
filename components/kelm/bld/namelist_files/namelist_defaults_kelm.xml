@@ -28,6 +28,7 @@ attributes to express the dependency.
 <kelm_kernel_reports>.false.</kelm_kernel_reports>
 <kelm_do_albedo>.true.</kelm_do_albedo>
 <use_top_solar_rad>.false.</use_top_solar_rad>
+<use_finetop_rad>.false.</use_finetop_rad>
 <kelm_stomata_closed>.false.</kelm_stomata_closed>
 <kelm_do_photosynthesis>.true.</kelm_do_photosynthesis>
 <kelm_co2_ppmv>284.7</kelm_co2_ppmv>
