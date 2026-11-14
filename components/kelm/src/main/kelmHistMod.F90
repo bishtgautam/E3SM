@@ -725,28 +725,26 @@ contains
   !-----------------------------------------------------------------------
   subroutine kelm_hist_final(kelm_state, year, month, day, tod, logunit)
     !
-    ! Flush a partial trailing month (nacs > 0) so a run that stops
-    ! mid-month still gets a written record. Must run BEFORE kELMDestroy
-    ! -- kelm_final calls this first, ahead of tearing the object down.
+    ! Release history's resources. A partial trailing month (nacs > 0) is
+    ! dropped, not written: ELM writes a tape only when it fills (here at
+    ! the month boundary), never at the end of a run that stops mid-month.
+    ! Must run BEFORE kELMDestroy -- kelm_final calls this first, ahead of
+    ! tearing the object down.
     !
     implicit none
     type(kELMType), intent(in) :: kelm_state
     integer         , intent(in) :: year, month, day, tod
     integer         , intent(in) :: logunit
-    integer :: ierr, k
+    integer :: k
 
     if (.not. hist_init_done) return
 
-    if (hist_nacs > 0) then
-       call kELMHistoryNormalize(kelm_state, ierr)
-       if (ierr /= KELM_SUCCESS) &
-            call shr_sys_abort('(kelm_hist_final) ERROR: kELMHistoryNormalize failed')
-       call kelm_hist_pull(kelm_state)
-       call kelm_hist_write_file(hist_start_year, hist_start_month, hist_start_day, &
-                                  year, month, day, tod, logunit)
-       call kELMHistoryReset(kelm_state, ierr)
-       hist_nacs = 0
+    if (hist_nacs > 0 .and. masterproc) then
+       write(logunit,*) '(kelm_hist_final) partial month not written (as ELM): ', &
+            hist_nacs,' samples since ',hist_start_year,'-',hist_start_month,'-',hist_start_day
+       call shr_sys_flush(logunit)
     end if
+    hist_nacs = 0
 
     call PIO_freedecomp(pio_subsystem, hist_iodesc)
     do k = 1, nlevdim
