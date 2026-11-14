@@ -407,14 +407,24 @@ contains
     end if
 
     ! ---- satellite phenology ----
-    call read_gc_real3d(ncid, fname, 'MONTHLY_LAI', ngrid, lsmpft, nmonths, &
-                        cell_ids, monthly_lai)
-    call read_gc_real3d(ncid, fname, 'MONTHLY_SAI', ngrid, lsmpft, nmonths, &
-                        cell_ids, monthly_sai)
-    call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_TOP', ngrid, lsmpft, nmonths, &
-                        cell_ids, monthly_height_top)
-    call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_BOT', ngrid, lsmpft, nmonths, &
-                        cell_ids, monthly_height_bot)
+    ! MONTHLY_* are either (time, lsmpft, gridcell), or, on reduced-dimension
+    ! datasets with a single PFT per gridcell, (time, gridcell) with
+    ! PFT_TYPE(gridcell) naming that PFT. ELM (SatellitePhenologyMod) gives a
+    ! vegetated patch the gridcell's value when its PFT equals PFT_TYPE and zero
+    ! otherwise. Expanding the reduced fields here to (cell, lsmpft, month), with
+    ! zeros for every other PFT, gives each patch the same values downstream.
+    if (var_ndims(ncid, fname, 'MONTHLY_LAI') == 2) then
+       call read_monthly_reduced(iulog, ncid, fname, ngrid, cell_ids)
+    else
+       call read_gc_real3d(ncid, fname, 'MONTHLY_LAI', ngrid, lsmpft, nmonths, &
+                           cell_ids, monthly_lai)
+       call read_gc_real3d(ncid, fname, 'MONTHLY_SAI', ngrid, lsmpft, nmonths, &
+                           cell_ids, monthly_sai)
+       call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_TOP', ngrid, lsmpft, nmonths, &
+                           cell_ids, monthly_height_top)
+       call read_gc_real3d(ncid, fname, 'MONTHLY_HEIGHT_BOT', ngrid, lsmpft, nmonths, &
+                           cell_ids, monthly_height_bot)
+    end if
 
     call free_iodescs()
     call pio_closefile(ncid)
@@ -589,6 +599,127 @@ contains
     slowest_dim_is_time = (trim(dimname) == 'time')
 
   end function slowest_dim_is_time
+
+  !-----------------------------------------------------------------------
+  integer function var_ndims(ncid, fname, varname)
+    !
+    ! !DESCRIPTION:
+    ! Number of dimensions of a variable on the file.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    !
+    type(var_desc_t) :: vardesc
+    integer :: status
+    character(len=*), parameter :: subname = 'kelm_read_surfdata::var_ndims'
+
+    status = pio_inq_varid(ncid, trim(varname), vardesc)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: no '//trim(varname)//' on '//trim(fname))
+    end if
+    status = pio_inq_varndims(ncid, vardesc, var_ndims)
+    if (status /= PIO_NOERR) then
+       call shr_sys_abort(subname//' ERROR: cannot inquire '//trim(varname)//' on '//trim(fname))
+    end if
+
+  end function var_ndims
+
+  !-----------------------------------------------------------------------
+  subroutine read_monthly_2d(ncid, fname, varname, ngrid, cell_ids, buf)
+    !
+    ! !DESCRIPTION:
+    ! Read a VAR(time, gridcell) field for the owned cells as (cell, month).
+    ! Decomposed reads go one time frame at a time, as read_gc_real3d does for
+    ! the full MONTHLY_* fields, since PIO decompositions leave time out.
+    !
+    implicit none
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname, varname
+    integer          , intent(in)    :: ngrid
+    integer          , intent(in)    :: cell_ids(:)
+    real(r8)         , intent(inout) :: buf(:,:)
+    !
+    integer :: m
+    integer :: no_extra(0)
+
+    if (decomposed .and. slowest_dim_is_time(ncid, fname, varname)) then
+       do m = 1, nmonths
+          call read_darray_real(ncid, fname, varname, ngrid, no_extra, cell_ids, &
+                                buf(:,m), frame=m)
+       end do
+    else
+       call read_gc_real2d(ncid, fname, varname, ngrid, nmonths, cell_ids, buf)
+    end if
+
+  end subroutine read_monthly_2d
+
+  !-----------------------------------------------------------------------
+  subroutine read_monthly_reduced(iulog, ncid, fname, ngrid, cell_ids)
+    !
+    ! !DESCRIPTION:
+    ! Read reduced-dimension phenology, MONTHLY_*(time, gridcell) plus
+    ! PFT_TYPE(gridcell), into the full monthly_*(cell, lsmpft, month) arrays.
+    ! Each cell's values go to its PFT_TYPE slot; every other PFT gets zero, as
+    ! does bare ground (PFT 0), matching ELM's readMonthlyVegetation and
+    ! readAnnualVegetation for these datasets.
+    !
+    implicit none
+    integer          , intent(in)    :: iulog
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: fname
+    integer          , intent(in)    :: ngrid
+    integer          , intent(in)    :: cell_ids(:)
+    !
+    integer , allocatable :: pft_type(:)
+    real(r8), allocatable :: buf(:,:)   ! (cell, month)
+    integer :: ncells, i, ip
+    character(len=*), parameter :: subname = 'kelm_read_surfdata::read_monthly_reduced'
+
+    ncells = size(cell_ids)
+    allocate(pft_type(ncells), buf(ncells, nmonths))
+
+    call read_gc_int1d(ncid, fname, 'PFT_TYPE', ngrid, cell_ids, pft_type)
+    if (ncells > 0) then
+       if (minval(pft_type) < 0 .or. maxval(pft_type) > lsmpft-1) then
+          call shr_sys_abort(subname//' ERROR: PFT_TYPE out of range on '//trim(fname))
+       end if
+    end if
+
+    monthly_lai(:,:,:)        = 0.0_r8
+    monthly_sai(:,:,:)        = 0.0_r8
+    monthly_height_top(:,:,:) = 0.0_r8
+    monthly_height_bot(:,:,:) = 0.0_r8
+
+    call read_monthly_2d(ncid, fname, 'MONTHLY_LAI', ngrid, cell_ids, buf)
+    do i = 1, ncells
+       ip = pft_type(i) + 1                 ! 1-based slot, bare ground = 1
+       if (ip > 1) monthly_lai(i, ip, :) = buf(i, :)
+    end do
+    call read_monthly_2d(ncid, fname, 'MONTHLY_SAI', ngrid, cell_ids, buf)
+    do i = 1, ncells
+       ip = pft_type(i) + 1
+       if (ip > 1) monthly_sai(i, ip, :) = buf(i, :)
+    end do
+    call read_monthly_2d(ncid, fname, 'MONTHLY_HEIGHT_TOP', ngrid, cell_ids, buf)
+    do i = 1, ncells
+       ip = pft_type(i) + 1
+       if (ip > 1) monthly_height_top(i, ip, :) = buf(i, :)
+    end do
+    call read_monthly_2d(ncid, fname, 'MONTHLY_HEIGHT_BOT', ngrid, cell_ids, buf)
+    do i = 1, ncells
+       ip = pft_type(i) + 1
+       if (ip > 1) monthly_height_bot(i, ip, :) = buf(i, :)
+    end do
+
+    if (masterproc) then
+       write(iulog,*) trim(subname),': reduced-dimension MONTHLY_* expanded by PFT_TYPE'
+       call shr_sys_flush(iulog)
+    end if
+
+    deallocate(pft_type, buf)
+
+  end subroutine read_monthly_reduced
 
   !-----------------------------------------------------------------------
   logical function has_dim(ncid, dimname)
