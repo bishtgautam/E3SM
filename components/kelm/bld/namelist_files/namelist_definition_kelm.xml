@@ -166,6 +166,17 @@ saturated fraction (1 - fsat), and the infiltration excess assumes surface
 water sits on the saturated fraction.
 </entry>
 
+<entry id="kelm_hist_off"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., kELM keeps no history at all: nothing is accumulated each step
+(the hbuf timer) and no history file is written, not even the partial month
+at the end of the run. ELM's counterpart is hist_empty_htapes = .true. with
+no hist_fincl. For timing runs.
+</entry>
+
 <entry id="run_zero_weight_urban"
        type="logical"
        category="kelm"

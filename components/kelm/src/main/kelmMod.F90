@@ -231,6 +231,8 @@ module kelmMod
   logical           , public :: use_finetop_rad      = .false.
   ! Modified infiltration, ELM's switch of the same name (SoilHydrologyMod).
   logical           , public :: use_modified_infil   = .false.
+  ! No history at all: no accumulation (hbuf) and no files. For timing runs.
+  logical           , public :: kelm_hist_off        = .false.
   ! run_zero_weight_urban (ELM's switch of the same name) lives in
   ! kelmSubgridMod, which applies it; it is read with this namelist.
   ! PFT parameter file (ELM's clm_params). Required: the kernels, all of which
@@ -314,7 +316,7 @@ contains
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
                             kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
-                            albice, use_modified_infil, run_zero_weight_urban
+                            albice, use_modified_infil, run_zero_weight_urban, kelm_hist_off
 
     ! defaults
     do_kelm   = .true.
@@ -331,6 +333,7 @@ contains
     use_top_solar_rad    = .false.
     use_finetop_rad      = .false.
     use_modified_infil   = .false.
+    kelm_hist_off        = .false.
     run_zero_weight_urban = .true.
     fparamfile            = ' '
     kelm_do_albedo       = .true.
@@ -394,6 +397,7 @@ contains
     call mpi_bcast (use_finetop_rad       , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (use_modified_infil    , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (run_zero_weight_urban , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (kelm_hist_off         , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     if (use_top_solar_rad .and. use_finetop_rad) then
        call shr_sys_abort(subname//' ERROR: use_finetop_rad and use_top_solar_rad '// &
             'cannot both be true (as in ELM)')
@@ -416,6 +420,7 @@ contains
        write(logunit,*) '   use_finetop_rad        = ', use_finetop_rad
        write(logunit,*) '   use_modified_infil     = ', use_modified_infil
        write(logunit,*) '   run_zero_weight_urban  = ', run_zero_weight_urban
+       write(logunit,*) '   kelm_hist_off          = ', kelm_hist_off
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
        write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
@@ -969,7 +974,8 @@ contains
                   real(coupling_dt_in_sec, r8), logunit)
           end if
        end if
-       if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done) then
+       if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done &
+           .and. .not. kelm_hist_off) then
           call kelm_hist_init(kelm_state, logunit, kelm_caseid, kelm_hist_fincl, &
                                kelm_hist_start_year, kelm_hist_start_month, &
                                kelm_hist_start_day, n_kokkos_col, num_cells_global, &
@@ -1077,7 +1083,7 @@ contains
     ! becomes true and history is never activated either -- no crash, just no
     ! output, which is the same prerequisite the soil kernels themselves have.
     if (kokkos_state_built .and. soil_kernel_built .and. .not. hist_state_init_done &
-        .and. kelm_perf_ncells == 0) then
+        .and. kelm_perf_ncells == 0 .and. .not. kelm_hist_off) then
        call kelm_hist_init(kelm_state, logunit, kelm_caseid, kelm_hist_fincl, &
                             kelm_hist_start_year, kelm_hist_start_month, &
                             kelm_hist_start_day, n_kokkos_col, num_cells_global, &

@@ -313,6 +313,7 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'use_finetop_rad');
     add_default($nl, 'use_modified_infil');
     add_default($nl, 'run_zero_weight_urban');
+    add_default($nl, 'kelm_hist_off');
 
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'kelm_stomata_closed');
