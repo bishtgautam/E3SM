@@ -137,7 +137,7 @@ natural and lake patch albedos and canopy transmission are adjusted from the
 cell's sky view factor, terrain configuration factor, elevation standard
 deviation and slope/aspect. fsurdat must carry STDEV_ELEV (or STD_ELEV),
 SKY_VIEW, TERRAIN_CONFIG, SINSL_COSAS and SINSL_SINAS. Urban is not adjusted,
-as in ELM. ELM's fineTOP (use_finetop_rad) is not ported.
+as in ELM. For ELM's fineTOP, see use_finetop_rad.
 </entry>
 
 <entry id="use_finetop_rad"
@@ -153,6 +153,29 @@ incidence angle on the slope; emitted longwave is per unit slope area; and
 the coupler gets the apparent albedo. fsurdat must carry SLOPE_DEG,
 ASPECT_DEG, SKY_VIEW_FACTOR, TERRAIN_CONFIG_FACTOR and HORIZON_ANGLE_DEG
 (ndir_horizon_angle = 8). Cannot be combined with use_top_solar_rad.
+</entry>
+
+<entry id="use_modified_infil"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., use the modified infiltration scheme, as ELM's switch of the same
+name does (SoilHydrologyMod): the infiltration capacity is not scaled by the
+saturated fraction (1 - fsat), and the infiltration excess assumes surface
+water sits on the saturated fraction.
+</entry>
+
+<entry id="run_zero_weight_urban"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .true.
+As ELM's switch of the same name. If .true., every gridcell with a valid
+URBAN_REGION_ID gets all three urban landunits (TBD, HD, MD), even at 0%
+weight; those stay inactive. If .false., only urban landunits with
+PCT_URBAN > 0 are allocated, which saves memory and time on large grids.
+Requires a finidat written with the same setting (or a cold start).
 </entry>
 
 <entry id="kelm_check_boundary"

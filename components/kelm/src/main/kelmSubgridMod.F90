@@ -79,6 +79,12 @@ module kelmSubgridMod
   integer, parameter, public :: maxpatch_urb = 5   ! columns per urban landunit
   integer, parameter :: urban_invalid_region = 0
 
+  ! ELM's run_zero_weight_urban (namelist, read by kelmMod). .true., ELM's
+  ! default: every gridcell with a valid URBAN_REGION_ID gets all three urban
+  ! landunits, even at 0% weight (inactive). .false.: only urban landunits with
+  ! PCT_URBAN > 0 are allocated (ELM: subgridMod :: urban_landunit_exists).
+  logical, public :: run_zero_weight_urban = .true.
+
   !--------------------------------------------------------------------------
   ! Subgrid, for the cells this rank owns
   !--------------------------------------------------------------------------
@@ -331,12 +337,30 @@ contains
   end function urban_valid
 
   !-----------------------------------------------------------------------
+  logical function urban_landunit_exists(g, u)
+    !
+    ! !DESCRIPTION:
+    ! Whether gridcell g gets urban landunit type u (1 = TBD, 2 = HD, 3 = MD),
+    ! as ELM's subgridMod :: urban_landunit_exists decides it.
+    !
+    implicit none
+    integer, intent(in) :: g, u
+
+    if (run_zero_weight_urban) then
+       urban_landunit_exists = urban_valid(g)
+    else
+       urban_landunit_exists = (pct_urban(g,u) > 0.0_r8)
+    end if
+
+  end function urban_landunit_exists
+
+  !-----------------------------------------------------------------------
   subroutine count_subgrid(ncells, nlun, ncol, npat)
     !
     implicit none
     integer, intent(in)  :: ncells
     integer, intent(out) :: nlun, ncol, npat
-    integer :: g
+    integer :: g, u
 
     nlun = 0; ncol = 0; npat = 0
 
@@ -345,12 +369,14 @@ contains
        nlun = nlun + 1
        ncol = ncol + 1
        npat = npat + natpft
-       ! urban x3: on valid urban parameters, regardless of weight
-       if (urban_valid(g)) then
-          nlun = nlun + 3
-          ncol = ncol + 3*maxpatch_urb
-          npat = npat + 3*maxpatch_urb
-       end if
+       ! urban x3: see urban_landunit_exists
+       do u = 1, 3
+          if (urban_landunit_exists(g, u)) then
+             nlun = nlun + 1
+             ncol = ncol + maxpatch_urb
+             npat = npat + maxpatch_urb
+          end if
+       end do
        ! lake, wetland, glacier: only where present
        if (pct_lake(g)    > 0.0_r8) then; nlun = nlun+1; ncol = ncol+1; npat = npat+1; end if
        if (pct_wetland(g) > 0.0_r8) then; nlun = nlun+1; ncol = ncol+1; npat = npat+1; end if
@@ -404,7 +430,7 @@ contains
        end select
 
        do g = 1, ncells
-          if (.not. urban_valid(g)) cycle
+          if (.not. urban_landunit_exists(g, u)) cycle
 
           nl = nl + 1
           lun_gridcell(nl) = g

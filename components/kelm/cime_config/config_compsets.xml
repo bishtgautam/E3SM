@@ -19,4 +19,11 @@
     <lname>1850_DATM%QIA_KELM_SICE_SOCN_SROF_SGLC_SWAV</lname>
   </compset>
 
+  <!-- GSWP3 forcing, as ELM's IGSWELM but with SROF; used to compare kELM
+       and ELM on the same forcing -->
+  <compset>
+    <alias>IGSWKELM</alias>
+    <lname>2000_DATM%GSWP3v1_KELM_SICE_SOCN_SROF_SGLC_SWAV</lname>
+  </compset>
+
 </compsets>

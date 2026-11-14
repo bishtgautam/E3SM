@@ -30,6 +30,8 @@ attributes to express the dependency.
 <albice>0.60,0.40</albice>
 <use_top_solar_rad>.false.</use_top_solar_rad>
 <use_finetop_rad>.false.</use_finetop_rad>
+<use_modified_infil>.false.</use_modified_infil>
+<run_zero_weight_urban>.true.</run_zero_weight_urban>
 <kelm_stomata_closed>.false.</kelm_stomata_closed>
 <kelm_do_photosynthesis>.true.</kelm_do_photosynthesis>
 <kelm_co2_ppmv>284.7</kelm_co2_ppmv>

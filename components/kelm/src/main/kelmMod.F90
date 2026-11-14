@@ -32,7 +32,7 @@ module kelmMod
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md, &
                                num_landunits_global, num_columns_global, &
-                               num_patches_global
+                               num_patches_global, run_zero_weight_urban
   use kelmSurfaceStateMod, only : kelm_surface_state_init, &
                                    kelm_surface_state_clean
   use kelmFilterMod      , only : kelm_build_filters, kelm_filters_clean
@@ -91,6 +91,7 @@ module kelmMod
                                       kelm_kokkos_seed_canopy_hydrology, &
                                       kelm_kokkos_push_top_solar_rad, &
                                       kelm_kokkos_push_finetop_rad, &
+                                      kelm_kokkos_set_modified_infil, &
                                       kelm_kokkos_seed_albedo, &
                                       kelm_kokkos_seed_pftpar, &
                                       kelm_kokkos_seed_stomata_closed, &
@@ -228,6 +229,10 @@ module kelmMod
   ! SKY_VIEW_FACTOR, TERRAIN_CONFIG_FACTOR and HORIZON_ANGLE_DEG
   ! (ndir_horizon_angle = 8). Exclusive with use_top_solar_rad, as in ELM.
   logical           , public :: use_finetop_rad      = .false.
+  ! Modified infiltration, ELM's switch of the same name (SoilHydrologyMod).
+  logical           , public :: use_modified_infil   = .false.
+  ! run_zero_weight_urban (ELM's switch of the same name) lives in
+  ! kelmSubgridMod, which applies it; it is read with this namelist.
   ! PFT parameter file (ELM's clm_params). Required: the kernels, all of which
   ! always run, read their PFT parameters from it.
   character(len=256), public :: fparamfile = ' '
@@ -309,7 +314,7 @@ contains
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
                             kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
-                            albice
+                            albice, use_modified_infil, run_zero_weight_urban
 
     ! defaults
     do_kelm   = .true.
@@ -325,6 +330,8 @@ contains
     kelm_kernel_reports  = .false.
     use_top_solar_rad    = .false.
     use_finetop_rad      = .false.
+    use_modified_infil   = .false.
+    run_zero_weight_urban = .true.
     fparamfile            = ' '
     kelm_do_albedo       = .true.
     albice               = (/ 0.60_r8, 0.40_r8 /)
@@ -385,6 +392,8 @@ contains
     call mpi_bcast (kelm_timer_level      , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
     call mpi_bcast (use_top_solar_rad     , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (use_finetop_rad       , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (use_modified_infil    , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (run_zero_weight_urban , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     if (use_top_solar_rad .and. use_finetop_rad) then
        call shr_sys_abort(subname//' ERROR: use_finetop_rad and use_top_solar_rad '// &
             'cannot both be true (as in ELM)')
@@ -405,6 +414,8 @@ contains
        write(logunit,*) '   kelm_do_photosynthesis = ', kelm_do_photosynthesis
        write(logunit,*) '   use_top_solar_rad      = ', use_top_solar_rad
        write(logunit,*) '   use_finetop_rad        = ', use_finetop_rad
+       write(logunit,*) '   use_modified_infil     = ', use_modified_infil
+       write(logunit,*) '   run_zero_weight_urban  = ', run_zero_weight_urban
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
        write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
@@ -673,6 +684,7 @@ contains
        call kelm_kokkos_seed_canopy_hydrology(kelm_state, logunit)
        if (use_top_solar_rad) call kelm_kokkos_push_top_solar_rad(kelm_state, logunit)
        if (use_finetop_rad)   call kelm_kokkos_push_finetop_rad(kelm_state, logunit)
+       if (use_modified_infil) call kelm_kokkos_set_modified_infil(kelm_state, logunit)
        call kelm_kokkos_seed_albedo(kelm_state, logunit)
 
        ! Constant for the whole run, so seeded once here rather than per step.

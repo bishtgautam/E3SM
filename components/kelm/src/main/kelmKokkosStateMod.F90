@@ -80,6 +80,7 @@ module kelmKokkosStateMod
   use kelm_mod       , only : kELMType, KELM_SUCCESS, &
                                kELMSetUseTopSolarRad, &
                                kELMSetUseFinetopRad, kELMTopographicEffectsOnRadiation, &
+                               kELMSetUseModifiedInfil, &
                                kELMSetPatchColumn, &
                                kELMSetElai, kELMSetEsai, kELMSetHtop, &
                                kELMSetRootrPatch, kELMSetRootfr, &
@@ -184,6 +185,7 @@ module kelmKokkosStateMod
   public :: kelm_kokkos_seed_canopy_hydrology
   public :: kelm_kokkos_push_top_solar_rad
   public :: kelm_kokkos_push_finetop_rad
+  public :: kelm_kokkos_set_modified_infil
   logical, private :: finetop_on = .false.   ! kelm_kokkos_push_finetop_rad was called
   public :: kelm_kokkos_seed_soil_properties
   public :: kelm_kokkos_seed_albedo
@@ -936,6 +938,27 @@ contains
     end if
 
   end subroutine kelm_kokkos_push_top_solar_rad
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_kokkos_set_modified_infil(elm, logunit)
+    !
+    ! Modified infiltration (ELM: use_modified_infil): switch it on in the
+    ! library, which hands it to the natural and urban infiltration kernels.
+    !
+    implicit none
+    type(kELMType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: ierr
+    character(len=*), parameter :: subname = '(kelm_kokkos_set_modified_infil) '
+
+    call kELMSetUseModifiedInfil(elm, .true., ierr)
+    call check(ierr, subname, 'UseModifiedInfil')
+    if (masterproc) then
+       write(logunit,*) subname,'modified infiltration on'
+       call shr_sys_flush(logunit)
+    end if
+
+  end subroutine kelm_kokkos_set_modified_infil
 
   !-----------------------------------------------------------------------
   subroutine kelm_kokkos_push_finetop_rad(elm, logunit)

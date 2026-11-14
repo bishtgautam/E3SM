@@ -311,6 +311,8 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'albice');
     add_default($nl, 'use_top_solar_rad');
     add_default($nl, 'use_finetop_rad');
+    add_default($nl, 'use_modified_infil');
+    add_default($nl, 'run_zero_weight_urban');
 
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'kelm_stomata_closed');
