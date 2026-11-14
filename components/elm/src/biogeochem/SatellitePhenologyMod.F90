@@ -700,10 +700,12 @@ contains
           ! Assign lai/sai/hgtt/hgtb to the top [maxpatch_pft] patches
           ! as determined in subroutine surfrd
 
-          mlai2t(:,:) = 0._r8
-          msai2t(:,:) = 0._r8
-          mhvt2t(:,:) = 0._r8
-          mhvb2t(:,:) = 0._r8
+          ! Zero only this month's slot: zeroing (:,:) here would wipe the
+          ! month read on the previous pass (k=1) when k=2
+          mlai2t(:,k) = 0._r8
+          msai2t(:,k) = 0._r8
+          mhvt2t(:,k) = 0._r8
+          mhvb2t(:,k) = 0._r8
 
           do p = bounds%begp,bounds%endp
              g =veg_pp%gridcell(p)
