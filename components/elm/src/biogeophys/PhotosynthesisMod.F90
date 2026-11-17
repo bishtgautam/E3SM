@@ -108,6 +108,17 @@ module  PhotosynthesisMod
   type(photo_params_type), public, protected :: params_inst  ! params_inst is populated in readParamsMod
   !$acc declare create(params_inst)
 
+  ! Diagnostic capture state for kELM replay validation.
+  !
+  ! Photosynthesis is called from INSIDE the CanopyFluxes Newton loop, up to
+  ! 41 times per phase per timestep. Snapshotting every call would add roughly
+  ! 3 GB to a five-day 2x1 run, so only the FIRST call of each phase in each
+  ! timestep is captured. That is the call whose result becomes
+  ! rssun_iter(:,1)/rssha_iter(:,1), so the record set stays self-consistent.
+  integer, save :: diag_last_ts_sun = -1
+  integer, save :: diag_last_ts_sha = -1
+
+
 contains
 
   !------------------------------------------------------------------------------
@@ -226,6 +237,8 @@ contains
     use elm_varcon     , only : rgas, tfrz
     use elm_varctl     , only : carbon_only
     use pftvarcon      , only : vcmax_np1, vcmax_np2, vcmax_np3, vcmax_np4, jmax_np1, jmax_np2, jmax_np3
+    use ElmDiagnostics , only : diag_enabled, diag_timestep, diag_snapshot_1d, &
+                                diag_snapshot_int_1d
     !
     ! !ARGUMENTS:
     type(bounds_type)      , intent(in)    :: bounds
@@ -967,6 +980,208 @@ contains
             rs(p) = 0._r8
          end if
       end do
+
+      ! ---- Diagnostic Capture: Photosynthesis inputs and outputs ----
+      ! Everything a leaf-level port needs to be replayed, plus the answer.
+      ! Once per phase per timestep; see diag_last_ts_* above.
+      if (diag_enabled) then
+         diag_capture: block
+           real(r8) :: dbuf(bounds%begp:bounds%endp)
+           integer  :: ibuf(bounds%begp:bounds%endp)
+           integer  :: np, pp, tt
+           logical  :: do_capture
+           character(len=8) :: pfx
+
+           if (phase == 'sun') then
+              do_capture = (diag_timestep /= diag_last_ts_sun)
+              if (do_capture) diag_last_ts_sun = diag_timestep
+              pfx = 'photosun'
+           else
+              do_capture = (diag_timestep /= diag_last_ts_sha)
+              if (do_capture) diag_last_ts_sha = diag_timestep
+              pfx = 'photosha'
+           end if
+
+           if (do_capture) then
+              np = bounds%endp - bounds%begp + 1
+
+              ! Arguments
+              call diag_snapshot_1d(trim(pfx)//'_in:esat_tv', esat_tv(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:eair', eair(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:oair', oair(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:cair', cair(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:rb', rb(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:btran', btran(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:dayl_factor', dayl_factor(bounds%begp:bounds%endp), np)
+
+              ! Canopy and atmospheric state
+              call diag_snapshot_1d(trim(pfx)//'_in:t_veg', t_veg(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:t10', t10(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_in:tgcm', tgcm(bounds%begp:bounds%endp), np)
+
+              ! forc_pbot is topounit-indexed; broadcast to patches so every
+              ! record in this set shares one index space.
+              do pp = bounds%begp, bounds%endp
+                 tt = veg_pp%topounit(pp)
+                 dbuf(pp) = forc_pbot(tt)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_in:forc_pbot', dbuf, np)
+
+              ! Phase-dependent radiation and leaf area, first canopy layer.
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = par_z(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_in:par_z', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = lai_z(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_in:lai_z', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = tlai_z(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_in:tlai_z', dbuf, np)
+              call diag_snapshot_1d(trim(pfx)//'_in:vcmaxcint', vcmaxcint(bounds%begp:bounds%endp), np)
+
+              do pp = bounds%begp, bounds%endp
+                 ibuf(pp) = nrad(pp)
+              end do
+              call diag_snapshot_int_1d(trim(pfx)//'_in:nrad', ibuf, np)
+              do pp = bounds%begp, bounds%endp
+                 ibuf(pp) = veg_pp%itype(pp)
+              end do
+              call diag_snapshot_int_1d(trim(pfx)//'_in:itype', ibuf, np)
+
+              ! PFT parameters, broadcast to patches so a replay needs no
+              ! parameter file. The fourteen below c3psn..mbbopt are uniform
+              ! across all 25 PFTs on clm_params; capturing them per patch is
+              ! what lets a checker VERIFY that rather than assume it.
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = c3psn(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:c3psn', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = leafcn(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:leafcn', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = flnr(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:flnr', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = fnitr(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:fnitr', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = slatop(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:slatop', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%qe(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:qe', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%theta_cj(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:theta_cj', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%bbbopt(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:bbbopt', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%mbbopt(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:mbbopt', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%fnr(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:fnr', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%act25(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:act25', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%kcha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:kcha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%koha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:koha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%cpha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:cpha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%vcmaxha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:vcmaxha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%jmaxha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:jmaxha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%tpuha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:tpuha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%lmrha(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:lmrha', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%vcmaxhd(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:vcmaxhd', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%jmaxhd(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:jmaxhd', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%tpuhd(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:tpuhd', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%lmrhd(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:lmrhd', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = veg_vp%lmrse(veg_pp%itype(pp))
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_par:lmrse', dbuf, np)
+
+              ! Outputs
+              call diag_snapshot_1d(trim(pfx)//'_out:rs', rs(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:psn', psn(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:lmr', lmr(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:vcmax25_top', vcmax25_top(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:bbb', bbb(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:mbb', mbb(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:kc', kc(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:ko', ko(bounds%begp:bounds%endp), np)
+              call diag_snapshot_1d(trim(pfx)//'_out:cp', cp(bounds%begp:bounds%endp), np)
+
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = ci_z(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_out:ci_z', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = gs_mol(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_out:gs_mol', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = vcmax_z(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_out:vcmax_z', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = an(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_out:an', dbuf, np)
+              do pp = bounds%begp, bounds%endp
+                 dbuf(pp) = ag(pp,1)
+              end do
+              call diag_snapshot_1d(trim(pfx)//'_out:ag', dbuf, np)
+           end if
+         end block diag_capture
+      end if
 
     end associate
 
