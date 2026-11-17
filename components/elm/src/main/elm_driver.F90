@@ -276,8 +276,18 @@ contains
     ! carries. This used to wait for nstep == 1, which silently skipped the
     ! initialization pass -- so the earliest recorded state already had a step
     ! of physics on it and could not be compared against a cold start.
+    !
+    ! Off unless ELM_DIAG is set in the environment (mirrors kELM's own
+    ! KELM_DIAG gate) -- the exhaustive per-kernel-per-timestep dump this
+    ! writes runs to ~1 GB/month on a single-column case, which is fine for
+    ! kernel-level validation but not for a full-year run.
     if (.not. diag_enabled .and. get_nstep() <= 1) then
-       call diag_init('elm_diagnostics.bin', .true.)
+       block
+         character(len=256) :: diag_path
+         integer :: dlen
+         call get_environment_variable('ELM_DIAG', diag_path, dlen)
+         if (dlen > 0) call diag_init(trim(diag_path), .true.)
+       end block
     end if
     call diag_new_timestep(get_nstep())
 
