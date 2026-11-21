@@ -25,6 +25,7 @@ module kelmIO
   private
 
   integer                       , public :: io_type
+  integer                       , public :: io_format  ! PIO_NETCDF_FORMAT mode bits, OR'd into PIO_createfile
   type(iosystem_desc_t), pointer, public :: pio_subsystem
 
   public :: kelm_pio_init
@@ -39,7 +40,7 @@ contains
     ! Grab the PIO subsystem the driver set up for this component instance.
     !
     ! !USES:
-    use shr_pio_mod, only : shr_pio_getiosys, shr_pio_getiotype
+    use shr_pio_mod, only : shr_pio_getiosys, shr_pio_getiotype, shr_pio_getioformat
     !
     implicit none
     !
@@ -47,6 +48,7 @@ contains
 
     pio_subsystem => shr_pio_getiosys(inst_name)
     io_type       =  shr_pio_getiotype(inst_name)
+    io_format     =  shr_pio_getioformat(inst_name)
 
   end subroutine kelm_pio_init
 

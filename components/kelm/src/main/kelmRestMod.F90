@@ -49,7 +49,7 @@ module kelmRestMod
   use shr_sys_mod  , only : shr_sys_abort, shr_sys_flush
   use shr_file_mod , only : shr_file_getunit, shr_file_freeunit
   use kelmSpmdMod , only : masterproc, iam, npes, mpicom_lnd
-  use kelmIO      , only : pio_subsystem, io_type
+  use kelmIO      , only : pio_subsystem, io_type, io_format
   use kelmHistMod , only : kelm_hist_get_restart_state, kelm_hist_set_restart_state
   use kelmSubgridMod     , only : lun_gridcell, col_landunit, patch_column
   use kelmLakeMod        , only : n_lake, cell_of_klake
@@ -157,7 +157,7 @@ contains
     call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
     allocate(vid(nfld))
 
-    ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), PIO_CLOBBER)
+    ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), ior(PIO_CLOBBER, io_format))
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot create '//trim(fname))
 
     ndims = 0

@@ -19,7 +19,7 @@ module kelmHistMod
   use shr_const_mod, only : SHR_CONST_REARTH
   use shr_cal_mod  , only : shr_cal_ymd2julian, shr_cal_numDaysInYear, shr_cal_noleap
   use kelmSpmdMod , only : masterproc, iam, npes
-  use kelmIO      , only : pio_subsystem, io_type
+  use kelmIO      , only : pio_subsystem, io_type, io_format
   use kelmSubgridMod, only : num_landunits, lun_itype, lun_wtgcell, lun_gridcell, &
                              istsoil, istdlak, isturb_tbd, isturb_md, &
                              num_patches, patch_column, patch_itype, patch_wtcol, &
@@ -531,7 +531,7 @@ contains
     write(cdate,'(i4.4,"-",i2.2)') start_year, start_month
     fname = trim(hist_caseid)//'.kelm.h0.'//trim(cdate)//'.nc'
 
-    ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), PIO_CLOBBER)
+    ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), ior(PIO_CLOBBER, io_format))
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_createfile failed for '//trim(fname))
 
     ierr = PIO_def_dim(file, 'lndgrid', num_global, dimid_lndgrid)
