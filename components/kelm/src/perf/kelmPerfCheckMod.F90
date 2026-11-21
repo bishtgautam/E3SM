@@ -50,7 +50,7 @@ module kelmPerfCheckMod
   ! kELMRestartKind (kELM.h); the same constants kelmRestMod uses.
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
                         KIND_NATPATCH = 3, KIND_URBLUN = 4, &
-                        KIND_LAKECOL = 7, KIND_LAKEPATCH = 8
+                        KIND_LAKECOL = 7   ! 8 (was LAKEPATCH) is unused
 
   integer, parameter :: NAMELEN = 128
   character(len=8), parameter :: REF_MAGIC = 'KELMPRF'
@@ -92,7 +92,7 @@ contains
     if (st /= KELM_SUCCESS) call shr_sys_abort('(kelm_perf_check) ERROR: RestartFieldInfo failed')
     if (f%name(1:5) == 'hist:') return
     select case (kind)
-    case (KIND_CELL, KIND_NATCOL, KIND_NATPATCH, KIND_URBLUN, KIND_LAKECOL, KIND_LAKEPATCH)
+    case (KIND_CELL, KIND_NATCOL, KIND_NATPATCH, KIND_URBLUN, KIND_LAKECOL)
     case default
        return
     end select
@@ -118,7 +118,7 @@ contains
        case (KIND_NATCOL);    c = lun_gridcell(col_landunit(col_of_kcol(e)))
        case (KIND_NATPATCH);  c = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);    c = lun_gridcell(lun_of_kurb(e))
-       case (KIND_LAKECOL, KIND_LAKEPATCH); c = cell_of_klake(e)
+       case (KIND_LAKECOL);   c = cell_of_klake(e)
        end select
        if (c < 1 .or. c > ncell) call shr_sys_abort('(kelm_perf_check) ERROR: '// &
             trim(f%name)//' maps an entity outside this rank''s cells')

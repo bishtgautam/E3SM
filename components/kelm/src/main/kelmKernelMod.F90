@@ -519,7 +519,7 @@ contains
        why = ' '
 
     case (K_LAKEFLUX, K_LAKETEMP, K_LAKEHYDRO)
-       ! Runnable since Stage 6.5, on the lake surface (lakeCol/lakePatch,
+       ! Runnable since Stage 6.5, on the lake surface (lakeCol,
        ! kelmLakeMod). The three run as a set, and only alongside the soil
        ! kernels, whose shared metadata carries the per-cell precipitation
        ! the lake gathers: both enforced in kelm_kernels_parse.

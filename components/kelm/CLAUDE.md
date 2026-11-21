@@ -193,7 +193,7 @@ cases -- use a standard grid.
 
 Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
 driver, `RUN_TYPE=hybrid` (it cold-starts kELM: `finidat` reads ELM files,
-not kELM restarts). Lake state restarts (`LAKECOL`/`LAKEPATCH`, since
+not kELM restarts). Lake state restarts (`LAKECOL`, since
 Stage 6.5); urban state restarts (`URBLUN`, since Stage 6.7; every urban
 surface record is indexed by landunit).
 
@@ -241,8 +241,8 @@ the C++ layout). Stepped from `src/main/kELMUrban.cpp` by the
 
 ## The lake surface
 
-Lake is its own surface, a peer of natural and urban: `lakeCol`/`lakePatch`
-(`src/data_types/Lake{Column,Patch}Data.h`), driven from
+Lake is its own surface, a peer of natural and urban: `lakeCol`
+(`src/data_types/LakeColumnData.h`), driven from
 `src/main/kelmLakeMod.F90`. Durable facts:
 
 - **Seeded and read by NAME** through the restart registry
@@ -253,8 +253,13 @@ Lake is its own surface, a peer of natural and urban: `lakeCol`/`lakePatch`
   snow index: slot j <-> ELM layer j-4; `zi` slot i <-> ELM `zi(i-5)`.
   LakeTemperature reads `zi` ONE SLOT EARLIER than LakeHydrology, so it gets
   `zi_lt`, refreshed from `zi` each step. Never hand it `zi` directly.
-- **One patch per lake column, packed alike** (LakeHydrology indexes
-  p = c); `kELMAllocateLakeSurface` refuses anything else.
+- **No lake patch container.** ELM puts one patch, of weight 1, on each
+  lake column, so its patch-level fields (fluxes, albedo, `sabg_lyr`,
+  `fvdiag`, ...) are `lakeCol` members, indexed by lake column (registry
+  `lakecol:`; restart kind 8, once `LAKEPATCH`, is kept unused). The lake
+  kernels still take a patch->column map; the builders pass
+  `lakeCol.col_topounit`, the identity. ELM names ending in `_patch`
+  (`forc_hgt_{u,t,q}_patch`, `qflx_snow_grnd_patch`) are kept on purpose.
 - **Forcing comes from the cell** (`cell`, `CellData`), by the lake
   column's `col_gridcell`, as for every surface; no surface reads another's
   container.

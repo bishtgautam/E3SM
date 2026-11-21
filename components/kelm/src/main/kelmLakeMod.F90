@@ -3,7 +3,7 @@ module kelmLakeMod
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
   ! The lake landunit on the coupled path (plan Stage 6.5, L1 and L4): the
-  ! Fortran side of kELM's lake surface (lakeCol/lakePatch in the C++).
+  ! Fortran side of kELM's lake surface (lakeCol in the C++).
   !
   ! WHAT THIS OWNS
   !   maps        packed lake column/patch <-> subgrid column/patch, the cell
@@ -20,9 +20,8 @@ module kelmLakeMod
   !               ELM's landunit-weighted cell mean.
   ! ELM is the reference for behaviour only; nothing is copied.
   !
-  ! ONE PATCH PER LAKE COLUMN, packed in the same ascending order, so packed
-  ! lake patch k sits on packed lake column k. LakeHydrology indexes p = c,
-  ! and kELMAllocateLakeSurface refuses anything else.
+  ! ONE PATCH PER LAKE COLUMN, of weight 1, so ELM's lake patch fields are
+  ! lakeCol fields, indexed by packed lake column k (registry "lakecol:").
   !-----------------------------------------------------------------------
 
   use shr_kind_mod    , only : r8 => shr_kind_r8
@@ -84,7 +83,7 @@ contains
     call build_maps(logunit)
     if (n_lake == 0) return
 
-    call kELMAllocateLakeSurface(elm, n_lake, n_lake, ierr)
+    call kELMAllocateLakeSurface(elm, n_lake, ierr)
     if (ierr /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: kELMAllocateLakeSurface failed')
 
     call seed_topology(elm)
@@ -153,10 +152,6 @@ contains
        ibuf(k) = cell_of_klake(k) - 1
     end do
     call lake_set(elm, 'lakecol:col_gridcell', ibuf)
-    do k = 1, n_lake
-       ibuf(k) = k - 1
-    end do
-    call lake_set(elm, 'lakepatch:patch_column', ibuf)
     deallocate(ibuf)
 
   end subroutine seed_topology
@@ -452,7 +447,7 @@ contains
   subroutine kelm_lake_push_forcing(elm)
     !
     ! Per step: the reference height and the incident shortwave, per lake
-    ! patch, with ELM's band assignment (1 visible, 2 near-IR). Everything else
+    ! column, with ELM's band assignment (1 visible, 2 near-IR). Everything else
     ! the lake reads, kELMLakeGatherForcing takes on the device from the
     ! lake column's cell (`cell`).
     !
@@ -469,9 +464,9 @@ contains
        sold(k,1) = forc_swvdr(g); sold(k,2) = forc_swndr(g)
        soli(k,1) = forc_swvdf(g); soli(k,2) = forc_swndf(g)
     end do
-    call lake_set(elm, 'lakepatch:forc_hgt', hgt)
-    call lake_set(elm, 'lakepatch:forc_solad', sold)
-    call lake_set(elm, 'lakepatch:forc_solai', soli)
+    call lake_set(elm, 'lakecol:forc_hgt', hgt)
+    call lake_set(elm, 'lakecol:forc_solad', sold)
+    call lake_set(elm, 'lakecol:forc_solai', soli)
     deallocate(hgt, sold, soli)
 
   end subroutine kelm_lake_push_forcing

@@ -76,14 +76,15 @@ module kelmRestMod
   integer, parameter :: NAMELEN = 128
 
   ! kELMRestartKind (kELM.h). URBCOL/URBPATCH are retired: every urban
-  ! surface record is indexed by landunit (URBLUN) since plan B.
+  ! surface record is indexed by landunit (URBLUN) since plan B. Kind 8 was
+  ! LAKEPATCH: ELM's one patch per lake column now lives in LAKECOL, and 8 is
+  ! kept unused so the other kinds keep their numbers.
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
                         KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_URBCOL = 5, &
-                        KIND_URBPATCH = 6, KIND_LAKECOL = 7, &
-                        KIND_LAKEPATCH = 8, NKIND = 9
+                        KIND_URBPATCH = 6, KIND_LAKECOL = 7, NKIND = 9
   character(len=10), parameter :: kind_name(0:NKIND) = (/ &
        'topo      ', 'cell      ', 'natcol    ', 'natpatch  ', 'urblun    ', &
-       'urbcol    ', 'urbpatch  ', 'lakecol   ', 'lakepatch ', 'landunit  ' /)
+       'urbcol    ', 'urbpatch  ', 'lakecol   ', 'unused8   ', 'landunit  ' /)
 
   ! One field's layout, agreed across ranks.
   type :: field_t
@@ -508,7 +509,6 @@ contains
     case (KIND_NATPATCH); local_count = n_kokkos_patch
     case (KIND_URBLUN);   local_count = n_kokkos_urb
     case (KIND_LAKECOL);  local_count = n_lake
-    case (KIND_LAKEPATCH); local_count = n_lake   ! one patch per lake column
     case default
        local_count = 0
        call shr_sys_abort(subname//'ERROR: '//trim(name)//' is allocated, but kind '// &
@@ -537,7 +537,7 @@ contains
        case (KIND_NATCOL);   cell(e) = lun_gridcell(col_landunit(col_of_kcol(e)))
        case (KIND_NATPATCH); cell(e) = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);   cell(e) = lun_gridcell(lun_of_kurb(e))
-       case (KIND_LAKECOL, KIND_LAKEPATCH); cell(e) = cell_of_klake(e)
+       case (KIND_LAKECOL);  cell(e) = cell_of_klake(e)
        end select
        if (cell(e) < 1 .or. cell(e) > ncell) call shr_sys_abort(subname// &
             'ERROR: entity maps outside this rank''s cells')
