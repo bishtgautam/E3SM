@@ -333,6 +333,19 @@ when the coupler's restart alarm rings, dated with the step's END time
   active on two, 0-27% lake, snow) -- 12 urban landunits, 6 per rank. Same
   procedure as above (10 d, `REST_N=5`); the negative control must perturb
   an ACTIVE landunit (a 0-weight one moves the restart but not h0).
+- **Lake closure + layout test on f09 (passes, 2026-11-20, after the
+  lakePatch merge):** `global_f09` mixed case (4643 lake columns) on pm-gpu,
+  1 month, `REST_N=15` ndays, `RANKS=1` and `RANKS=2`. Jan h0 identical on 1,
+  2 and 4 ranks; a continue from the day-16 restart (own layout, and the
+  1-rank case from the 2-rank `kelm.r`) reproduces the Jan h0 and the day-31
+  restart. Negative control: `lakecol:t_lake` + 1e-6 K in the day-16 restart
+  changes 50 of 167 h0 fields. Compare restarts with `cprnc -m` (no time dim).
+- **`natcol:sub_surf_abs_SW` is not reproducible in restarts** (open, found
+  2026-11-20): `SurfaceRadiation` runs per natural patch and every patch writes
+  the column value, a write race on GPU (ELM's serial loop keeps the last
+  patch). Diagnostic only, nothing reads it, so h0 is unaffected, but it is the
+  one field that differs between restarts of identical runs. Exclude it when
+  comparing restarts until it is fixed.
 - **A branch starts history fresh**, as ELM's does (`hist_restart_ncd` zeroes
   `ntimes` on `nsrBranch`): the `hist:*` accumulators and the interval
   start/count are not read, so the first h0 holds only the branch's own steps
