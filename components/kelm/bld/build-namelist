@@ -307,6 +307,8 @@ if ($LND_GRID eq "null") {
     # diagnostic tables in lnd.log are off by default.
     add_default($nl, 'kelm_kernel_reports');
     add_default($nl, 'kelm_do_albedo');
+    # The glacier's bare-ice albedo (ELM albice, its lnd_in default).
+    add_default($nl, 'albice');
     add_default($nl, 'use_top_solar_rad');
     add_default($nl, 'use_finetop_rad');
 

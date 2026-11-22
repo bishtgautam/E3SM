@@ -21,7 +21,7 @@ module kelmHistMod
   use kelmSpmdMod , only : masterproc, iam, npes
   use kelmIO      , only : pio_subsystem, io_type, io_format
   use kelmSubgridMod, only : num_landunits, lun_itype, lun_wtgcell, lun_gridcell, &
-                             istsoil, istdlak, isturb_tbd, isturb_md, &
+                             istsoil, istdlak, istice, isturb_tbd, isturb_md, &
                              num_patches, patch_column, patch_itype, patch_wtcol, &
                              col_landunit
   use kelmSurfdataMod, only : natpft
@@ -376,9 +376,10 @@ contains
     ! h0 value is the landunit-weighted mean over its natural and LAKE
     ! landunits (kELMHistorySetLandunitWeights, pushed by kelmLakeMod), and
     ! since Stage 6.7 its URBAN ones too (kELMHistorySetUrbanWeights, pushed
-    ! by kelmUrbanMod), so the guard is that those cover the cell: weight on
-    ! any landunit kELM does not model (glacier, wetland, crop) would make
-    ! the mean a mislabelled partial one.
+    ! by kelmUrbanMod), and its GLACIER one (kELMHistorySetGlacierWeights,
+    ! kelmGlacierMod), so the guard is that those cover the cell: weight on
+    ! a landunit kELM does not model (wetland, crop) would make the mean a
+    ! mislabelled partial one.
     !
     implicit none
     integer, intent(in) :: logunit
@@ -392,16 +393,17 @@ contains
     wsum = 0.0_r8
     do l = 1, num_landunits
        if (lun_itype(l) == istsoil .or. lun_itype(l) == istdlak .or. &
+           lun_itype(l) == istice .or. &
            (lun_itype(l) >= isturb_tbd .and. lun_itype(l) <= isturb_md)) then
           wsum(lun_gridcell(l)) = wsum(lun_gridcell(l)) + lun_wtgcell(l)
        end if
     end do
     do g = 1, ncell
        if (abs(wsum(g) - 1.0_r8) > tol) then
-          write(logunit,*) subname,'ERROR: natural + lake + urban landunit weight on local cell ', &
+          write(logunit,*) subname,'ERROR: natural + lake + urban + glacier landunit weight on local cell ', &
                g,' = ',wsum(g),' != 1.0 -- h0 is the mean over those landunits only'
           call shr_sys_flush(logunit)
-          call shr_sys_abort(subname//'ERROR: natural + lake + urban landunit weight-on-gridcell '// &
+          call shr_sys_abort(subname//'ERROR: natural + lake + urban + glacier landunit weight-on-gridcell '// &
                '/= 1.0; history output would silently mislabel a partial mean '// &
                'as a gridcell value')
        end if

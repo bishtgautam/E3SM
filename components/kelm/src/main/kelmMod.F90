@@ -72,6 +72,7 @@ module kelmMod
                                       kelm_hist_final
   use kelmLakeMod           , only : kelm_lake_init, kelm_lake_push_forcing, &
                                       kelm_lake_clean, lake_built
+  use kelmGlacierMod        , only : kelm_glacier_init, kelm_glacier_clean
   use kelmUrbanMod          , only : kelm_urban_init, kelm_urban_diag_dump, &
                                       kelm_urban_clean, urban_built, kelm_urban_diag_step, &
                                       kelm_urban_apply_finidat
@@ -165,6 +166,8 @@ module kelmMod
   ! that turning it on is a deliberate act and a run without it keeps the
   ! frozen cold-start albedos it has been graded against.
   logical, public :: kelm_do_albedo = .false.
+  ! ELM: SurfaceAlbedoType albice -- the glacier's bare-ice albedo (VIS, NIR).
+  real(r8), public :: albice(2) = (/ 0.60_r8, 0.40_r8 /)
 
   ! Hold stomata closed instead of leaving them wide open. Photosynthesis is
   ! not ported, so rssun/rssha are zero and transpiration is unbounded from
@@ -304,7 +307,8 @@ contains
                             kelm_stomata_closed, kelm_do_photosynthesis, &
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
-                            kelm_kernel_reports, use_top_solar_rad, use_finetop_rad
+                            kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
+                            albice
 
     ! defaults
     do_kelm   = .true.
@@ -322,6 +326,7 @@ contains
     use_finetop_rad      = .false.
     fparamfile            = ' '
     kelm_do_albedo       = .true.
+    albice               = (/ 0.60_r8, 0.40_r8 /)
     kelm_stomata_closed  = .false.
     kelm_do_photosynthesis = .true.
     kelm_co2_ppmv        = 284.7_r8
@@ -372,6 +377,7 @@ contains
     ! These four went unbroadcast until 2026-10-04: every rank but 0 ran with
     ! albedo and photosynthesis OFF. Every namelist member needs a line here.
     call mpi_bcast (kelm_do_albedo        , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (albice                , 2, MPI_REAL8  , 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_stomata_closed   , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_do_photosynthesis, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_co2_ppmv         , 1, MPI_REAL8  , 0, mpicom_lnd, ier)
@@ -394,6 +400,7 @@ contains
        write(logunit,*) '   kelm_check_soft_fail = ', kelm_check_soft_fail
        write(logunit,*) '   kelm_kernel_reports  = ', kelm_kernel_reports
        write(logunit,*) '   kelm_do_albedo       = ', kelm_do_albedo
+       write(logunit,*) '   albice               = ', albice
        write(logunit,*) '   kelm_do_photosynthesis = ', kelm_do_photosynthesis
        write(logunit,*) '   use_top_solar_rad      = ', use_top_solar_rad
        write(logunit,*) '   use_finetop_rad        = ', use_finetop_rad
@@ -682,6 +689,10 @@ contains
        call kelm_lake_init(kelm_state, logunit)
        ! The urban surface's time-constant parameters (plan Stage 6.7, U1).
        call kelm_urban_init(kelm_state, logunit)
+       ! The glacier surface (glacier plan, G4): after lake and urban, which
+       ! push the natural landunit weights history starts from when they
+       ! exist. albice is kelm_inparm's (default: ELM's lnd_in default).
+       call kelm_glacier_init(kelm_state, logunit, lake_built, urban_built, albice)
 
        ! SNICAR lookup tables. Pushed once; nothing crosses per step. Both
        ! files must be given -- with either blank, snow albedo stays at the
@@ -879,12 +890,11 @@ contains
        call shr_sys_abort(subname//' ERROR: inconsistent subgrid composition')
     end if
 
-    ! Glacier is out of scope (no kernels and no Fortran fallback), so say so
-    ! loudly where it appears rather than silently ignoring the area.
+    ! Glacier: ELM's plain istice landunit, modelled by the glacier surface
+    ! (kelmGlacierMod). Wetland and crop are not, and init aborts on them
+    ! (kelm_hist_check_natveg_weight).
     if (n_gla > 0 .and. masterproc) then
-       write(logunit,*) subname,'WARNING: ',n_gla,' cells have glacier area, ', &
-                        'which kELM does not model; it is not yet excluded ', &
-                        'from the subgrid'
+       write(logunit,*) subname,n_gla,' cells have glacier area (istice, no MEC)'
        call shr_sys_flush(logunit)
     end if
 
@@ -1263,6 +1273,7 @@ contains
        call kelm_soil_kernel_clean()
        call kelm_kokkos_state_clean()
        call kelm_lake_clean()
+       call kelm_glacier_clean()
        call kelm_urban_clean()
        call kelm_soil_prop_clean()
        call kelm_root_clean()

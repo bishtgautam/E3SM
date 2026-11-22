@@ -30,7 +30,7 @@ module kelmLakeMod
   use kelmSubgridMod , only : num_landunits, num_columns, num_patches, &
                                lun_gridcell, lun_itype, lun_wtgcell, &
                                col_landunit, patch_column, istsoil, istdlak, &
-                               isturb_tbd, isturb_md
+                               isturb_tbd, isturb_md, istice
   use kelmSurfdataMod, only : lakedepth_in, etalake_in, lakefetch_in, lake_spval
   use kelmSurfaceStateMod, only : col_pct_sand, col_pct_clay, col_organic
   use kelmSoilPropMod, only : nlevsoi, nlevgrnd, nlevsno, nlevtot, &
@@ -413,6 +413,9 @@ contains
        case (isturb_tbd:isturb_md)
           ! Urban joins the mean through kELMHistorySetUrbanWeights
           ! (kelmUrbanMod, Stage 6.7).
+       case (istice)
+          ! Glacier joins the mean through kELMHistorySetGlacierWeights
+          ! (kelmGlacierMod, glacier plan).
        case default
           wother_cell(g) = wother_cell(g) + lun_wtgcell(l)
        end select
@@ -430,7 +433,7 @@ contains
     deallocate(lake_of_cell, wn_cell, wl_cell, wother_cell)
     if (any(wother > tol)) then
        call shr_sys_abort(subname//'ERROR: a lake cell has weight on a landunit '// &
-            'other than natural, lake and urban, which kELM history cannot represent')
+            'other than natural, lake, urban and glacier, which kELM history cannot represent')
     end if
 
     call kELMHistorySetLandunitWeights(elm, lake_of, wn, wl, n_kokkos_col, ierr)

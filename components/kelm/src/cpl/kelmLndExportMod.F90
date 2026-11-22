@@ -92,9 +92,9 @@ contains
     call refuse(l2x, 'Sl_soilw')
     call refuse(l2x, 'Flrl_rofmud')
 
-    ! Glacier, wetland and crop are not supported (owner, 2026-11-11): every
-    ! cell's natural + lake + urban weight must be 1, or the means below would
-    ! be partial ones. History aborts on the same condition.
+    ! Wetland and crop are not supported (owner, 2026-11-11 and 2026-11-22):
+    ! every cell's natural + lake + urban + glacier weight must be 1, or the
+    ! means below would be partial ones. History aborts on the same condition.
     call kelm_hist_check_natveg_weight(logunit)
 
     ncells = num_cells_owned

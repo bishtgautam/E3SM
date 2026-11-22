@@ -53,6 +53,7 @@ module kelmRestMod
   use kelmHistMod , only : kelm_hist_get_restart_state, kelm_hist_set_restart_state
   use kelmSubgridMod     , only : lun_gridcell, col_landunit, patch_column
   use kelmLakeMod        , only : n_lake, cell_of_klake
+  use kelmGlacierMod     , only : n_glc, cell_of_kglc
   use kelmKokkosStateMod , only : n_kokkos_col, n_kokkos_patch, n_kokkos_urb, &
                                    col_of_kcol, patch_of_kpatch, lun_of_kurb
   use kelmLndExportMod  , only : kelm_lnd2atm_ready, kelm_lnd2atm_cell_table, &
@@ -81,10 +82,12 @@ module kelmRestMod
   ! kept unused so the other kinds keep their numbers.
   integer, parameter :: KIND_TOPO = 0, KIND_CELL = 1, KIND_NATCOL = 2, &
                         KIND_NATPATCH = 3, KIND_URBLUN = 4, KIND_URBCOL = 5, &
-                        KIND_URBPATCH = 6, KIND_LAKECOL = 7, NKIND = 9
+                        KIND_URBPATCH = 6, KIND_LAKECOL = 7, KIND_GLCCOL = 10, &
+                        NKIND = 10
   character(len=10), parameter :: kind_name(0:NKIND) = (/ &
        'topo      ', 'cell      ', 'natcol    ', 'natpatch  ', 'urblun    ', &
-       'urbcol    ', 'urbpatch  ', 'lakecol   ', 'unused8   ', 'landunit  ' /)
+       'urbcol    ', 'urbpatch  ', 'lakecol   ', 'unused8   ', 'landunit  ', &
+       'glccol    ' /)
 
   ! One field's layout, agreed across ranks.
   type :: field_t
@@ -509,6 +512,7 @@ contains
     case (KIND_NATPATCH); local_count = n_kokkos_patch
     case (KIND_URBLUN);   local_count = n_kokkos_urb
     case (KIND_LAKECOL);  local_count = n_lake
+    case (KIND_GLCCOL);   local_count = n_glc
     case default
        local_count = 0
        call shr_sys_abort(subname//'ERROR: '//trim(name)//' is allocated, but kind '// &
@@ -538,6 +542,7 @@ contains
        case (KIND_NATPATCH); cell(e) = lun_gridcell(col_landunit(patch_column(patch_of_kpatch(e))))
        case (KIND_URBLUN);   cell(e) = lun_gridcell(lun_of_kurb(e))
        case (KIND_LAKECOL);  cell(e) = cell_of_klake(e)
+       case (KIND_GLCCOL);   cell(e) = cell_of_kglc(e)
        end select
        if (cell(e) < 1 .or. cell(e) > ncell) call shr_sys_abort(subname// &
             'ERROR: entity maps outside this rank''s cells')

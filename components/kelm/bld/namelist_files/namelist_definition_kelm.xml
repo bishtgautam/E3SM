@@ -205,6 +205,17 @@ library can still run a chosen subset (kelmKernelMod's kelm_kernels_parse)
 for kernel-by-kernel checks against ELM.
 </entry>
 
+<entry id="albice"
+       type="real(2)"
+       category="kelm"
+       group="kelm_inparm"
+       valid_values="" >
+Default: 0.60,0.40
+Bare land-ice albedo (visible, near-infrared) of the glacier landunit: ELM's
+albice, whose lnd_in default this is (namelist_defaults.xml, every glc_nec).
+ELM's code default (0.80, 0.55) is not what ELM runs with.
+</entry>
+
 <entry id="kelm_do_albedo"
        type="logical"
        category="kelm"

@@ -33,6 +33,7 @@ module kelmKernelMod
   use kelmKokkosStateMod , only : n_kokkos_col
   use kelmLakeMod       , only : lake_built
   use kelmUrbanMod      , only : urban_built, kelm_urban_diag_step
+  use kelmGlacierMod    , only : kelm_glacier_diag_step
   use kelmSoilPropMod   , only : nlevgrnd, nlevsno, nlevtot
   use kelm_mod       , only : kELMType, KELM_SUCCESS, KELM_NKERNEL, KELM_NTIMER, &
                                kELMSetActiveKernels, kELMActiveKernelsError, kELMSetStepHook, &
@@ -737,6 +738,7 @@ contains
     select case (stage)
     case (KELM_STAGE_STATE_IN)
        call kelm_diag_snapshot_state(hook_elm, nlevtot, nlevgrnd, 'kelm_in')
+       call kelm_glacier_diag_step(hook_elm, 'kelm_glcin')
     case (KELM_STAGE_URBAN_IN)
        call kelm_urban_diag_step(hook_elm, 'kelm_urbin')
     case (KELM_STAGE_WBAL_BEGIN)
@@ -763,6 +765,7 @@ contains
        call kelm_urban_diag_step(hook_elm, 'kelm_urbout')
     case (KELM_STAGE_FLUXES_OUT)
        call kelm_diag_snapshot_fluxes(hook_elm, 'kelm_out')
+       call kelm_glacier_diag_step(hook_elm, 'kelm_glcout')
     end select
 
   end subroutine kelm_step_hook
