@@ -195,7 +195,11 @@ Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
 driver, `RUN_TYPE=hybrid` (it cold-starts kELM: `finidat` reads ELM files,
 not kELM restarts). Lake state restarts (`LAKECOL`, since
 Stage 6.5); urban state restarts (`URBLUN`, since Stage 6.7; every urban
-surface record is indexed by landunit).
+surface record is indexed by landunit); glacier state restarts (`GLCCOL`).
+
+Wetland will never be supported (owner, 2026-11-22), nor crop: init aborts
+on either. Glacier MEC, the firn model and CISM coupling are not supported;
+`finidat` does not seed glacier columns (they cold-start).
 
 ## The urban surface
 
@@ -277,6 +281,51 @@ Lake is its own surface, a peer of natural and urban: `lakeCol`
   `LakeHydrologyData` (the replay structs carry none).
 - **Lake negative controls need >= 1e-6 K.** Convective mixing averages a
   1e-12 K perturbation of `t_lake` below a 300 K ULP; it vanishes.
+
+## The glacier surface
+
+ELM's plain `istice` landunit (no glacier MEC, no firn model, no CISM) is
+its own surface, `glacier` (`src/data_types/GlacierColumnData.h`): one
+column and its bare-ice patch per glacier landunit, merged like lake's,
+driven from `src/main/kelmGlacierMod.F90` and stepped by
+`external_models/kelm/src/main/kELMGlacier.cpp`. Durable facts:
+
+- **Natural's layouts**: reversed snow slots, `thermal`/`snowsoil` on
+  `NLEVGRND` ice layers, the combined and `_p1` views. Field names match
+  the natural containers', so the templated kernels
+  (`BareGroundFluxesPatch`, `SurfaceRadiationPatch`,
+  `CanopyTemperatureColumnGlacier`) take it as column and patch.
+- **Glacier branches in shared kernels are keyed on `lun_itype == ISTICE`**
+  (column type 3), never on "not soil": a column whose type is not yet
+  seeded (0) must stay natural.
+- **Each glacier stage runs when the natural kernel at the same ELM driver
+  position is active** (`kELMDriver.cpp`), only if the driver allocated the
+  surface. `kELMStepInputs` is unchanged.
+- **No soil hydrology** (ELM keeps it out of `filter_hydrologyc`); its
+  runoff is `qflx_qrgwl`, the water-balance residual. ELM's spval soil
+  properties and absent aquifer/plant water come from `glacierAux`
+  stand-ins, never restarted.
+- **A glacier cold-starts at `h2osno_max` (1000 mm) and sits on the cap
+  for months.** Capping (`do_capsnow = h2osno > 1000`, decided in
+  `BeginColWaterBalanceColumn`) routes precipitation to `qflx_snwcp_*`
+  and `AerosolMassesCappingColumn` thins the top layer's aerosol. The pack
+  hovers ~1e-3 mm above the cap: a sublimation difference of that size
+  switches the capping regime, so glacier divergence grows fast once any
+  appears.
+- **`frac_iceold` is set at the top of the glacier step** (ELM
+  `elm_drv_init`); the non-soil melt compaction reads it.
+- **`albice` is a `kelm_inparm` namelist variable, default 0.60,0.40** --
+  ELM's lnd_in default, not its code's 0.80,0.55.
+- **History**: `GlacierRule` per field (`HistData.h`), read off ELM's h0
+  over a 100% glacier cell; QICE/QICE_FRZ/QICE_MELT are glacier-only.
+  TWS and the multi-level fields are not mapped (natural-only).
+- **KELM_DIAG** writes `kelm_glcin`/`kelm_glcout` (packed glacier order,
+  kELM snow slots). Pair `kelm_glcin` with ELM's `canhydro_in` only between
+  two startups: an ELM startup runs a duplicate first pass a kELM continue
+  run does not, so a startup-vs-continue probe diverges at step 2 by
+  construction.
+- Twins: `cime/scripts/glc_gla.sh` / `glc_gla_kelm.sh` (`gla20`, `gla100`),
+  surfdata from `tools/make_glacier_surfdata.py`. Restart kind `glccol`.
 
 ## Restarts
 
