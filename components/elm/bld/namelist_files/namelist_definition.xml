@@ -176,6 +176,17 @@ of plant carbon and nutrient fluxes
 If TRUE, separate the vegetated landunit into a crop landunit and a natural vegetation landunit
 </entry>
 
+<entry id="use_single_pft" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" >
+If TRUE, each natural vegetation landunit has a single PFT: the one PFT_TYPE (gridcell)
+on fsurdat names. It takes the sum of the cell's PCT_NAT_PFT weights (1 where the
+landunit has vegetation data, 0 where it has none), and every other PFT gets zero weight,
+so it stays inactive. For datasets with one PFT per gridcell, such as the 1 km
+regional sets with reduced-dimension MONTHLY_LAI. The run stops if PFT_TYPE is missing
+or outside 0..numpft.
+Default: FALSE
+</entry>
+
 <entry id="run_zero_weight_urban" type="logical" category="elm_physics"
        group="elm_inparm" valid_values="" >
 If TRUE, allocate memory for all urban landunits everywhere where we have valid urban data,

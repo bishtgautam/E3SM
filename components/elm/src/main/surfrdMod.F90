@@ -41,6 +41,7 @@ module surfrdMod
   ! !PRIVATE MEMBER FUNCTIONS:
   private :: surfrd_special             ! Read the special landunits
   private :: surfrd_veg_all             ! Read all of the vegetated landunits
+  private :: surfrd_single_pft          ! use_single_pft: one PFT (PFT_TYPE) per natural veg landunit
   private :: surfrd_pftformat           ! Read crop pfts in file format where they are part of the vegetated land unit
   private :: surfrd_cftformat           ! Read crop pfts in file format where they are on their own landunit
   private :: surfrd_fates_nocropmod     ! Read in crop and pfts and compress them both into wt_nat_patch
@@ -1060,6 +1061,50 @@ contains
   end subroutine surfrd_pftformat
 
   !-----------------------------------------------------------------------
+  subroutine surfrd_single_pft(begg, endg, ncid)
+    !
+    ! !DESCRIPTION:
+    ! use_single_pft: give each natural vegetation landunit one PFT, the one
+    ! PFT_TYPE names. It takes the sum of the PCT_NAT_PFT weights (1 where the
+    ! landunit has vegetation data, 0 elsewhere), so the sums are unchanged.
+    !
+    ! !USES:
+    use elm_varsur      , only : wt_nat_patch
+    !
+    ! !ARGUMENTS:
+    integer          , intent(in)    :: begg, endg
+    type(file_desc_t), intent(inout) :: ncid
+    !
+    ! !LOCAL VARIABLES:
+    integer           :: g, t
+    logical           :: readvar
+    real(r8)          :: wsum
+    integer , pointer :: pft_type(:)
+    character(len=32) :: subname = 'surfrd_single_pft'
+    !-----------------------------------------------------------------------
+
+    allocate(pft_type(begg:endg))
+    call ncd_io(ncid=ncid, varname='PFT_TYPE', flag='read', data=pft_type, &
+         dim1name=grlnd, readvar=readvar)
+    if (.not. readvar) call endrun(msg=' ERROR: PFT_TYPE NOT on surfdata file'// &
+         ' (needed by use_single_pft)'//errMsg(__FILE__, __LINE__))
+    do g = begg, endg
+       if (pft_type(g) < lbound(wt_nat_patch,3) .or. pft_type(g) > ubound(wt_nat_patch,3)) then
+          write(iulog,*) trim(subname)//' ERROR: PFT_TYPE out of range at g = ', g, &
+               ' value ', pft_type(g)
+          call endrun(msg=errMsg(__FILE__, __LINE__))
+       end if
+       do t = lbound(wt_nat_patch,2), ubound(wt_nat_patch,2)
+          wsum = sum(wt_nat_patch(g,t,:))
+          wt_nat_patch(g,t,:) = 0._r8
+          wt_nat_patch(g,t,pft_type(g)) = wsum
+       end do
+    end do
+    deallocate(pft_type)
+
+  end subroutine surfrd_single_pft
+
+  !-----------------------------------------------------------------------
   subroutine surfrd_veg_all(begg, endg, ncid, ns,ntpu)
     !
     ! !DESCRIPTION:
@@ -1067,7 +1112,7 @@ contains
     !
     ! !USES:
     use elm_varctl      , only : create_crop_landunit, use_fates, use_polygonal_tundra
-    use elm_varctl      , only : irrigate
+    use elm_varctl      , only : irrigate, use_single_pft
     use elm_varpar      , only : surfpft_lb, surfpft_ub, surfpft_size, cft_lb, cft_ub, cft_size
     use elm_varpar      , only : crop_prog
     use elm_varsur      , only : wt_lunit, wt_nat_patch, wt_cft, fert_cft, fert_p_cft, wt_polygon
@@ -1208,6 +1253,11 @@ contains
     wt_nat_patch(begg:endg,:,:)   = wt_nat_patch(begg:endg,:,:) / 100._r8
     !call check_sums_equal_1_3d(wt_nat_patch, begg, 'wt_nat_patch', subname,ntpu)
     call check_sums_equal_1_3d(wt_nat_patch, begg, 'wt_nat_patch', subname)
+
+    ! One PFT per natural vegetation landunit: PFT_TYPE takes the whole weight.
+    if (use_single_pft) then
+       call surfrd_single_pft(begg, endg, ncid)
+    end if
 
     ! If no irrigation, merge irrigated CFTs with rainfed
     

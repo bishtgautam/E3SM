@@ -164,6 +164,12 @@ module elm_varctl
   !          finidat file generated with the same setting)
   logical, public :: run_zero_weight_urban = .true.
 
+  ! true => each natural vegetation landunit has one PFT, the one PFT_TYPE on
+  !         fsurdat names, carrying the whole PCT_NAT_PFT sum (1 where the
+  !         landunit has vegetation data, 0 elsewhere); the other PFTs get zero
+  !         weight and stay inactive
+  logical, public :: use_single_pft = .false.
+
   ! true => make ALL patches, cols & landunits active (even if weight is 0)
   logical, public :: all_active = .false.
   !$acc declare copyin(all_active)

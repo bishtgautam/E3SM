@@ -62,7 +62,7 @@ module controlMod
                         glcmec_downscale_longwave, glc_snow_persistence_max_days, &
                         wrtdia, create_crop_landunit, nsegspc, co2_ppmv, &
                         subgridflag, irrigate, tw_irr, extra_gw_irr, &
-                        firrig_data, run_zero_weight_urban, all_active, mpi_sync_nstep_freq, &
+                        firrig_data, run_zero_weight_urban, use_single_pft, all_active, mpi_sync_nstep_freq, &
                         use_c13, use_c14, fates_paramfile, use_fates, &
                         use_betr, use_lai_streams, metdata_type, metdata_bypass, &
                         metdata_biases, co2_file, aero_file, &
@@ -277,7 +277,7 @@ contains
          clump_pproc, wrtdia, &
          create_crop_landunit, nsegspc, co2_ppmv, override_nsrest, &
          albice, more_vertlayers, subgridflag, irrigate, tw_irr, extra_gw_irr, firrig_data, &
-         run_zero_weight_urban, all_active, mpi_sync_nstep_freq
+         run_zero_weight_urban, use_single_pft, all_active, mpi_sync_nstep_freq
     ! Urban options
 
     namelist /elm_inparm/  &
@@ -844,6 +844,7 @@ contains
 
     ! Other subgrid logic
     call mpi_bcast(run_zero_weight_urban, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast(use_single_pft, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast(all_active, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     ! max number of plant functional types in naturally vegetated landunit
@@ -1310,6 +1311,7 @@ contains
     
     write(iulog,*) '   Sub-grid topographic effects on solar radiation   = ', use_top_solar_rad  ! TOP solar radiation parameterization
     write(iulog,*) '   Soil albedos read from surface dataset = ', use_surfdata_soil_albedo
+    write(iulog,*) '   One PFT per natural vegetation landunit (PFT_TYPE) = ', use_single_pft
     write(iulog,*) '   Grid-scale topographic effects on radiation (fineTOP)  = ', use_finetop_rad   ! fineTOP radiation parameterization
 
     if (nsrest == nsrContinue) then
