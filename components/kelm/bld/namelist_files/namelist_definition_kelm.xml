@@ -88,14 +88,33 @@ Default: ' '
        input_pathname="abs"
        group="kelm_inparm"
        valid_values="" >
-Full pathname of an ELM restart file to read as an initial condition.
+Full pathname of a kELM restart file (*.kelm.r.*.nc) to read as the initial
+condition of a startup run (RUN_TYPE=startup). Works on any number of ranks,
+whatever rank count wrote the file.
 
-READ-ONLY, and it reads an ELM file -- kELM's own restarts (Stage 6) are
-read by CONTINUE_RUN or kelm_nrevsn, not here. This exists to start kELM from
-ELM's exact state so the two can be stepped once from a bit-identical
-starting point, which is the only way to separate a coupling error from an
-arithmetic one -- the replay tests seed each kernel from ELM and so bypass
-the coupling by construction.
+The model state is restored from the file as on a branch run, but the run
+keeps its own RUN_STARTDATE and starts at step 0, and history starts fresh.
+The file must come from a kELM run on the same grid and surface data: the
+entity counts, cell coordinates, column/landunit/PFT types and PFT weights
+are checked, and the run aborts if any differs.
+
+ELM restarts are not accepted here; see kelm_elm_ic_probe.
+Default: ' '
+</entry>
+
+<entry id="kelm_elm_ic_probe"
+       type="char*256"
+       category="kelm"
+       input_pathname="abs"
+       group="kelm_inparm"
+       valid_values="" >
+Full pathname of an ELM restart file to read as the initial condition, for
+the identical-IC probe. ONE RANK ONLY (NTASKS_LND=1), and not with finidat.
+
+A validation tool, not a user feature: it starts kELM from ELM's exact state
+so the two models can be stepped from an identical start, which is the only
+way to separate a coupling error from an arithmetic one -- the replay tests
+seed each kernel from ELM and so bypass the coupling by construction.
 
 The soil grid is not taken from this file; it comes from the surface dataset
 and is identical by construction.
@@ -163,8 +182,8 @@ Default: .false.
 If .true., round-trip a per-entity fingerprint through the Kokkos views at the
 end of the first step and check that every packed slot returns what was
 written to it. DESTRUCTIVE now that the kernels run: the probe restores the
-cold-start seed afterwards, which discards the first step's physics (and a
-finidat initial state). Turn it on only for a run whose results you intend to
+cold-start seed afterwards, which discards the first step's physics (and an
+initial state from finidat or kelm_elm_ic_probe). Turn it on only for a run whose results you intend to
 throw away.
 This validates the Fortran/Kokkos boundary plumbing: extents matching the views
 kELMCreate allocated, no setter silently rejected, both the int and double

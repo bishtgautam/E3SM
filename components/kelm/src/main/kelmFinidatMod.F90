@@ -2,7 +2,11 @@ module kelmFinidatMod
 
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
-  ! Read an ELM restart file as an initial condition (finidat).
+  ! Read an ELM restart file as an initial condition: the identical-IC
+  ! probe, namelist kelm_elm_ic_probe, one rank only. (The finidat namelist
+  ! variable takes a kELM restart instead, read by kelmRestMod.) The fi_*
+  ! names and the *_apply_finidat routines in the surface modules predate
+  ! that split and mean this probe path.
   !
   ! WHY THIS EXISTS. Every kELM kernel matches ELM to ~1e-14 when replayed
   ! against ELM's recorded inputs, and the coupled model is still ~0.9 K off.
@@ -24,8 +28,8 @@ module kelmFinidatMod
   !   - either probe vs ELM's CONTINUOUS run: align on FORCING (offset 2832
   !     for this file), never on state, or every field reads ~10% off for free.
   !
-  ! READ-ONLY, DELIBERATELY. kELM does not write restarts. This is a
-  ! debugging instrument, not restart capability; do not mistake it for one.
+  ! A DEBUGGING INSTRUMENT, NOT RESTART CAPABILITY. kELM's own restarts
+  ! (CONTINUE_RUN, branch, finidat) go through kelmRestMod.
   !
   ! NETCDF DIMENSION ORDER. A CDL declaration H2OSOI_LIQ(column, levtot) means
   ! levtot varies FASTEST in memory, so the matching Fortran array is

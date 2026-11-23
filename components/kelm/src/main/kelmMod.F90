@@ -66,7 +66,8 @@ module kelmMod
                                    kelm_diag_snapshot_state,              &
                                    kelm_diag_snapshot_fluxes,             &
                                    kelm_diag_write_maps, kelm_diag_flush
-  use kelmRestMod           , only : kelm_rest_read
+  use kelmRestMod           , only : kelm_rest_read, REST_MODE_CONTINUE, REST_MODE_BRANCH, &
+                                      REST_MODE_INITIAL
   use kelmHistMod           , only : kelm_hist_init, kelm_hist_step, &
                                       kelm_hist_write_if_month_end, &
                                       kelm_hist_final
@@ -190,19 +191,25 @@ module kelmMod
   ! exactly how kELM behaved before SNICAR was ported.
   character(len=256), public :: fsnowoptics = ' '
   character(len=256), public :: fsnowaging  = ' '
-  ! ELM restart file read as an initial condition. READ-ONLY: kELM never
-  ! writes restarts. This exists so both models can be started from
-  ! bit-identical state and stepped once, which is the only way to separate a
-  ! coupling error from an arithmetic one -- the replay tests bypass the
-  ! coupling by construction and so cannot see it.
+  ! finidat: a kELM restart (*.kelm.r.*.nc) read as the initial condition
+  ! of a startup run, on any number of ranks. It is read like a branch's
+  ! restart (kelmRestMod, REST_MODE_INITIAL) but the run keeps its own
+  ! RUN_STARTDATE and step 0, and history starts fresh. The file must come
+  ! from a kELM run on the same grid and surface data.
   character(len=256), public :: finidat = ' '
+  ! kelm_elm_ic_probe: an ELM restart read as the initial condition, ONE RANK
+  ! ONLY. A validation tool, not a user feature: it starts kELM from ELM's
+  ! exact state so the two can be stepped from an identical start (the
+  ! identical-IC probe), the only way to separate a coupling error from an
+  ! arithmetic one -- the replay tests bypass the coupling by construction.
+  character(len=256), public :: kelm_elm_ic_probe = ' '
   ! Stage 6 restart. kelm_nrevsn is ELM's nrevsn: the kELM restart a BRANCH
   ! run starts from. A CONTINUE run reads rpointer.lnd instead. The read
   ! itself is deferred to the top of the first kelm_run (see there).
   character(len=256), public :: kelm_nrevsn = ' '
   character(len=256), private :: rest_read_file = ' '
   logical, private :: rest_read_pending = .false.
-  logical, private :: rest_read_branch  = .false.   ! branch: history starts fresh
+  integer, private :: rest_read_mode = REST_MODE_CONTINUE   ! kelmRestMod REST_MODE_*
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
   ! seed, which silently discards a step of physics. That was harmless while
@@ -309,7 +316,7 @@ contains
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
                             kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
-                            albice
+                            albice, kelm_elm_ic_probe
 
     ! defaults
     do_kelm   = .true.
@@ -318,6 +325,7 @@ contains
     fsnowoptics = ' '
     fsnowaging  = ' '
     finidat     = ' '
+    kelm_elm_ic_probe = ' '
     kelm_nrevsn = ' '
     kelm_check_boundary  = .false.
     kelm_stage2_snapshot = .false.
@@ -369,6 +377,15 @@ contains
     call mpi_bcast (fsnowaging , len(fsnowaging)  , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (finidat    , len(finidat)     , MPI_CHARACTER, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_nrevsn, len(kelm_nrevsn), MPI_CHARACTER, 0, mpicom_lnd, ier)
+    call mpi_bcast (kelm_elm_ic_probe, len(kelm_elm_ic_probe), MPI_CHARACTER, 0, mpicom_lnd, ier)
+    if (len_trim(finidat) > 0 .and. len_trim(kelm_elm_ic_probe) > 0) then
+       call shr_sys_abort(subname//' ERROR: set finidat (a kELM restart) or '// &
+            'kelm_elm_ic_probe (an ELM restart), not both')
+    end if
+    if (len_trim(kelm_elm_ic_probe) > 0 .and. npes > 1) then
+       call shr_sys_abort(subname//' ERROR: kelm_elm_ic_probe (an ELM restart) is read '// &
+            'on one rank only; use NTASKS_LND=1, or a kELM restart in finidat')
+    end if
     call mpi_bcast (kelm_check_boundary , 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_stage2_snapshot, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_check_soft_fail, 1      , MPI_LOGICAL  , 0, mpicom_lnd, ier)
@@ -408,6 +425,8 @@ contains
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
        write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
+       write(logunit,*) '   finidat              = ', trim(finidat)
+       write(logunit,*) '   kelm_elm_ic_probe    = ', trim(kelm_elm_ic_probe)
        write(logunit,*) '   kelm_hist_fincl      = ', trim(kelm_hist_fincl)
        write(logunit,*) '   kelm_timer_level     = ', kelm_timer_level
        call shr_sys_flush(logunit)
@@ -480,9 +499,9 @@ contains
     ! Perf mode: the active cells just counted are the sources; the
     ! decomposition below deals kelm_perf_ncells virtual cells instead.
     if (kelm_perf_ncells > 0) then
-       if (len_trim(finidat) > 0) then
+       if (len_trim(finidat) > 0 .or. len_trim(kelm_elm_ic_probe) > 0) then
           call shr_sys_abort(subname//' ERROR: perf mode is a cold start; '// &
-               'finidat must be blank (its column/pft counts are per file)')
+               'finidat and kelm_elm_ic_probe must be blank')
        end if
        kelm_perf_nsrc  = num_cells_global
        num_cells_global = kelm_perf_ncells
@@ -736,12 +755,14 @@ contains
           ! built on step one.
        end if
 
-       ! finidat LAST among the seeding, so it overwrites every cold-start
-       ! value rather than racing them. The soil GRID is deliberately left to
-       ! kelm_soil_prop_init above -- it is identical by construction and
-       ! pushing it again would only add a way to get it wrong.
-       if (len_trim(finidat) > 0) then
-          call kelm_finidat_read(finidat, num_columns, num_patches, logunit)
+       ! The ELM-restart probe LAST among the seeding, so it overwrites every
+       ! cold-start value rather than racing them. The soil GRID is
+       ! deliberately left to kelm_soil_prop_init above -- it is identical by
+       ! construction and pushing it again would only add a way to get it
+       ! wrong. (A kELM finidat is read at the top of the first step instead,
+       ! like a restart.)
+       if (len_trim(kelm_elm_ic_probe) > 0) then
+          call kelm_finidat_read(kelm_elm_ic_probe, num_columns, num_patches, logunit)
           ! Soil-prop arrays FIRST: the first-step soil kernel init re-pushes
           ! from them, so seeding only the device would be undone one step in.
           call kelm_finidat_apply_soilprop(logunit)
@@ -938,7 +959,8 @@ contains
     if (present(doalb)) doalb_in = doalb
     do_albedo_this_step = kelm_do_albedo .and. doalb_in
 
-    ! RESTART READ, on the first step of a continue/branch run. It has to be
+    ! RESTART READ, on the first step of a continue/branch run, or of a
+    ! startup from a kELM finidat. It has to be
     ! HERE: before the forcing push (forcing views are restart fields, and
     ! this step's forcing must win) and before root stress (btran must come
     ! from the restored soil, not the cold start). The pieces a startup
@@ -974,7 +996,11 @@ contains
              photosyn_statics_pushed = .true.
           end if
        end if
-       call kelm_rest_read(kelm_state, rest_read_file, rest_read_branch, &
+       ! An initial condition checks the file's cell coordinates against this
+       ! run's, which the forcing push below would otherwise set only later.
+       if (rest_read_mode == REST_MODE_INITIAL .and. kokkos_state_built) &
+            call kelm_kokkos_push_latlon(kelm_state, cell_lat, cell_lon, logunit)
+       call kelm_rest_read(kelm_state, rest_read_file, rest_read_mode, &
                             num_cells_owned, num_cells_global, nstep, logunit)
        rest_read_pending = .false.
     end if
@@ -1050,7 +1076,7 @@ contains
                real(coupling_dt_in_sec, r8), logunit)
           ! soil_kernel_init pushes _p1 with an empty snow half; the collapse
           ! that follows would write that back over the seeded snowpack.
-          if (len_trim(finidat) > 0) then
+          if (len_trim(kelm_elm_ic_probe) > 0) then
              call kelm_kokkos_reseed_finidat_snow(kelm_state, logunit)
           end if
        end if
@@ -1307,12 +1333,14 @@ contains
     !
     ! Decide, from the coupler's start type, whether this run starts from an
     ! kELM restart (ELM's nsrest): 'continue' reads rpointer.lnd, 'branch'
-    ! reads kelm_nrevsn, 'startup' reads nothing (finidat, if set, is the
-    ! separate ELM-restart path). Returns the restart's step counter, or -1,
-    ! so the driver can carry its own count on; the read itself happens at
-    ! the top of the first kelm_run.
+    ! reads kelm_nrevsn, 'startup' reads finidat if it is set (an initial
+    ! condition: state only, the run keeps its own clock). Returns the
+    ! restart's step counter on continue/branch, or -1, so the driver can
+    ! carry its own count on; the read itself happens at the top of the first
+    ! kelm_run.
     !
-    use kelmRestMod, only : kelm_rest_rpointer_read, kelm_rest_peek_nstep
+    use kelmRestMod, only : kelm_rest_rpointer_read, kelm_rest_peek_nstep, &
+                            kelm_rest_is_kelm_file
     character(len=*), intent(in)  :: start_type, inst_suffix
     integer         , intent(in)  :: logunit
     integer         , intent(out) :: nstep_restart
@@ -1322,16 +1350,22 @@ contains
     select case (trim(start_type))
     case ('continue')
        rest_read_file = kelm_rest_rpointer_read(inst_suffix)
+       rest_read_mode = REST_MODE_CONTINUE
     case ('branch')
        if (len_trim(kelm_nrevsn) == 0) call shr_sys_abort(subname// &
             'ERROR: a branch run needs kelm_nrevsn (the kELM restart to branch from)')
        rest_read_file = kelm_nrevsn
-       rest_read_branch = .true.
+       rest_read_mode = REST_MODE_BRANCH
     case default
-       return
+       if (len_trim(finidat) == 0) return
+       if (.not. kelm_rest_is_kelm_file(finidat)) call shr_sys_abort(subname// &
+            'ERROR: finidat '//trim(finidat)//' is not a kELM restart (*.kelm.r.*.nc). '// &
+            'An ELM restart is read only by the one-rank probe, kelm_elm_ic_probe.')
+       rest_read_file = finidat
+       rest_read_mode = REST_MODE_INITIAL
     end select
     rest_read_pending = .true.
-    nstep_restart = kelm_rest_peek_nstep(rest_read_file)
+    if (rest_read_mode /= REST_MODE_INITIAL) nstep_restart = kelm_rest_peek_nstep(rest_read_file)
     if (masterproc) then
        write(logunit,*) subname, trim(start_type), ' run from ', trim(rest_read_file), &
             ' (nstep ', nstep_restart, ')'

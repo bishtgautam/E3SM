@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Compare an kELM finidat-restart run against ELM step by step from step 1.
+"""Compare a kELM identical-IC probe run against ELM step by step from step 1.
 
-The point of a finidat restart is that step 1 starts from ELM's own state, so
+The probe (kELM namelist kelm_elm_ic_probe, an ELM restart; one rank) starts
+kELM from ELM's own state at step 1, so
 accumulated drift is removed and whatever differs was caused in that step.
 That makes "how big is the error at step 1" a different and more useful
 question than "when does it first exceed a tolerance".

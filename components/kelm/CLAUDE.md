@@ -192,8 +192,8 @@ cases -- use a standard grid.
 ## Not supported yet
 
 Multi-instance (`NINST_LND > 1` is asserted against in `buildnml`), the moab
-driver, `RUN_TYPE=hybrid` (it cold-starts kELM: `finidat` reads ELM files,
-not kELM restarts). Lake state restarts (`LAKECOL`, since
+driver, `RUN_TYPE=hybrid` (it cold-starts kELM; use a startup with a kELM
+`finidat` instead). Lake state restarts (`LAKECOL`, since
 Stage 6.5); urban state restarts (`URBLUN`, since Stage 6.7; every urban
 surface record is indexed by landunit); glacier state restarts (`GLCCOL`).
 
@@ -237,12 +237,13 @@ the C++ layout). Stepped from `src/main/kELMUrban.cpp` by the
   domain (natural first, lake last). Wall entries of snow/water fields are
   spval (the wall record has none). `tools/urban_step_compare.py` pairs it
   with ELM's labels for an identical-IC probe.
-- **finidat seeds urban** (`kelm_urban_apply_finidat`, after the natural
-  push), one rank only, like the natural push. It sets both the split
+- **The ELM-restart probe (`kelm_elm_ic_probe`) seeds urban**
+  (`kelm_urban_apply_finidat`, after the natural push), one rank only, like
+  the natural push. It sets both the split
   (`_soi`/`_sno`, snow reversed) and the combined ELM-ordered arrays; the
   `_p1` geometry is rebuilt from the snow every step and `t_building` is
-  diagnosed, so neither is seeded. Lake is still a cold start under finidat.
-- **finidat seeds glacier** (`kelm_glacier_apply_finidat`, after urban), one
+  diagnosed, so neither is seeded. Lake is still a cold start under the probe.
+- **The probe seeds glacier** (`kelm_glacier_apply_finidat`, after urban), one
   rank only: snow (reversed), ice layers (split arrays), `t_grnd`, albedos
   and the SNICAR absorption factors. `_p1` geometry and `h2osoi_vol` are
   rebuilt each step. The glc_gla20 probe from ELM's 03-01 restart gives
@@ -341,7 +342,21 @@ headers by `external_models/kelm/tools/gen_restart_registry.py`), the active
 history accumulators, and the Fortran-side `nstep` and history interval. Written
 when the coupler's restart alarm rings, dated with the step's END time
 (`<case>.kelm.r.YYYY-MM-DD-SSSSS.nc`), plus `rpointer.lnd`. Read on
-`CONTINUE_RUN=TRUE` (from `rpointer.lnd`) or a branch (`kelm_nrevsn`).
+`CONTINUE_RUN=TRUE` (from `rpointer.lnd`), a branch (`kelm_nrevsn`), or a
+startup's `finidat`.
+
+- **`finidat` takes only a kELM restart** (owner, 2026-11-22), read as an
+  initial condition on any rank count (`REST_MODE_INITIAL`): state restored as
+  on a branch, history fresh, but the run keeps its own `RUN_STARTDATE` and
+  step 0. It aborts on a file from another grid (cell count, checked before
+  the export table is read) or surface dataset (`STRUCTURE_FIELDS`: cell
+  lat/lon, column/landunit/PFT types, PFT weights; landunit weights are not
+  restart state and are not checked). glc4 from a Jan-run restart: 1, 2 and 4
+  ranks bit-identical; vs a continue run only the startup's duplicate-pass
+  differences (142/160 under 1e-3).
+- **An ELM restart goes in `kelm_elm_ic_probe`**, never `finidat`: the
+  identical-IC probe (kelmFinidatMod and the `*_apply_finidat` routines --
+  the names predate the split), one rank only, a validation tool.
 
 - **The read happens at the top of the first `kelm_run`**, after forcing the
   first-step lazy inits and BEFORE the forcing push and root stress. Moving it

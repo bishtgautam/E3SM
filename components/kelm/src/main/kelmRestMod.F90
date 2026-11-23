@@ -41,6 +41,16 @@ module kelmRestMod
   ! so the first h0 holds only the branch's own steps and the branch may
   ! change kelm_hist_fincl.
   !
+  ! AN INITIAL CONDITION (finidat) IS A BRANCH THAT KEEPS ITS OWN CLOCK: the
+  ! state is restored as on a branch, history starts fresh, and rst:nstep is
+  ! ignored, so the run stays a startup at step 0 on its own RUN_STARTDATE.
+  ! The file must come from the same grid and surface data: the number of
+  ! entities of every kind must match (the per-field shape check), and the
+  ! STRUCTURE fields below must equal this run's own values before they are
+  ! overwritten. Landunit weights are not restart state (they come from this
+  ! run's surface data) and are not checked. Any rank count may read a file
+  ! written by any other.
+  !
   ! READING IS STRICT. Every allocated, non-TOPO registry field must be on
   ! the file with the same global shape, or the run aborts: under "write all
   ! state" a field that silently fails to restore is a bug, not a tolerance.
@@ -71,8 +81,20 @@ module kelmRestMod
   public :: kelm_rest_write
   public :: kelm_rest_read
   public :: kelm_rest_peek_nstep
+  public :: kelm_rest_is_kelm_file
   public :: kelm_rest_read_lnd2atm
   public :: kelm_rest_rpointer_read
+
+  ! kelm_rest_read modes.
+  integer, parameter, public :: REST_MODE_CONTINUE = 0  ! state + history; nstep
+  integer, parameter, public :: REST_MODE_BRANCH   = 1  ! state; history fresh; nstep
+  integer, parameter, public :: REST_MODE_INITIAL  = 2  ! state; history fresh; own nstep
+
+  ! Checked against this run's values on an initial-condition read: a file
+  ! from another grid or surface dataset fails here, not silently.
+  character(len=*), parameter :: STRUCTURE_FIELDS(8) = [character(len=24) :: &
+       'cell:lat_rad', 'cell:lon_rad', 'natcol:col_itype', 'natcol:lun_itype', &
+       'natpatch:patch_itype', 'natpatch:wtcol', 'urban:itype', 'glccol:lun_itype']
 
   integer, parameter :: NAMELEN = 128
 
@@ -292,35 +314,42 @@ contains
   end subroutine kelm_rest_write
 
   !-----------------------------------------------------------------------
-  subroutine kelm_rest_read(elm, fname, branch, ncell, ncell_global, nstep, logunit)
+  subroutine kelm_rest_read(elm, fname, mode, ncell, ncell_global, nstep, logunit)
     !
     ! Restore every allocated, non-TOPO registry field and the Fortran-side
-    ! state from fname. Returns the step counter of the last step the
-    ! writing run took. A branch leaves history as kelm_hist_init set it
-    ! (see the header). Collective.
+    ! state from fname. On a continue or branch run, nstep returns the step
+    ! counter of the last step the writing run took; an initial condition
+    ! leaves it alone. Branch and initial leave history as kelm_hist_init set
+    ! it (see the header). Collective.
     !
-    type(kELMType) , intent(in)  :: elm
-    character(len=*), intent(in)  :: fname
-    logical         , intent(in)  :: branch
-    integer         , intent(in)  :: ncell, ncell_global
-    integer         , intent(out) :: nstep
-    integer         , intent(in)  :: logunit
+    type(kELMType) , intent(in)    :: elm
+    character(len=*), intent(in)    :: fname
+    integer         , intent(in)    :: mode
+    integer         , intent(in)    :: ncell, ncell_global
+    integer         , intent(inout) :: nstep
+    integer         , intent(in)    :: logunit
 
     type(file_desc_t) :: file
     type(var_desc_t)  :: vdesc
     type(field_t), allocatable :: f(:)
     integer :: nfld, i, ierr, varid, ndims_v, dimids(2), len1, len2, nread
-    integer :: nacs, hy, hm, hd, nglob
+    integer :: nacs, hy, hm, hd, nglob, nstep_file, nchecked
     integer(c_int) :: st
-    real(c_double), allocatable :: buf(:)
+    real(c_double), allocatable :: buf(:), cur(:)
+    real(r8) :: dloc, dmax
+    logical :: fresh_hist, initial
     character(len=*), parameter :: subname = '(kelm_rest_read) '
 
-    call layout_begin(elm, f, nfld, ncell, ncell_global, branch, subname)
+    initial    = (mode == REST_MODE_INITIAL)
+    fresh_hist = (mode /= REST_MODE_CONTINUE)
+    call layout_begin(elm, f, nfld, ncell, ncell_global, fresh_hist, subname)
 
     ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot open '//trim(fname))
+    call check_cell_count(file, fname, ncell_global, subname)
 
     nread = 0
+    nchecked = 0
     do i = 1, nfld
        if (.not. f(i)%active) cycle
        ierr = PIO_inq_varid(file, trim(f(i)%name), varid)
@@ -335,6 +364,11 @@ contains
        nglob = kmap(f(i)%kind)%nglob
        if ((f(i)%n2g == 0 .and. (ndims_v /= 1 .or. len1 /= nglob)) .or. &
            (f(i)%n2g >  0 .and. (ndims_v /= 2 .or. len1 /= f(i)%n2g .or. len2 /= nglob))) then
+          if (initial .and. masterproc) write(logunit,*) subname, trim(f(i)%name), &
+               ': file (', len1, len2, ') vs this run (', f(i)%n2g, nglob, ')'
+          if (initial) call shr_sys_abort(subname//'ERROR: '//trim(f(i)%name)// &
+               ' has a different shape on finidat '//trim(fname)//' -- finidat must '// &
+               'come from a kELM run on the same grid and surface data')
           call shr_sys_abort(subname//'ERROR: '//trim(f(i)%name)//' has a different '// &
                'shape on '//trim(fname)//' than in this configuration')
        end if
@@ -342,6 +376,29 @@ contains
        allocate(buf(max(f(i)%n1 * max(f(i)%n2g, 1), 1)))
        call PIO_read_darray(file, vdesc, dec_iodesc(decomp_for(f(i)%kind, f(i)%n2g)), buf, ierr)
        if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: read '//trim(f(i)%name))
+       if (initial .and. any(STRUCTURE_FIELDS == f(i)%name)) then
+          ! This run's own value, from its surface data, must equal the file's.
+          dloc = 0._r8
+          if (f(i)%n1 > 0) then
+             allocate(cur(size(buf)))
+             call kELMRestartFieldGet(elm, int(i-1, c_int), cur, &
+                  int(f(i)%n1 * max(f(i)%n2, 1), c_int), st)
+             if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: get '//trim(f(i)%name))
+             dloc = maxval(abs(cur(1:f(i)%n1 * max(f(i)%n2, 1)) - buf(1:f(i)%n1 * max(f(i)%n2, 1))))
+             deallocate(cur)
+          end if
+          call mpi_allreduce(dloc, dmax, 1, MPI_REAL8, MPI_MAX, mpicom_lnd, ierr)
+          if (dmax > 1.e-12_r8) then
+             if (masterproc) then
+                write(logunit,*) subname, trim(f(i)%name), &
+                     ' differs from this run''s by up to ', dmax
+                call shr_sys_flush(logunit)
+             end if
+             call shr_sys_abort(subname//'ERROR: finidat '//trim(fname)//' is from a '// &
+                  'different grid or surface dataset ('//trim(f(i)%name)//' differs)')
+          end if
+          nchecked = nchecked + 1
+       end if
        if (f(i)%n1 > 0) then
           call kELMRestartFieldSet(elm, int(i-1, c_int), buf, &
                int(f(i)%n1 * max(f(i)%n2, 1), c_int), st)
@@ -351,7 +408,8 @@ contains
        nread = nread + 1
     end do
 
-    nstep = read_int(file, 'rst:nstep')
+    nstep_file = read_int(file, 'rst:nstep')
+    if (.not. initial) nstep = nstep_file
     nacs  = read_int(file, 'rst:hist_nacs')
     hy    = read_int(file, 'rst:hist_start_year')
     hm    = read_int(file, 'rst:hist_start_month')
@@ -359,7 +417,7 @@ contains
     call PIO_closefile(file)
     call layout_end()
 
-    if (branch) then
+    if (fresh_hist) then
        nacs = 0
     else
        call kelm_hist_set_restart_state(nacs, hy, hm, hd)
@@ -368,7 +426,10 @@ contains
 
     if (masterproc) then
        write(logunit,'(a,a,a,i0,a,i0,a,i0,a,i0)') subname, trim(fname), ': restored ', &
-            nread, ' fields, nstep ', nstep, ', history samples ', nacs, ', npes ', npes
+            nread, ' fields, nstep ', nstep_file, ', history samples ', nacs, ', npes ', npes
+       if (initial) write(logunit,'(a,a,i0,a)') subname, &
+            'initial condition: the run keeps its own date and step 0; ', nchecked, &
+            ' structure fields match this run'
        call shr_sys_flush(logunit)
     end if
 
@@ -411,6 +472,7 @@ contains
     call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
     ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot open '//trim(fname))
+    call check_cell_count(file, fname, ncell_global, subname)
     call PIO_seterrorhandling(file, PIO_BCAST_ERROR)
     ierr = PIO_inq_varid(file, 'rst:lnd2atm', vdesc)
     call PIO_seterrorhandling(file, PIO_INTERNAL_ERROR)
@@ -636,6 +698,50 @@ contains
     call PIO_closefile(file)
     kelm_rest_peek_nstep = ival
   end function kelm_rest_peek_nstep
+
+  !-----------------------------------------------------------------------
+  subroutine check_cell_count(file, fname, ncell_global, subname)
+    !
+    ! The file's land-cell count must be this run's: the first thing read
+    ! from a restart (the export table at init) is laid out by cell, and a
+    ! mismatched read fails inside PIO with no message.
+    !
+    type(file_desc_t), intent(inout) :: file
+    character(len=*) , intent(in)    :: fname, subname
+    integer          , intent(in)    :: ncell_global
+    integer :: ierr, dimid, n
+    character(len=16) :: a, b
+    call PIO_seterrorhandling(file, PIO_BCAST_ERROR)
+    ierr = PIO_inq_dimid(file, 'cell', dimid)
+    if (ierr == PIO_NOERR) ierr = PIO_inq_dimlen(file, dimid, n)
+    call PIO_seterrorhandling(file, PIO_INTERNAL_ERROR)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: '//trim(fname)// &
+         ' has no cell dimension -- is it a kELM restart?')
+    if (n /= ncell_global) then
+       write(a,'(i0)') n
+       write(b,'(i0)') ncell_global
+       call shr_sys_abort(subname//'ERROR: '//trim(fname)//' has '//trim(a)// &
+            ' land cells, this run has '//trim(b)//' -- it is from a different grid or domain')
+    end if
+  end subroutine check_cell_count
+
+  !-----------------------------------------------------------------------
+  logical function kelm_rest_is_kelm_file(fname)
+    !
+    ! True if fname is a kELM restart: every one carries rst:nstep, and an
+    ! ELM restart does not. Aborts if the file cannot be opened. Collective.
+    !
+    character(len=*), intent(in) :: fname
+    type(file_desc_t) :: file
+    integer :: ierr, vid_i
+    ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
+    if (ierr /= PIO_NOERR) call shr_sys_abort('(kelm_rest_is_kelm_file) ERROR: cannot open '//trim(fname))
+    call PIO_seterrorhandling(file, PIO_BCAST_ERROR)
+    ierr = PIO_inq_varid(file, 'rst:nstep', vid_i)
+    call PIO_seterrorhandling(file, PIO_INTERNAL_ERROR)
+    call PIO_closefile(file)
+    kelm_rest_is_kelm_file = (ierr == PIO_NOERR)
+  end function kelm_rest_is_kelm_file
 
   !-----------------------------------------------------------------------
   function kelm_rest_rpointer_read(inst_suffix) result(fname)

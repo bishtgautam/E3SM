@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Urban identical-IC probe: kELM's urban trace against ELM's, step by step.
 
-Both models start from one ELM restart (finidat; kELM seeds urban state in
+Both models start from one ELM restart (ELM finidat; kELM kelm_elm_ic_probe,
+which seeds urban state in
 kelmUrbanMod :: kelm_urban_apply_finidat), so the two binaries are aligned
 step for step and whatever differs at step 1 was caused in step 1 -- or was
 never seeded. Never call a later difference "amplification" while step 1
