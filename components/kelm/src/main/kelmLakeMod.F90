@@ -366,6 +366,19 @@ contains
     call lake_set(elm, 'lakecol:savedtke1', spread(0.57_r8, 1, n_lake))
     call lake_set(elm, 'lakecol:ust_lake', spread(0.1_r8, 1, n_lake))
     call lake_set(elm, 'lakecol:z0mg', spread(0.0004_r8, 1, n_lake))
+    ! ELM SurfaceAlbedoType InitCold: the albedos and transmissions the first
+    ! step's radiation uses before any SurfaceAlbedo has run. Left at zero, a
+    ! cold start whose first step is sunlit absorbs and reflects nothing
+    ! (ERRSOL = -solar for that step; open item T-1, found by glacier).
+    call lake_set(elm, 'lakecol:albgrd', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:albgri', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:albsod', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:albsoi', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:albd', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:albi', spread(spread(0.2_r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:ftdd', spread(spread(1._r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:ftid', spread(spread(0._r8, 1, n_lake), 2, 2))
+    call lake_set(elm, 'lakecol:ftii', spread(spread(1._r8, 1, n_lake), 2, 2))
 
     if (masterproc) then
        write(logunit,*) subname,'lake cold start: 277 K, soil saturated, ', &

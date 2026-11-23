@@ -268,6 +268,24 @@ contains
     s = t_cold;         call glc_set(elm, 'glccol:t_h2osfc', s)
     deallocate(s)
 
+    ! ELM SurfaceAlbedoType InitCold: the albedos and transmissions the first
+    ! step's radiation uses, before any SurfaceAlbedo has run. Left at zero,
+    ! a cold start whose first step is sunlit absorbs and reflects nothing
+    ! (errsol = -solar for that step).
+    allocate(v(n_glc, 2))
+    v = 0.2_r8
+    call glc_set(elm, 'glccol:albgrd', v); call glc_set(elm, 'glccol:albgri', v)
+    call glc_set(elm, 'glccol:albsod', v); call glc_set(elm, 'glccol:albsoi', v)
+    call glc_set(elm, 'glccol:albd', v);   call glc_set(elm, 'glccol:albi', v)
+    v = 0.6_r8
+    call glc_set(elm, 'glccol:albsnd_hst', v); call glc_set(elm, 'glccol:albsni_hst', v)
+    v = 0._r8
+    call glc_set(elm, 'glccol:fabd', v); call glc_set(elm, 'glccol:fabi', v)
+    call glc_set(elm, 'glccol:ftid', v)
+    v = 1._r8
+    call glc_set(elm, 'glccol:ftdd', v); call glc_set(elm, 'glccol:ftii', v)
+    deallocate(v)
+
     if (masterproc) then
        write(logunit,*) subname,'cold start: h2osno ',h2osno,' snow_depth ',snow_depth, &
             ' snl ',snl,' dz (ice side first) ',dzs(1:-snl)
