@@ -312,6 +312,8 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'use_top_solar_rad');
     add_default($nl, 'use_finetop_rad');
     add_default($nl, 'use_modified_infil');
+    add_default($nl, 'use_surfdata_soil_albedo');
+    add_default($nl, 'use_single_pft');
     add_default($nl, 'run_zero_weight_urban');
     add_default($nl, 'kelm_hist_off');
     # kelm_hist_empty_htapes, kelm_hist_nhtfrq and kelm_hist_mfilt are left

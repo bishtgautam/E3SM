@@ -32,7 +32,7 @@ module kelmMod
                                num_patches, lun_itype, col_landunit, &
                                istsoil, isturb_tbd, isturb_hd, isturb_md, &
                                num_landunits_global, num_columns_global, &
-                               num_patches_global, run_zero_weight_urban
+                               num_patches_global, run_zero_weight_urban, use_single_pft
   use kelmSurfaceStateMod, only : kelm_surface_state_init, &
                                    kelm_surface_state_clean
   use kelmFilterMod      , only : kelm_build_filters, kelm_filters_clean
@@ -231,6 +231,9 @@ module kelmMod
   logical           , public :: use_finetop_rad      = .false.
   ! Modified infiltration, ELM's switch of the same name (SoilHydrologyMod).
   logical           , public :: use_modified_infil   = .false.
+  ! Soil albedos from fsurdat (ALBSAT_VIS/NIR, ALBDRY_VIS/NIR) instead of the
+  ! SOIL_COLOR classes, ELM's switch of the same name (SurfaceAlbedoType).
+  logical           , public :: use_surfdata_soil_albedo = .false.
   ! No history at all: no accumulation (hbuf) and no files. For timing runs.
   logical           , public :: kelm_hist_off        = .false.
   ! run_zero_weight_urban (ELM's switch of the same name) lives in
@@ -322,6 +325,7 @@ contains
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
                             kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
                             albice, use_modified_infil, run_zero_weight_urban, kelm_hist_off, &
+                            use_surfdata_soil_albedo, use_single_pft, &
                             kelm_hist_empty_htapes, kelm_hist_nhtfrq, kelm_hist_mfilt
 
     ! defaults
@@ -339,8 +343,10 @@ contains
     use_top_solar_rad    = .false.
     use_finetop_rad      = .false.
     use_modified_infil   = .false.
+    use_surfdata_soil_albedo = .false.
     kelm_hist_off        = .false.
     run_zero_weight_urban = .true.
+    use_single_pft        = .false.
     fparamfile            = ' '
     kelm_do_albedo       = .true.
     albice               = (/ 0.60_r8, 0.40_r8 /)
@@ -405,7 +411,14 @@ contains
     call mpi_bcast (use_top_solar_rad     , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (use_finetop_rad       , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (use_modified_infil    , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (use_surfdata_soil_albedo, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (run_zero_weight_urban , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (use_single_pft        , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    ! An ELM finidat carries every natpft patch; kELM's finidat mapping has
+    ! not been checked against a one-patch subgrid, so allow only cold starts.
+    if (use_single_pft .and. len_trim(finidat) > 0) then
+       call shr_sys_abort(subname//' ERROR: use_single_pft needs a cold start (finidat = '''')')
+    end if
     call mpi_bcast (kelm_hist_off         , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_hist_empty_htapes, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_hist_nhtfrq      , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
@@ -431,7 +444,9 @@ contains
        write(logunit,*) '   use_top_solar_rad      = ', use_top_solar_rad
        write(logunit,*) '   use_finetop_rad        = ', use_finetop_rad
        write(logunit,*) '   use_modified_infil     = ', use_modified_infil
+       write(logunit,*) '   use_surfdata_soil_albedo = ', use_surfdata_soil_albedo
        write(logunit,*) '   run_zero_weight_urban  = ', run_zero_weight_urban
+       write(logunit,*) '   use_single_pft         = ', use_single_pft
        write(logunit,*) '   kelm_hist_off          = ', kelm_hist_off
        write(logunit,*) '   fparamfile            = ', trim(fparamfile)
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
@@ -588,7 +603,9 @@ contains
        call kelm_read_surfdata(logunit, fsurdat, num_cells_grid, &
                                 natural_id_cells_owned, kelm_perf_ncells == 0, &
                                 read_top=use_top_solar_rad, &
-                                read_finetop=use_finetop_rad)
+                                read_finetop=use_finetop_rad, &
+                                read_soil_albedo=use_surfdata_soil_albedo, &
+                                read_pft_type=use_single_pft)
        call kelm_t_stop('kelm_read_surfdata')
        call kelm_report_composition(logunit)
        call kelm_build_subgrid(logunit, num_cells_owned)

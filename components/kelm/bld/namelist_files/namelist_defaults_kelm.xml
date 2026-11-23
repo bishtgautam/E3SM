@@ -31,6 +31,8 @@ attributes to express the dependency.
 <use_top_solar_rad>.false.</use_top_solar_rad>
 <use_finetop_rad>.false.</use_finetop_rad>
 <use_modified_infil>.false.</use_modified_infil>
+<use_surfdata_soil_albedo>.false.</use_surfdata_soil_albedo>
+<use_single_pft>.false.</use_single_pft>
 <run_zero_weight_urban>.true.</run_zero_weight_urban>
 <kelm_hist_off>.false.</kelm_hist_off>
 <kelm_hist_empty_htapes>.false.</kelm_hist_empty_htapes>

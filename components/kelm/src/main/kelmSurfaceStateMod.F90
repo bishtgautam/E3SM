@@ -20,7 +20,8 @@ module kelmSurfaceStateMod
   use shr_sys_mod     , only : shr_sys_abort, shr_sys_flush
   use kelmSpmdMod    , only : masterproc, iam
   use kelmSurfdataMod, only : nlevsoi, lsmpft, nmonths, pct_sand, pct_clay, &
-                               organic, soil_color, monthly_lai, monthly_sai, &
+                               organic, soil_color, soil_albsat, soil_albdry, &
+                               monthly_lai, monthly_sai, &
                                monthly_height_top, monthly_height_bot
   use kelmSubgridMod , only : num_columns, num_patches, lun_gridcell, lun_itype, &
                                col_landunit, patch_column, patch_itype, patch_wtcol, istsoil
@@ -35,6 +36,10 @@ module kelmSurfaceStateMod
   real(r8), public, pointer :: col_pct_clay(:,:) => null() ! (column, nlevsoi)
   real(r8), public, pointer :: col_organic(:,:)  => null() ! (column, nlevsoi)
   integer , public, pointer :: col_soil_color(:) => null() ! (column)
+  ! Column soil albedos from fsurdat (use_surfdata_soil_albedo), (column, 2);
+  ! not associated when the option is off.
+  real(r8), public, pointer :: col_albsat(:,:) => null()
+  real(r8), public, pointer :: col_albdry(:,:) => null()
 
   ! Satellite phenology after ELM's monthly interpolation.  Non-natural
   ! patches remain zero: ELM only applies these streams to vegetated patches.
@@ -123,6 +128,14 @@ contains
        col_organic(c,:)  = organic(g,:)
        col_soil_color(c) = soil_color(g)
     end do
+    if (associated(soil_albsat)) then
+       allocate(col_albsat(num_columns, 2), col_albdry(num_columns, 2))
+       do c = 1, num_columns
+          g = lun_gridcell(col_landunit(c))
+          col_albsat(c,:) = soil_albsat(g,:)
+          col_albdry(c,:) = soil_albdry(g,:)
+       end do
+    end if
     if (nfill > 0) then
        write(logunit,*) '(kelm_surface_state_init) rank ', iam, ': ', nfill, &
                         ' columns with no sand or clay set to 1% each, as ELM does'
@@ -160,6 +173,7 @@ contains
     if (associated(col_pct_clay))    deallocate(col_pct_clay)
     if (associated(col_organic))     deallocate(col_organic)
     if (associated(col_soil_color))  deallocate(col_soil_color)
+    if (associated(col_albsat))      deallocate(col_albsat, col_albdry)
     if (associated(patch_lai))        deallocate(patch_lai)
     if (associated(patch_sai))        deallocate(patch_sai)
     if (associated(patch_height_top)) deallocate(patch_height_top)

@@ -46,7 +46,7 @@ module kelmSubgridMod
   use kelmSurfdataMod, only : numurbl, natpft, &
                                pct_natveg, pct_crop, pct_lake, pct_wetland, &
                                pct_glacier, pct_urban, pct_nat_pft, urban_region_id, &
-                               wtlunit_roof, wtroad_perv
+                               wtlunit_roof, wtroad_perv, pft_type_cell
 
   implicit none
   save
@@ -84,6 +84,13 @@ module kelmSubgridMod
   ! landunits, even at 0% weight (inactive). .false.: only urban landunits with
   ! PCT_URBAN > 0 are allocated (ELM: subgridMod :: urban_landunit_exists).
   logical, public :: run_zero_weight_urban = .true.
+
+  ! ELM's use_single_pft (namelist, read by kelmMod). .true.: the natural
+  ! vegetation landunit gets ONE patch, the PFT named by PFT_TYPE, carrying the
+  ! sum of the cell's PCT_NAT_PFT weights; the other natpft patches are not
+  ! allocated at all (ELM allocates them at zero weight, inactive, so the
+  ! physics is the same). .false.: all natpft patches, as ELM.
+  logical, public :: use_single_pft = .false.
 
   !--------------------------------------------------------------------------
   ! Subgrid, for the cells this rank owns
@@ -368,7 +375,11 @@ contains
        ! natural vegetation: always
        nlun = nlun + 1
        ncol = ncol + 1
-       npat = npat + natpft
+       if (use_single_pft) then
+          npat = npat + 1
+       else
+          npat = npat + natpft
+       end if
        ! urban x3: see urban_landunit_exists
        do u = 1, 3
           if (urban_landunit_exists(g, u)) then
@@ -413,12 +424,24 @@ contains
        ! All natpft patches are allocated whatever their weight, matching ELM.
        ! PCT_NAT_PFT is a percentage of the natural-vegetated landunit, not of
        ! the gridcell, so it becomes the patch weight on the column directly.
-       do m = 1, natpft
+       if (use_single_pft) then
+          ! One patch, PFT_TYPE, with the whole weight. Summed as ELM's
+          ! surfrd_single_pft does: the sum of the PCT_NAT_PFT/100 terms.
           np = np + 1
           patch_column(np) = nc
-          patch_itype(np)  = m - 1       ! 0-based PFT index, bare ground = 0
-          patch_wtcol(np)  = pct_nat_pft(g,m) / 100.0_r8
-       end do
+          patch_itype(np)  = pft_type_cell(g)
+          patch_wtcol(np)  = 0.0_r8
+          do m = 1, natpft
+             patch_wtcol(np) = patch_wtcol(np) + pct_nat_pft(g,m) / 100.0_r8
+          end do
+       else
+          do m = 1, natpft
+             np = np + 1
+             patch_column(np) = nc
+             patch_itype(np)  = m - 1       ! 0-based PFT index, bare ground = 0
+             patch_wtcol(np)  = pct_nat_pft(g,m) / 100.0_r8
+          end do
+       end if
     end do
 
     ! ---- 2. urban, one landunit type at a time ----

@@ -52,7 +52,7 @@ module kelmKokkosStateMod
                                patch_wtcol
   use kelmSurfaceStateMod , only : surface_state_built, patch_lai, patch_sai, &
                                     patch_height_top, &
-                               col_soil_color
+                               col_soil_color, col_albsat, col_albdry
   use kelmSurfdataMod, only : topo_std, topo_slope, monthly_lai, monthly_sai, &
                                monthly_height_top, monthly_height_bot, &
                                top_stdev_elev, top_sky_view, top_terrain_config, &
@@ -86,7 +86,7 @@ module kelmKokkosStateMod
                                kELMSetRootrPatch, kELMSetRootfr, &
                                kELMSetSmpsc, kELMSetSmpso, &
                                kELMSetRootStressTcStress, &
-                               kELMSetSoilColor, kELMSetRhol, kELMSetRhos, &
+                               kELMSetSoilColor, kELMSetSoilAlbedo, kELMSetRhol, kELMSetRhos, &
                                kELMSetCoszen, &
                                kELMSetPhenActive, kELMSetMonthlyLai, &
                                kELMSetMonthlySai, kELMSetMonthlyHtop, &
@@ -1051,6 +1051,22 @@ contains
       end do
       call kELMSetSoilColor(elm, ic, n_kokkos_col, ierr)
       call check(ierr, subname, 'SoilColor')
+      ! use_surfdata_soil_albedo: the column's own saturated/dry albedos
+      ! replace the colour-class table (ELM: albsat_col, albdry_col).
+      if (associated(col_albsat)) then
+         block
+           real(r8), allocatable :: sat(:,:), dry(:,:)
+           allocate(sat(n_kokkos_col, 2), dry(n_kokkos_col, 2))
+           do kc2 = 1, n_kokkos_col
+              sat(kc2,:) = col_albsat(col_of_kcol(kc2),:)
+              dry(kc2,:) = col_albdry(col_of_kcol(kc2),:)
+           end do
+           szo(1) = n_kokkos_col; szo(2) = 2
+           call kELMSetSoilAlbedo(elm, sat, dry, szo, ierr)
+           call check(ierr, subname, 'SoilAlbedo')
+           deallocate(sat, dry)
+         end block
+      end if
       szo(1) = n_kokkos_patch; szo(2) = 2
       do kp = 1, n_kokkos_patch
          ivt = patch_itype(patch_of_kpatch(kp))

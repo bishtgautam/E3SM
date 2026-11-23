@@ -137,6 +137,13 @@ module kelmSurfdataMod
   real(r8), public, pointer :: organic(:,:)     => null()  ! (ncells, nlevsoi)
   real(r8), public, pointer :: fmax(:)          => null()  ! (ncells)
   integer , public, pointer :: soil_color(:)    => null()  ! (ncells)
+  ! Per-cell saturated and dry soil albedos (ELM: use_surfdata_soil_albedo),
+  ! (ncells, 2) for VIS and NIR. Read only when the caller asks.
+  real(r8), public, pointer :: soil_albsat(:,:) => null()  ! ALBSAT_VIS, ALBSAT_NIR
+  real(r8), public, pointer :: soil_albdry(:,:) => null()  ! ALBDRY_VIS, ALBDRY_NIR
+  ! The one PFT of each cell (PFT_TYPE, 0-based, bare ground = 0), for
+  ! use_single_pft. Read only when the caller asks.
+  integer , public, pointer :: pft_type_cell(:) => null()   ! (ncells)
 
   !--------------------------------------------------------------------------
   ! Urban region ID. Not a physics parameter: it decides whether a gridcell gets
@@ -206,7 +213,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine kelm_read_surfdata(iulog, fname, gsize, cell_ids, read_decomposed, read_top, &
-                                read_finetop)
+                                read_finetop, read_soil_albedo, read_pft_type)
     !
     ! !DESCRIPTION:
     ! Read the surface dataset and keep the rows for the cells this rank owns.
@@ -220,6 +227,8 @@ contains
     logical         , intent(in) :: read_decomposed ! false if cell_ids repeat
     logical, optional, intent(in) :: read_top     ! also read the TOP fields
     logical, optional, intent(in) :: read_finetop ! also read the fineTOP fields
+    logical, optional, intent(in) :: read_soil_albedo ! also read ALBSAT_*, ALBDRY_*
+    logical, optional, intent(in) :: read_pft_type    ! also read PFT_TYPE
     !
     type(file_desc_t) :: ncid
     integer           :: dimid, status
@@ -352,6 +361,33 @@ contains
     call read_gc_real2d(ncid, fname, 'ORGANIC' , ngrid, nlevsoi, cell_ids, organic)
     call read_gc_real1d(ncid, fname, 'FMAX'    , ngrid, cell_ids, fmax)
     call read_gc_int1d (ncid, fname, 'SOIL_COLOR', ngrid, cell_ids, soil_color)
+
+    ! ---- the cell's one PFT (use_single_pft) ----
+    if (present(read_pft_type)) then
+       if (read_pft_type) then
+          allocate(pft_type_cell(ncells))
+          call read_gc_int1d(ncid, fname, 'PFT_TYPE', ngrid, cell_ids, pft_type_cell)
+          if (any(pft_type_cell < 0) .or. any(pft_type_cell > natpft-1)) then
+             call shr_sys_abort(subname//' ERROR: PFT_TYPE outside 0..natpft-1 on '//trim(fname))
+          end if
+       end if
+    end if
+
+    ! ---- soil albedos (ELM: SurfaceAlbedoType :: ReadSoilAlbedo) ----
+    if (present(read_soil_albedo)) then
+       if (read_soil_albedo) then
+          allocate(soil_albsat(ncells, 2), soil_albdry(ncells, 2))
+          call read_gc_real1d(ncid, fname, 'ALBSAT_VIS', ngrid, cell_ids, soil_albsat(:,1))
+          call read_gc_real1d(ncid, fname, 'ALBSAT_NIR', ngrid, cell_ids, soil_albsat(:,2))
+          call read_gc_real1d(ncid, fname, 'ALBDRY_VIS', ngrid, cell_ids, soil_albdry(:,1))
+          call read_gc_real1d(ncid, fname, 'ALBDRY_NIR', ngrid, cell_ids, soil_albdry(:,2))
+          ! ELM stops on a value outside [0, 1].
+          if (any(soil_albsat < 0.0_r8) .or. any(soil_albsat > 1.0_r8) .or. &
+              any(soil_albdry < 0.0_r8) .or. any(soil_albdry > 1.0_r8)) then
+             call shr_sys_abort(subname//' ERROR: soil albedo outside [0, 1] on '//trim(fname))
+          end if
+       end if
+    end if
 
     ! ---- urban validity ----
     call read_gc_int1d(ncid, fname, 'URBAN_REGION_ID', ngrid, cell_ids, urban_region_id)
@@ -1044,6 +1080,8 @@ contains
     if (associated(organic))     deallocate(organic)
     if (associated(fmax))        deallocate(fmax)
     if (associated(soil_color))  deallocate(soil_color)
+    if (associated(soil_albsat)) deallocate(soil_albsat, soil_albdry)
+    if (associated(pft_type_cell)) deallocate(pft_type_cell)
     if (associated(urban_region_id))    deallocate(urban_region_id)
     if (associated(wtlunit_roof))       deallocate(wtlunit_roof)
     if (associated(wtroad_perv))        deallocate(wtroad_perv)

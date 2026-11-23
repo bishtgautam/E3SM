@@ -166,6 +166,29 @@ saturated fraction (1 - fsat), and the infiltration excess assumes surface
 water sits on the saturated fraction.
 </entry>
 
+<entry id="use_surfdata_soil_albedo"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., read per-gridcell soil albedos ALBSAT_VIS, ALBSAT_NIR, ALBDRY_VIS
+and ALBDRY_NIR from fsurdat instead of mapping SOIL_COLOR to the built-in
+albedo classes, as ELM's switch of the same name does (SurfaceAlbedoType).
+The run stops if a field is missing or a value is outside [0, 1].
+</entry>
+
+<entry id="use_single_pft"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., the natural vegetation landunit of each cell gets a single patch:
+the PFT that PFT_TYPE (gridcell) on fsurdat names, carrying the sum of the
+cell's PCT_NAT_PFT weights. The other PFTs are not allocated, which cuts
+memory, run time and the restart size. Matches ELM's use_single_pft, which
+gives the other PFTs zero weight (inactive). Needs a cold start.
+</entry>
+
 <entry id="kelm_hist_off"
        type="logical"
        category="kelm"
