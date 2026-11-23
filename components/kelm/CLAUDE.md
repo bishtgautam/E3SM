@@ -198,8 +198,8 @@ Stage 6.5); urban state restarts (`URBLUN`, since Stage 6.7; every urban
 surface record is indexed by landunit); glacier state restarts (`GLCCOL`).
 
 Wetland will never be supported (owner, 2026-11-22), nor crop: init aborts
-on either. Glacier MEC, the firn model and CISM coupling are not supported;
-`finidat` does not seed glacier columns (they cold-start).
+on either. Glacier MEC, the firn model and CISM coupling are not supported.
+ELM's default-h0 `QSNOMELT_LYR` (levsno) is not written for any surface.
 
 ## The urban surface
 
@@ -242,6 +242,11 @@ the C++ layout). Stepped from `src/main/kELMUrban.cpp` by the
   (`_soi`/`_sno`, snow reversed) and the combined ELM-ordered arrays; the
   `_p1` geometry is rebuilt from the snow every step and `t_building` is
   diagnosed, so neither is seeded. Lake is still a cold start under finidat.
+- **finidat seeds glacier** (`kelm_glacier_apply_finidat`, after urban), one
+  rank only: snow (reversed), ice layers (split arrays), `t_grnd`, albedos
+  and the SNICAR absorption factors. `_p1` geometry and `h2osoi_vol` are
+  rebuilt each step. The glc_gla20 probe from ELM's 03-01 restart gives
+  glacier h0 fields identical to ELM.
 
 ## The lake surface
 
@@ -318,7 +323,8 @@ driven from `src/main/kelmGlacierMod.F90` and stepped by
   ELM's lnd_in default, not its code's 0.80,0.55.
 - **History**: `GlacierRule` per field (`HistData.h`), read off ELM's h0
   over a 100% glacier cell; QICE/QICE_FRZ/QICE_MELT are glacier-only.
-  TWS and the multi-level fields are not mapped (natural-only).
+  TSOI_ICE/SOILLIQ_ICE/SOILICE_ICE are the glacier column's levgrnd
+  profile (`glc2d`, the glacier analogue of `lake2d`), spval without glacier.
 - **KELM_DIAG** writes `kelm_glcin`/`kelm_glcout` (packed glacier order,
   kELM snow slots). Pair `kelm_glcin` with ELM's `canhydro_in` only between
   two startups: an ELM startup runs a duplicate first pass a kELM continue
