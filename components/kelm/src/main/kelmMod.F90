@@ -72,7 +72,8 @@ module kelmMod
                                       kelm_hist_final
   use kelmLakeMod           , only : kelm_lake_init, kelm_lake_push_forcing, &
                                       kelm_lake_clean, lake_built
-  use kelmGlacierMod        , only : kelm_glacier_init, kelm_glacier_clean
+  use kelmGlacierMod        , only : kelm_glacier_init, kelm_glacier_clean, &
+                                      kelm_glacier_apply_finidat
   use kelmUrbanMod          , only : kelm_urban_init, kelm_urban_diag_dump, &
                                       kelm_urban_clean, urban_built, kelm_urban_diag_step, &
                                       kelm_urban_apply_finidat
@@ -747,6 +748,8 @@ contains
           call kelm_kokkos_push_finidat(kelm_state, logunit)
           ! Urban state too (U8 probe); lake is still a cold start (STATUS L1).
           call kelm_urban_apply_finidat(kelm_state, logunit)
+          ! Glacier state (glacier plan, identical-IC probes).
+          call kelm_glacier_apply_finidat(kelm_state, logunit)
        end if
 
        ! Every kernel runs; there is no namelist switch. The library can

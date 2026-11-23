@@ -51,6 +51,7 @@ module kelmGlacierMod
   public :: kelm_glacier_init
   public :: kelm_glacier_clean
   public :: kelm_glacier_diag_step
+  public :: kelm_glacier_apply_finidat
 
   ! ELM constants the cold start uses (elm_varcon, SnowHydrologyMod).
   real(r8), parameter :: denice      = 917._r8      ! ice density [kg/m3]
@@ -443,6 +444,134 @@ contains
     call kELMRestartFieldSet(elm, i, flat, size(flat), ierr)
     if (ierr /= KELM_SUCCESS) call shr_sys_abort('(kelm_glacier) ERROR: set '//trim(name))
   end subroutine glc_set_2d
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_glacier_apply_finidat(elm, logunit)
+    !
+    ! Overwrite the glacier cold start with an ELM restart's glacier state
+    ! (kelmFinidatMod), for identical-IC probes and runs from ELM initial
+    ! conditions. Each packed column is gathered from its subgrid column, so
+    ! like the natural and urban pushes this assumes one rank (the file is
+    ! global, the subgrid indices local).
+    !
+    !   snow     layers (thickness, temperature, water, grain radius,
+    !            aerosol), mass, depth, integrated snow, cover fractions,
+    !            the previous step's per-layer freezing and melt
+    !   ice      layer temperature and water (the split arrays; the combined
+    !            ones are refreshed from them each step)
+    !   surface  t_grnd, t_h2osfc; ground and patch albedos and the SNICAR
+    !            absorption factors the first step's radiation reads
+    ! The _p1 snow geometry is rebuilt from the snow every step; h2osoi_vol
+    ! is diagnosed by HydrologyDrainage.
+    !
+    use kelmFinidatMod, only : finidat_read, fi_ncol, fi_npft, &
+         fi_snl, fi_t_soisno, fi_h2osoi_liq, fi_h2osoi_ice, fi_dzsno, &
+         fi_snw_rds, fi_qflx_snofrz_lyr, fi_snow_depth, fi_h2osno, &
+         fi_int_snow, fi_frac_sno, fi_frac_sno_eff, fi_t_grnd, fi_t_h2osfc, &
+         fi_qflx_snow_melt, fi_albgrd, fi_albgri, fi_albd, fi_albi, &
+         fi_flx_absdv, fi_flx_absdn, fi_flx_absiv, fi_flx_absin, &
+         fi_mss_bcphi, fi_mss_bcpho, fi_mss_ocphi, fi_mss_ocpho, &
+         fi_mss_dst1, fi_mss_dst2, fi_mss_dst3, fi_mss_dst4
+    implicit none
+    type(kELMType), intent(in) :: elm
+    integer, intent(in) :: logunit
+    integer :: k, c, j
+    real(r8), allocatable :: r1(:), rs(:,:), rg(:,:), rr(:,:), ra(:,:)
+    character(len=*), parameter :: subname = '(kelm_glacier_apply_finidat) '
+
+    if (.not. glacier_built) return
+    if (.not. finidat_read) call shr_sys_abort(subname//'ERROR: finidat not read')
+    if (fi_ncol /= num_columns .or. fi_npft /= num_patches) &
+         call shr_sys_abort(subname//'ERROR: finidat subgrid is not this rank''s')
+    allocate(r1(n_glc), rs(n_glc, nlevsno), rg(n_glc, nlevgrnd), rr(n_glc, 2), &
+             ra(n_glc, nlevsno + 1))
+
+    call col_1d('glccol:snowsoil.snl'          , real(fi_snl, r8))
+    call col_1d('glccol:snowsoil.h2osno'       , fi_h2osno)
+    call col_1d('glccol:snowsoil.snow_depth'   , fi_snow_depth)
+    call col_1d('glccol:snowsoil.int_snow'     , fi_int_snow)
+    call col_1d('glccol:snowsoil.frac_sno'     , fi_frac_sno)
+    call col_1d('glccol:snowsoil.frac_sno_eff' , fi_frac_sno_eff)
+    call col_1d('glccol:snowsoil.qflx_snow_melt', fi_qflx_snow_melt)
+    call col_1d('glccol:t_grnd'                , fi_t_grnd)
+    call col_1d('glccol:t_h2osfc'              , fi_t_h2osfc)
+
+    ! Snow layers: ELM order (slot nlevsno on the ice) -> kELM reversed.
+    call col_sno('glccol:snowsoil.dz_sno'        , fi_dzsno)
+    call col_sno('glccol:snowsoil.t_soisno_sno'  , fi_t_soisno(1:nlevsno,:))
+    call col_sno('glccol:snowsoil.h2osoi_liq_sno', fi_h2osoi_liq(1:nlevsno,:))
+    call col_sno('glccol:snowsoil.h2osoi_ice_sno', fi_h2osoi_ice(1:nlevsno,:))
+    call col_sno('glccol:snowsoil.snw_rds'       , fi_snw_rds)
+    call col_sno('glccol:snowsoil.mss_bcphi', fi_mss_bcphi)
+    call col_sno('glccol:snowsoil.mss_bcpho', fi_mss_bcpho)
+    call col_sno('glccol:snowsoil.mss_ocphi', fi_mss_ocphi)
+    call col_sno('glccol:snowsoil.mss_ocpho', fi_mss_ocpho)
+    call col_sno('glccol:snowsoil.mss_dst1' , fi_mss_dst1)
+    call col_sno('glccol:snowsoil.mss_dst2' , fi_mss_dst2)
+    call col_sno('glccol:snowsoil.mss_dst3' , fi_mss_dst3)
+    call col_sno('glccol:snowsoil.mss_dst4' , fi_mss_dst4)
+    ! ELM-ordered on the kELM side too (as the natural column's).
+    do k = 1, n_glc; rs(k,:) = fi_qflx_snofrz_lyr(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:qflx_snofrz_lyr', rs)
+
+    ! Ice layers.
+    do k = 1, n_glc; rg(k,:) = fi_t_soisno(nlevsno+1:nlevsno+nlevgrnd, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:thermal.t_soisno_soi', rg)
+    do k = 1, n_glc; rg(k,:) = fi_h2osoi_liq(nlevsno+1:nlevsno+nlevgrnd, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:snowsoil.h2osoi_liq_soi', rg)
+    do k = 1, n_glc; rg(k,:) = fi_h2osoi_ice(nlevsno+1:nlevsno+nlevgrnd, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:snowsoil.h2osoi_ice_soi', rg)
+
+    ! Radiation: ground (column), surface (the one patch), SNICAR factors.
+    do k = 1, n_glc; rr(k,:) = fi_albgrd(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:albgrd', rr)
+    do k = 1, n_glc; rr(k,:) = fi_albgri(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:albgri', rr)
+    do k = 1, n_glc; rr(k,:) = fi_albd(:, patch_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:albd', rr)
+    do k = 1, n_glc; rr(k,:) = fi_albi(:, patch_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:albi', rr)
+    do k = 1, n_glc; ra(k,:) = fi_flx_absdv(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:flx_absdv', ra)
+    do k = 1, n_glc; ra(k,:) = fi_flx_absdn(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:flx_absdn', ra)
+    do k = 1, n_glc; ra(k,:) = fi_flx_absiv(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:flx_absiv', ra)
+    do k = 1, n_glc; ra(k,:) = fi_flx_absin(:, col_of_kglc(k)); end do
+    call glc_set(elm, 'glccol:flx_absin', ra)
+
+    if (masterproc) then
+       c = col_of_kglc(1)
+       write(logunit,*) subname,'seeded ',n_glc,' glacier columns from finidat; first: snl ', &
+            fi_snl(c),' h2osno ',fi_h2osno(c)
+       call shr_sys_flush(logunit)
+    end if
+    deallocate(r1, rs, rg, rr, ra)
+
+  contains
+
+    subroutine col_1d(name, src)
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:)
+      integer :: kk
+      do kk = 1, n_glc; r1(kk) = src(col_of_kglc(kk)); end do
+      call glc_set(elm, name, r1)
+    end subroutine col_1d
+
+    subroutine col_sno(name, src)
+      ! src (nlevsno, ncol), ELM order (slot nlevsno on the ice).
+      character(len=*), intent(in) :: name
+      real(r8), intent(in) :: src(:,:)
+      integer :: kk, jj
+      do kk = 1, n_glc
+         do jj = 1, nlevsno
+            rs(kk, jj) = src(nlevsno+1-jj, col_of_kglc(kk))
+         end do
+      end do
+      call glc_set(elm, name, rs)
+    end subroutine col_sno
+
+  end subroutine kelm_glacier_apply_finidat
 
   !-----------------------------------------------------------------------
   subroutine kelm_glacier_diag_step(elm, tag)
