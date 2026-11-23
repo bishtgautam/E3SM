@@ -793,6 +793,13 @@ If TRUE, fineTOP radiation parameterization will be activated, which considers t
 </entry>
 <!-- End fineTOP radiation parameterization -->
 
+<entry id="use_surfdata_soil_albedo" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, read per-gridcell soil albedos ALBSAT_VIS, ALBSAT_NIR, ALBDRY_VIS and ALBDRY_NIR
+from fsurdat instead of mapping SOIL_COLOR to the built-in albedo classes.
+The run stops if any of these fields is missing.
+</entry>
+
 <!-- ========================================================================================  -->
 <!-- Former CPP tokens -->
 <!-- ========================================================================================  -->

@@ -683,6 +683,9 @@ this mask will have smb calculated over the entire global land surface
 <!-- Use the radiation parameterization for fine-scale topographic effects -->
 <use_finetop_rad>.false.</use_finetop_rad>
 
+<!-- Read soil albedos from the surface dataset instead of SOIL_COLOR classes -->
+<use_surfdata_soil_albedo>.false.</use_surfdata_soil_albedo>
+
 <!-- SNICAR (SNow, ICe, and Aerosol Radiative model) datasets -->
 <!--  ***********  Resolution independent:   ***********  -->
 <fsnowoptics >lnd/clm2/snicardata/snicar_optics_5bnd_mam_c160322.nc</fsnowoptics>

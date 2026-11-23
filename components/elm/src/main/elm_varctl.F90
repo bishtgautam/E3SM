@@ -408,6 +408,7 @@ module elm_varctl
   character(len = SHR_KIND_CS), public :: precip_downscaling_method  = 'ERMM' ! Precip downscaling method values can be ERMM or FNM
   logical, public :: use_lake_wat_storage = .false.
   logical, public :: use_top_solar_rad   = .false.  ! TOP : sub-grid topographic effect on surface solar radiation
+  logical, public :: use_surfdata_soil_albedo = .false.  ! read ALBSAT_* and ALBDRY_* from fsurdat instead of using SOIL_COLOR classes
   logical, public :: use_finetop_rad     = .false.  ! fineTOP : fine(grid)-scale topographic effect on surface radiation balance (longwave + shortwave)
   
   !----------------------------------------------------------

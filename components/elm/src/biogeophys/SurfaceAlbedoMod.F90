@@ -30,7 +30,7 @@ module SurfaceAlbedoMod
   use ElmDiagnostics    , only : diag_snapshot_1d, diag_snapshot_2d, diag_snapshot_int_1d, diag_enabled
 
   use SurfaceAlbedoType , only : lake_melt_icealb, alblak, alblakwi
-  use SurfaceAlbedoType , only : albice, albsat, albdry, isoicol
+  use SurfaceAlbedoType , only : albice, albsat_col, albdry_col
   use elm_instMod , only : alm_fates
   use topounit_varcon   , only : max_topounits  
   use TopounitType      , only : top_pp
@@ -1090,7 +1090,6 @@ contains
     integer  :: c,l,t,g,gi,pi,mi           ! indices
     integer  :: ib            ! waveband number (1=vis, 2=nir)
     real(r8) :: inc           ! soil water correction factor for soil albedo
-    integer  :: soilcol       ! soilcolor
     real(r8) :: sicefr        ! Lake surface ice fraction (based on D. Mironov 2010)
     !-----------------------------------------------------------------------
 
@@ -1125,11 +1124,10 @@ contains
              l = col_pp%landunit(c)
              if (col_pp%is_soil(c) .or. col_pp%is_crop(c) .and. top_pp%active(t))  then ! soil
                 inc    = max(0.11_r8-0.40_r8*h2osoi_vol(c,1), 0._r8)
-                soilcol = isoicol(c)
                 ! changed from local variable to elm_type:
-                !albsod = min(albsat(soilcol,ib)+inc, albdry(soilcol,ib))
+                !albsod = min(albsat_col(c,ib)+inc, albdry_col(c,ib))
                 !albsoi = albsod
-                albsod(c,ib) = min(albsat(soilcol,ib)+inc, albdry(soilcol,ib))
+                albsod(c,ib) = min(albsat_col(c,ib)+inc, albdry_col(c,ib))
                 albsoi(c,ib) = albsod(c,ib)
              else if (lun_pp%itype(l) == istice .or. lun_pp%itype(l) == istice_mec .and. top_pp%active(t))  then  ! land ice
                 ! changed from local variable to clm_type:

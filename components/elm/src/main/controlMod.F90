@@ -100,7 +100,8 @@ module controlMod
                         use_vichydro, use_century_decomp, use_cn, use_crop, &
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
                         use_extrasnowlayers, use_T_rho_dependent_snowthk, &
-                        use_vancouver, use_mexicocity, use_noio, use_finetop_rad
+                        use_vancouver, use_mexicocity, use_noio, use_finetop_rad, &
+                        use_surfdata_soil_albedo
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -389,6 +390,9 @@ contains
 
     namelist /elm_inparm/ &
          use_top_solar_rad, use_finetop_rad
+
+    namelist /elm_inparm/ &
+         use_surfdata_soil_albedo
 
     namelist /elm_mosart/ &
          lnd_rof_coupling_nstep
@@ -976,6 +980,7 @@ contains
     call mpi_bcast (const_climate_hist, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_top_solar_rad, 1, MPI_LOGICAL, 0, mpicom, ier)  ! TOP solar radiation parameterization
     call mpi_bcast (use_finetop_rad, 1, MPI_LOGICAL, 0, mpicom, ier)  ! fineTOP radiation parameterization
+    call mpi_bcast (use_surfdata_soil_albedo, 1, MPI_LOGICAL, 0, mpicom, ier)  ! soil albedos from fsurdat
     
     ! glacier_mec variables
     call mpi_bcast (create_glacier_mec_landunit, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1304,6 +1309,7 @@ contains
     write(iulog,*) '   more vertical layers = ', more_vertlayers
     
     write(iulog,*) '   Sub-grid topographic effects on solar radiation   = ', use_top_solar_rad  ! TOP solar radiation parameterization
+    write(iulog,*) '   Soil albedos read from surface dataset = ', use_surfdata_soil_albedo
     write(iulog,*) '   Grid-scale topographic effects on radiation (fineTOP)  = ', use_finetop_rad   ! fineTOP radiation parameterization
 
     if (nsrest == nsrContinue) then

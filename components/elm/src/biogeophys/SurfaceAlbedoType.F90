@@ -8,7 +8,7 @@ module SurfaceAlbedoType
   use decompMod      , only : bounds_type
   use elm_varpar     , only : numrad, nlevcan, nlevsno
   use abortutils     , only : endrun
-  use elm_varctl     , only : fsurdat, iulog, use_finetop_rad
+  use elm_varctl     , only : fsurdat, iulog, use_finetop_rad, use_surfdata_soil_albedo
   use elm_varcon     , only : grlnd
   use ColumnType     , only : col_pp
    
@@ -48,9 +48,13 @@ module SurfaceAlbedoType
   real(r8), allocatable :: albsat (:,:) ! wet soil albedo by color class and waveband (1=vis,2=nir)
   real(r8), allocatable :: albdry (:,:) ! dry soil albedo by color class and waveband (1=vis,2=nir)
   integer , allocatable :: isoicol(:)  ! column soil color class
+  real(r8), allocatable :: albsat_col(:,:) ! column wet soil albedo by waveband (1=vis,2=nir)
+  real(r8), allocatable :: albdry_col(:,:) ! column dry soil albedo by waveband (1=vis,2=nir)
   !$acc declare create(albsat )
   !$acc declare create(albdry )
   !$acc declare create(isoicol)
+  !$acc declare create(albsat_col)
+  !$acc declare create(albdry_col)
 
 
   public :: SurfaceAlbedoInitTimeConst
@@ -145,7 +149,7 @@ contains
     type(bounds_type), intent(in) :: bounds
     !
     ! !LOCAL VARIABLES:
-    integer            :: c,g,t,ti,topi          ! indices
+    integer            :: c,g,t,ti,topi,ib       ! indices
     integer            :: mxsoil_color ! maximum number of soil color classes
     type(file_desc_t)  :: ncid         ! netcdf id
     character(len=256) :: locfn        ! local filename
@@ -157,6 +161,8 @@ contains
     ! Allocate module variable for soil color
 
     allocate(isoicol(bounds%begc:bounds%endc))
+    allocate(albsat_col(bounds%begc:bounds%endc,numrad))
+    allocate(albdry_col(bounds%begc:bounds%endc,numrad))
 
     ! Determine soil color and number of soil color classes
     ! if number of soil color classes is not on input dataset set it to 8
@@ -181,6 +187,16 @@ contains
        
     end do
     deallocate(soic2d)
+
+    if (use_surfdata_soil_albedo) then
+       if (masterproc) then
+          write(iulog,*) 'Reading soil albedos from surface dataset .....'
+       end if
+       call ReadSoilAlbedo(bounds, ncid, 'ALBSAT_VIS', albsat_col(bounds%begc:bounds%endc,1))
+       call ReadSoilAlbedo(bounds, ncid, 'ALBSAT_NIR', albsat_col(bounds%begc:bounds%endc,2))
+       call ReadSoilAlbedo(bounds, ncid, 'ALBDRY_VIS', albdry_col(bounds%begc:bounds%endc,1))
+       call ReadSoilAlbedo(bounds, ncid, 'ALBDRY_NIR', albdry_col(bounds%begc:bounds%endc,2))
+    end if
 
     call ncd_pio_closefile(ncid)
 
@@ -216,11 +232,69 @@ contains
       call endrun(msg=errMsg(__FILE__, __LINE__))
     end if
 
+    ! Map soil color classes to columns. Non-soil columns can have a color
+    ! outside the class range, and SoilAlbedo does not use their values.
+    if (.not. use_surfdata_soil_albedo) then
+       albsat_col(:,:) = 0._r8
+       albdry_col(:,:) = 0._r8
+       do ib = 1, numrad
+          do c = bounds%begc, bounds%endc
+             if (isoicol(c) >= 1 .and. isoicol(c) <= mxsoil_color) then
+                albsat_col(c,ib) = albsat(isoicol(c),ib)
+                albdry_col(c,ib) = albdry(isoicol(c),ib)
+             end if
+          end do
+       end do
+    end if
+
     ! Set alblakwi
     alblakwi(:) = lake_melt_icealb(:)
 
-  !$acc enter data copyin(albsat,albdry,isoicol,alblakwi )
+  !$acc enter data copyin(albsat,albdry,isoicol,albsat_col,albdry_col,alblakwi )
   end subroutine SurfaceAlbedoInitTimeConst
+
+  !-----------------------------------------------------------------------
+  subroutine ReadSoilAlbedo(bounds, ncid, varname, albedo)
+    !
+    ! !DESCRIPTION:
+    ! Read one per-gridcell soil albedo field and map it to columns
+    !
+    ! !USES:
+    use ncdio_pio      , only : file_desc_t, ncd_io
+    use topounit_varcon, only : max_topounits
+    use GridcellType   , only : grc_pp
+    !
+    ! !ARGUMENTS:
+    type(bounds_type), intent(in)    :: bounds
+    type(file_desc_t), intent(inout) :: ncid
+    character(len=*) , intent(in)    :: varname
+    real(r8)         , intent(out)   :: albedo(bounds%begc:bounds%endc)
+    !
+    ! !LOCAL VARIABLES:
+    integer           :: c,g,t,ti,topi    ! indices
+    logical           :: readvar
+    real(r8), pointer :: alb2d(:,:)       ! read in - soil albedo
+    !---------------------------------------------------------------------
+
+    allocate(alb2d(bounds%begg:bounds%endg,max_topounits))
+    call ncd_io(ncid=ncid, varname=varname, flag='read', data=alb2d, dim1name=grlnd, readvar=readvar)
+    if (.not. readvar) then
+       call endrun(msg=' ERROR: '//trim(varname)//' NOT on surfdata file'//errMsg(__FILE__, __LINE__))
+    end if
+    do c = bounds%begc, bounds%endc
+       g = col_pp%gridcell(c)
+       t = col_pp%topounit(c)
+       topi = grc_pp%topi(g)
+       ti = t - topi + 1
+       albedo(c) = alb2d(g,ti)
+       if (albedo(c) < 0._r8 .or. albedo(c) > 1._r8) then
+          write(iulog,*) 'soil albedo out of range: ', trim(varname), ' column ', c, ' value ', albedo(c)
+          call endrun(msg=' ERROR: invalid soil albedo on surfdata file'//errMsg(__FILE__, __LINE__))
+       end if
+    end do
+    deallocate(alb2d)
+
+  end subroutine ReadSoilAlbedo
 
   !------------------------------------------------------------------------
   subroutine Init(this, bounds)
