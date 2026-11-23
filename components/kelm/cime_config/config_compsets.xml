@@ -26,4 +26,11 @@
     <lname>2000_DATM%GSWP3v1_KELM_SICE_SOCN_SROF_SGLC_SWAV</lname>
   </compset>
 
+  <!-- kELM counterpart of ELM's IERA5ELM (ERA5 0.25 deg hourly forcing,
+       DATM_MODE=ELMERA5), with SROF in place of MOSART -->
+  <compset>
+    <alias>IERA5KELM</alias>
+    <lname>2000_DATM%ERA5_KELM_SICE_SOCN_SROF_SGLC_SWAV</lname>
+  </compset>
+
 </compsets>
