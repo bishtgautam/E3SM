@@ -33,6 +33,9 @@ attributes to express the dependency.
 <use_modified_infil>.false.</use_modified_infil>
 <run_zero_weight_urban>.true.</run_zero_weight_urban>
 <kelm_hist_off>.false.</kelm_hist_off>
+<kelm_hist_empty_htapes>.false.</kelm_hist_empty_htapes>
+<kelm_hist_nhtfrq>0</kelm_hist_nhtfrq>
+<kelm_hist_mfilt>1</kelm_hist_mfilt>
 <kelm_stomata_closed>.false.</kelm_stomata_closed>
 <kelm_do_photosynthesis>.true.</kelm_do_photosynthesis>
 <kelm_co2_ppmv>284.7</kelm_co2_ppmv>

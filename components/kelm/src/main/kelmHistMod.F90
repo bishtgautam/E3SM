@@ -2,14 +2,15 @@ module kelmHistMod
 
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
-  ! Minimal monthly (h0-equivalent) history output for kELM.
+  ! Minimal h0-equivalent history output for kELM: monthly by default, or
+  ! every N hours (kelm_hist_nhtfrq < 0), kelm_hist_mfilt records per file.
   !
   ! Thinner than a port of histFileMod.F90: per-step accumulation lives in
   ! C++ (History.cpp, driven through kelm_mod's kELMHistory* bindings).
   ! This module's job is exactly histFileMod's hist_htapes_wrapup minus its
   ! per-step half: parse the namelist additions, drive one accumulate call
-  ! per step, and once a month pull the normalized means and write them
-  ! through a real PIO decomposed write.
+  ! per step, and at each interval's end pull the normalized means and
+  ! write them through a real PIO decomposed write.
   !
   ! See plans/active/2026_08_23_kelm_history_output_plan.md for the design.
   !-----------------------------------------------------------------------
@@ -41,7 +42,7 @@ module kelmHistMod
 
   public :: kelm_hist_init
   public :: kelm_hist_step
-  public :: kelm_hist_write_if_month_end
+  public :: kelm_hist_write_if_due
   public :: kelm_hist_final
   public :: kelm_hist_get_restart_state
   public :: kelm_hist_set_restart_state
@@ -99,6 +100,23 @@ module kelmHistMod
   integer :: hist_start_month = 0
   integer :: hist_start_day   = 0
   integer :: hist_nacs        = 0   ! this module's own step counter, mirrors C++ hist.nacs
+  ! The open interval's start time of day [s]. Not in the restart file: a
+  ! restart resumes it as 0, which is exact for monthly and daily output.
+  integer :: hist_start_tod   = 0
+
+  ! Output frequency and file size, ELM's hist_nhtfrq/hist_mfilt for tape 1:
+  ! 0 = monthly; < 0 = every -hist_nhtfrq hours (a divisor of 24).
+  integer :: hist_nhtfrq = 0
+  integer :: hist_mfilt  = 1
+
+  ! The file being filled, open from its first record until it holds
+  ! hist_mfilt records (or the run ends).
+  logical            :: hist_file_open = .false.
+  integer            :: hist_nrec      = 0
+  character(len=256) :: hist_fname     = ' '
+  type(file_desc_t)  :: hist_file
+  type(var_desc_t)   :: hv_time, hv_time_bounds, hv_mcdate, hv_mcsec, hv_mdcur, hv_mscur
+  type(var_desc_t), allocatable :: hv_field(:)
 
   real(r4), parameter :: HIST_FILL = 1.0e36_r4
 
@@ -158,7 +176,8 @@ contains
   !-----------------------------------------------------------------------
   subroutine kelm_hist_init(kelm_state, logunit, caseid, kelm_hist_fincl, &
                              hist_year, month, day, n_local_cells, num_cells_global_in, &
-                             natural_id_cells_owned, lonc_g, latc_g, areac_g)
+                             natural_id_cells_owned, lonc_g, latc_g, areac_g, &
+                             nhtfrq, mfilt, empty_htapes)
     !
     ! Activate the C++-side default fields plus any namelist additions,
     ! build the local staging buffers and the PIO decomposed-write map, and
@@ -174,6 +193,9 @@ contains
     integer             , intent(in) :: num_cells_global_in
     integer             , intent(in) :: natural_id_cells_owned(:)  ! (n_local_cells,), full-grid indices
     real(r8)            , intent(in) :: lonc_g(:), latc_g(:), areac_g(:)  ! (ni*nj,)
+    integer             , intent(in) :: nhtfrq        ! 0 monthly, < 0 every -nhtfrq hours
+    integer             , intent(in) :: mfilt         ! records per file
+    logical             , intent(in) :: empty_htapes  ! only kelm_hist_fincl's fields
 
     integer :: ierr, i, is_avg, l, c, p, g
     real(r8) :: re_km
@@ -186,9 +208,21 @@ contains
     n_local     = n_local_cells
     num_global  = num_cells_global_in
 
-    call kELMHistoryActivateDefaults(kelm_state, ierr)
-    if (ierr /= KELM_SUCCESS) &
-         call shr_sys_abort(subname//'ERROR: kELMHistoryActivateDefaults failed')
+    if (nhtfrq > 0) call shr_sys_abort(subname//'ERROR: kelm_hist_nhtfrq > 0 (a number '// &
+         'of time steps) is not supported; use 0 (monthly) or -N (every N hours)')
+    if (nhtfrq < 0) then
+       if (mod(24, -nhtfrq) /= 0) call shr_sys_abort(subname//'ERROR: kelm_hist_nhtfrq = -N '// &
+            'needs N to divide 24, so every interval ends at the same times each day')
+    end if
+    if (mfilt < 1) call shr_sys_abort(subname//'ERROR: kelm_hist_mfilt must be >= 1')
+    hist_nhtfrq = nhtfrq
+    hist_mfilt  = mfilt
+
+    if (.not. empty_htapes) then
+       call kELMHistoryActivateDefaults(kelm_state, ierr)
+       if (ierr /= KELM_SUCCESS) &
+            call shr_sys_abort(subname//'ERROR: kELMHistoryActivateDefaults failed')
+    end if
 
     call kelm_hist_fincl_parse(kelm_state, kelm_hist_fincl, logunit)
 
@@ -308,11 +342,14 @@ contains
     hist_start_year  = hist_year
     hist_start_month = month
     hist_start_day   = day
+    hist_start_tod   = 0
     hist_nacs        = 0
 
     hist_init_done = .true.
 
     if (masterproc) then
+       write(logunit,*) subname,'kelm_hist_nhtfrq = ',hist_nhtfrq,', kelm_hist_mfilt = ', &
+            hist_mfilt,', kelm_hist_empty_htapes = ',empty_htapes
        write(logunit,*) subname,nfields,' history fields active:'
        do i = 1, nfields
           write(logunit,*) subname,'   ',trim(field_name(i)),' [',trim(field_units(i)),'] ', &
@@ -434,13 +471,14 @@ contains
   end subroutine kelm_hist_step
 
   !-----------------------------------------------------------------------
-  subroutine kelm_hist_write_if_month_end(kelm_state, year, month, day, tod, logunit)
+  subroutine kelm_hist_write_if_due(kelm_state, year, month, day, tod, logunit)
     !
-    ! (year, month, day, tod) is the END time of the step just taken. A
-    ! month boundary is day==1 .and. tod==0 of that end time; the file
-    ! written is dated for the month that just closed (the interval's
-    ! START, recorded at kelm_hist_init or the previous call here), not
-    ! the month whose day-1 boundary triggered the write.
+    ! (year, month, day, tod) is the END time of the step just taken. An
+    ! interval closes at a month boundary (day==1 .and. tod==0) for
+    ! hist_nhtfrq == 0, or every -hist_nhtfrq hours of the day for
+    ! hist_nhtfrq < 0 (ELM's hist_nhtfrq convention). The closed interval's
+    ! mean is appended to the open file as its next record; the file is
+    ! closed once it holds hist_mfilt records.
     !
     implicit none
     type(kELMType), intent(in) :: kelm_state
@@ -448,16 +486,24 @@ contains
     integer         , intent(in) :: logunit
 
     integer :: ierr
-    character(len=*), parameter :: subname = '(kelm_hist_write_if_month_end) '
+    logical :: due
+    character(len=*), parameter :: subname = '(kelm_hist_write_if_due) '
 
     if (.not. hist_init_done) return
-    if (.not. (day == 1 .and. tod == 0)) return
+    if (hist_nhtfrq == 0) then
+       due = (day == 1 .and. tod == 0)
+    else
+       due = (mod(tod, -hist_nhtfrq*3600) == 0)
+    end if
+    if (.not. due) return
 
     if (hist_nacs == 0) then
-       write(logunit,*) subname,'WARNING: month boundary reached with no accumulated ', &
-            'samples; skipping write for ',hist_start_year,'-',hist_start_month
+       write(logunit,*) subname,'WARNING: history interval closed with no accumulated ', &
+            'samples; skipping the record starting ',hist_start_year,'-',hist_start_month, &
+            '-',hist_start_day
        call shr_sys_flush(logunit)
        hist_start_year = year; hist_start_month = month; hist_start_day = day
+       hist_start_tod = tod
        return
     end if
 
@@ -466,18 +512,22 @@ contains
 
     call kelm_hist_pull(kelm_state)
 
-    call kelm_hist_write_file(hist_start_year, hist_start_month, hist_start_day, &
-                               year, month, day, tod, logunit)
+    if (.not. hist_file_open) call kelm_hist_open_file(logunit)
+    hist_nrec = hist_nrec + 1
+    call kelm_hist_write_record(year, month, day, tod, logunit)
 
     call kELMHistoryReset(kelm_state, ierr)
     if (ierr /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: kELMHistoryReset failed')
     hist_nacs = 0
 
-    ! The interval that just closed started at hist_start_*; the next one
-    ! starts exactly here, at this month boundary.
-    hist_start_year = year; hist_start_month = month; hist_start_day = day
+    if (hist_nrec == hist_mfilt) call kelm_hist_close_file(logunit)
 
-  end subroutine kelm_hist_write_if_month_end
+    ! The interval that just closed started at hist_start_*; the next one
+    ! starts exactly here.
+    hist_start_year = year; hist_start_month = month; hist_start_day = day
+    hist_start_tod = tod
+
+  end subroutine kelm_hist_write_if_due
 
   !-----------------------------------------------------------------------
   subroutine kelm_hist_pull(kelm_state)
@@ -506,199 +556,259 @@ contains
   end subroutine kelm_hist_pull
 
   !-----------------------------------------------------------------------
-  subroutine kelm_hist_write_file(start_year, start_month, start_day, &
-                                   end_year, end_month, end_day, end_tod, logunit)
+  subroutine kelm_hist_open_file(logunit)
     !
-    ! One self-contained monthly NetCDF file: dims, time-constant fields and
-    ! the accumulating fields are all (re)defined here, since -- unlike
-    ! ELM's single always-open tape -- a new file is created every month.
+    ! Create the next history file and write what does not change between
+    ! its records: dimensions, variable definitions, lon/lat/area and the
+    ! subgrid fractions. Named for its first record's interval start:
+    ! YYYY-MM for monthly files, ELM's YYYY-MM-DD-SSSSS otherwise.
+    !
+    ! PCT_LANDUNIT/PCT_NAT_PFT are time-constant. A one-record file keeps
+    ! ELM's h0 layout (lndgrid, lev, time); a multi-record file stores them
+    ! once, without the time dimension, rather than repeating them in every
+    ! record (on a 16M-cell grid that repeat alone is ~1.7 GB per record).
     !
     implicit none
-    integer, intent(in) :: start_year, start_month, start_day
-    integer, intent(in) :: end_year, end_month, end_day, end_tod
     integer, intent(in) :: logunit
 
-    type(file_desc_t) :: file
-    type(var_desc_t)  :: vid_lon, vid_lat, vid_area, vid_time, vid_time_bounds
-    type(var_desc_t), allocatable :: vid_field(:)
-    type(var_desc_t)  :: vid_pctl, vid_pctp, vid_mcdate, vid_mcsec, vid_mdcur, vid_mscur
+    type(var_desc_t)  :: vid_lon, vid_lat, vid_area, vid_pctl, vid_pctp
     integer :: dimid_lndgrid, dimid_time, dimid_histint, dimid_lev(MAX_LEVDIM)
-    integer :: ierr, ifld, k, ival(1)
-    character(len=256) :: fname
+    integer :: ierr, ifld, k
+    logical :: pct_has_time
     character(len=16)  :: cdate
-    real(r8) :: start_days, end_days, tb(2,1), tval(1)
     real(r4), allocatable :: wbuf(:), wbuf2(:)
-    character(len=*), parameter :: subname = '(kelm_hist_write_file) '
+    character(len=*), parameter :: subname = '(kelm_hist_open_file) '
 
-    write(cdate,'(i4.4,"-",i2.2)') start_year, start_month
-    fname = trim(hist_caseid)//'.kelm.h0.'//trim(cdate)//'.nc'
+    if (hist_nhtfrq == 0) then
+       write(cdate,'(i4.4,"-",i2.2)') hist_start_year, hist_start_month
+    else
+       write(cdate,'(i4.4,"-",i2.2,"-",i2.2,"-",i5.5)') hist_start_year, hist_start_month, &
+            hist_start_day, hist_start_tod
+    end if
+    hist_fname = trim(hist_caseid)//'.kelm.h0.'//trim(cdate)//'.nc'
+    pct_has_time = (hist_mfilt == 1)
 
-    ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), ior(PIO_CLOBBER, io_format))
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_createfile failed for '//trim(fname))
+    ierr = PIO_createfile(pio_subsystem, hist_file, io_type, trim(hist_fname), &
+         ior(PIO_CLOBBER, io_format))
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_createfile failed for '// &
+         trim(hist_fname))
 
-    ierr = PIO_def_dim(file, 'lndgrid', num_global, dimid_lndgrid)
+    ierr = PIO_def_dim(hist_file, 'lndgrid', num_global, dimid_lndgrid)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim lndgrid failed')
-    ierr = PIO_def_dim(file, 'time', PIO_UNLIMITED, dimid_time)
+    ierr = PIO_def_dim(hist_file, 'time', PIO_UNLIMITED, dimid_time)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim time failed')
-    ierr = PIO_def_dim(file, 'hist_interval', 2, dimid_histint)
+    ierr = PIO_def_dim(hist_file, 'hist_interval', 2, dimid_histint)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim hist_interval failed')
     do k = 1, nlevdim
-       ierr = PIO_def_dim(file, trim(levdim_name(k)), levdim_n(k), dimid_lev(k))
+       ierr = PIO_def_dim(hist_file, trim(levdim_name(k)), levdim_n(k), dimid_lev(k))
        if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_dim '// &
             trim(levdim_name(k))//' failed')
     end do
 
     ! Time-constant per-cell fields.
-    ierr = PIO_def_var(file, 'lon', PIO_real, (/dimid_lndgrid/), vid_lon)
+    ierr = PIO_def_var(hist_file, 'lon', PIO_real, (/dimid_lndgrid/), vid_lon)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var lon failed')
-    ierr = PIO_put_att(file, vid_lon, 'units', 'degrees_east')
-    ierr = PIO_def_var(file, 'lat', PIO_real, (/dimid_lndgrid/), vid_lat)
+    ierr = PIO_put_att(hist_file, vid_lon, 'units', 'degrees_east')
+    ierr = PIO_def_var(hist_file, 'lat', PIO_real, (/dimid_lndgrid/), vid_lat)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var lat failed')
-    ierr = PIO_put_att(file, vid_lat, 'units', 'degrees_north')
-    ierr = PIO_def_var(file, 'area', PIO_real, (/dimid_lndgrid/), vid_area)
+    ierr = PIO_put_att(hist_file, vid_lat, 'units', 'degrees_north')
+    ierr = PIO_def_var(hist_file, 'area', PIO_real, (/dimid_lndgrid/), vid_area)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var area failed')
-    ierr = PIO_put_att(file, vid_area, 'units', 'km^2')
+    ierr = PIO_put_att(hist_file, vid_area, 'units', 'km^2')
 
-    ! Time / time_bounds. NOT part of the lndgrid decomposition -- one
-    ! value (this file's single record) written collectively below.
-    ierr = PIO_def_var(file, 'time', PIO_double, (/dimid_time/), vid_time)
+    ! Time / time_bounds. NOT part of the lndgrid decomposition -- one value
+    ! per record, written collectively in kelm_hist_write_record.
+    ierr = PIO_def_var(hist_file, 'time', PIO_double, (/dimid_time/), hv_time)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var time failed')
-    ierr = PIO_put_att(file, vid_time, 'units', 'days since 0001-01-01 00:00:00')
-    ierr = PIO_put_att(file, vid_time, 'calendar', trim(shr_cal_noleap))
-    ierr = PIO_put_att(file, vid_time, 'bounds', 'time_bounds')
-    ierr = PIO_def_var(file, 'time_bounds', PIO_double, (/dimid_histint, dimid_time/), vid_time_bounds)
+    ierr = PIO_put_att(hist_file, hv_time, 'units', 'days since 0001-01-01 00:00:00')
+    ierr = PIO_put_att(hist_file, hv_time, 'calendar', trim(shr_cal_noleap))
+    ierr = PIO_put_att(hist_file, hv_time, 'bounds', 'time_bounds')
+    ierr = PIO_def_var(hist_file, 'time_bounds', PIO_double, (/dimid_histint, dimid_time/), &
+         hv_time_bounds)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var time_bounds failed')
 
     ! ELM's per-record date metadata, at the record's end time.
-    ierr = PIO_def_var(file, 'mcdate', PIO_int, (/dimid_time/), vid_mcdate)
-    ierr = PIO_put_att(file, vid_mcdate, 'long_name', 'current date (YYYYMMDD)')
-    ierr = PIO_def_var(file, 'mcsec', PIO_int, (/dimid_time/), vid_mcsec)
-    ierr = PIO_put_att(file, vid_mcsec, 'long_name', 'current seconds of current date')
-    ierr = PIO_put_att(file, vid_mcsec, 'units', 's')
-    ierr = PIO_def_var(file, 'mdcur', PIO_int, (/dimid_time/), vid_mdcur)
-    ierr = PIO_put_att(file, vid_mdcur, 'long_name', 'current day (from base day)')
-    ierr = PIO_def_var(file, 'mscur', PIO_int, (/dimid_time/), vid_mscur)
-    ierr = PIO_put_att(file, vid_mscur, 'long_name', 'current seconds of current day')
+    ierr = PIO_def_var(hist_file, 'mcdate', PIO_int, (/dimid_time/), hv_mcdate)
+    ierr = PIO_put_att(hist_file, hv_mcdate, 'long_name', 'current date (YYYYMMDD)')
+    ierr = PIO_def_var(hist_file, 'mcsec', PIO_int, (/dimid_time/), hv_mcsec)
+    ierr = PIO_put_att(hist_file, hv_mcsec, 'long_name', 'current seconds of current date')
+    ierr = PIO_put_att(hist_file, hv_mcsec, 'units', 's')
+    ierr = PIO_def_var(hist_file, 'mdcur', PIO_int, (/dimid_time/), hv_mdcur)
+    ierr = PIO_put_att(hist_file, hv_mdcur, 'long_name', 'current day (from base day)')
+    ierr = PIO_def_var(hist_file, 'mscur', PIO_int, (/dimid_time/), hv_mscur)
+    ierr = PIO_put_att(hist_file, hv_mscur, 'long_name', 'current seconds of current day')
 
-    ! Subgrid fractions (time-constant, written per record as ELM does).
-    ierr = PIO_def_var(file, 'PCT_LANDUNIT', PIO_real, &
-         (/dimid_lndgrid, dimid_lev(ilev_ltype), dimid_time/), vid_pctl)
+    ! Subgrid fractions.
+    if (pct_has_time) then
+       ierr = PIO_def_var(hist_file, 'PCT_LANDUNIT', PIO_real, &
+            (/dimid_lndgrid, dimid_lev(ilev_ltype), dimid_time/), vid_pctl)
+    else
+       ierr = PIO_def_var(hist_file, 'PCT_LANDUNIT', PIO_real, &
+            (/dimid_lndgrid, dimid_lev(ilev_ltype)/), vid_pctl)
+    end if
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var PCT_LANDUNIT failed')
-    ierr = PIO_put_att(file, vid_pctl, 'units', '%')
-    ierr = PIO_put_att(file, vid_pctl, 'long_name', '% of each landunit on topounit')
-    ierr = PIO_put_att(file, vid_pctl, '_FillValue', HIST_FILL)
-    ierr = PIO_put_att(file, vid_pctl, 'missing_value', HIST_FILL)
-    ierr = PIO_def_var(file, 'PCT_NAT_PFT', PIO_real, &
-         (/dimid_lndgrid, dimid_lev(ilev_natpft), dimid_time/), vid_pctp)
+    ierr = PIO_put_att(hist_file, vid_pctl, 'units', '%')
+    ierr = PIO_put_att(hist_file, vid_pctl, 'long_name', '% of each landunit on topounit')
+    ierr = PIO_put_att(hist_file, vid_pctl, '_FillValue', HIST_FILL)
+    ierr = PIO_put_att(hist_file, vid_pctl, 'missing_value', HIST_FILL)
+    if (pct_has_time) then
+       ierr = PIO_def_var(hist_file, 'PCT_NAT_PFT', PIO_real, &
+            (/dimid_lndgrid, dimid_lev(ilev_natpft), dimid_time/), vid_pctp)
+    else
+       ierr = PIO_def_var(hist_file, 'PCT_NAT_PFT', PIO_real, &
+            (/dimid_lndgrid, dimid_lev(ilev_natpft)/), vid_pctp)
+    end if
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_def_var PCT_NAT_PFT failed')
-    ierr = PIO_put_att(file, vid_pctp, 'units', '%')
-    ierr = PIO_put_att(file, vid_pctp, 'long_name', &
+    ierr = PIO_put_att(hist_file, vid_pctp, 'units', '%')
+    ierr = PIO_put_att(hist_file, vid_pctp, 'long_name', &
          '% of each PFT on the natural vegetation (i.e., soil) landunit')
-    ierr = PIO_put_att(file, vid_pctp, '_FillValue', HIST_FILL)
-    ierr = PIO_put_att(file, vid_pctp, 'missing_value', HIST_FILL)
+    ierr = PIO_put_att(hist_file, vid_pctp, '_FillValue', HIST_FILL)
+    ierr = PIO_put_att(hist_file, vid_pctp, 'missing_value', HIST_FILL)
 
     ! Accumulating fields.
-    allocate(vid_field(nfields))
+    if (allocated(hv_field)) deallocate(hv_field)
+    allocate(hv_field(nfields))
     do ifld = 1, nfields
        if (field_nlev(ifld) > 0) then
-          ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, &
-               (/dimid_lndgrid, dimid_lev(field_levdim(ifld)), dimid_time/), vid_field(ifld))
+          ierr = PIO_def_var(hist_file, trim(field_name(ifld)), PIO_real, &
+               (/dimid_lndgrid, dimid_lev(field_levdim(ifld)), dimid_time/), hv_field(ifld))
        else
-          ierr = PIO_def_var(file, trim(field_name(ifld)), PIO_real, (/dimid_lndgrid, dimid_time/), &
-               vid_field(ifld))
+          ierr = PIO_def_var(hist_file, trim(field_name(ifld)), PIO_real, &
+               (/dimid_lndgrid, dimid_time/), hv_field(ifld))
        end if
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_def_var failed for '//trim(field_name(ifld)))
-       ierr = PIO_put_att(file, vid_field(ifld), 'units', trim(field_units(ifld)))
-       ierr = PIO_put_att(file, vid_field(ifld), 'long_name', trim(field_long_name(ifld)))
-       ierr = PIO_put_att(file, vid_field(ifld), '_FillValue', HIST_FILL)
-       ierr = PIO_put_att(file, vid_field(ifld), 'missing_value', HIST_FILL)
+       ierr = PIO_put_att(hist_file, hv_field(ifld), 'units', trim(field_units(ifld)))
+       ierr = PIO_put_att(hist_file, hv_field(ifld), 'long_name', trim(field_long_name(ifld)))
+       ierr = PIO_put_att(hist_file, hv_field(ifld), '_FillValue', HIST_FILL)
+       ierr = PIO_put_att(hist_file, hv_field(ifld), 'missing_value', HIST_FILL)
        if (field_is_avg(ifld)) then
-          ierr = PIO_put_att(file, vid_field(ifld), 'cell_methods', 'time: mean')
+          ierr = PIO_put_att(hist_file, hv_field(ifld), 'cell_methods', 'time: mean')
        end if
     end do
 
-    ierr = PIO_enddef(file)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_enddef failed for '//trim(fname))
+    ierr = PIO_enddef(hist_file)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_enddef failed for '// &
+         trim(hist_fname))
+
+    ! Time-constant, decomposed fields -- once per file (each file is
+    ! self-contained), not once for the whole run.
+    allocate(wbuf(n_local))
+    wbuf = real(hist_lon, r4)
+    call PIO_write_darray(hist_file, vid_lon, hist_iodesc, wbuf, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray lon failed')
+    wbuf = real(hist_lat, r4)
+    call PIO_write_darray(hist_file, vid_lat, hist_iodesc, wbuf, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray lat failed')
+    wbuf = real(hist_area, r4)
+    call PIO_write_darray(hist_file, vid_area, hist_iodesc, wbuf, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray area failed')
+    deallocate(wbuf)
+
+    if (pct_has_time) call PIO_setframe(hist_file, vid_pctl, 1_PIO_OFFSET_KIND, ierr)
+    allocate(wbuf2(n_local*MAX_LUNIT))
+    wbuf2 = real(reshape(pct_landunit, (/n_local*MAX_LUNIT/)), r4)
+    call PIO_write_darray(hist_file, vid_pctl, levdim_iodesc(ilev_ltype), wbuf2, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_LANDUNIT failed')
+    deallocate(wbuf2)
+    if (pct_has_time) call PIO_setframe(hist_file, vid_pctp, 1_PIO_OFFSET_KIND, ierr)
+    allocate(wbuf2(n_local*natpft))
+    wbuf2 = real(reshape(pct_nat_pft, (/n_local*natpft/)), r4)
+    call PIO_write_darray(hist_file, vid_pctp, levdim_iodesc(ilev_natpft), wbuf2, ierr)
+    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_NAT_PFT failed')
+    deallocate(wbuf2)
+
+    hist_file_open = .true.
+    hist_nrec = 0
+
+  end subroutine kelm_hist_open_file
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_hist_write_record(end_year, end_month, end_day, end_tod, logunit)
+    !
+    ! Append record hist_nrec (already incremented) to the open file: its
+    ! time metadata and every active field's interval mean.
+    !
+    implicit none
+    integer, intent(in) :: end_year, end_month, end_day, end_tod
+    integer, intent(in) :: logunit
+
+    integer :: ierr, ifld, ival(1)
+    real(r8) :: start_days, end_days, tb(2,1), tval(1)
+    real(r4), allocatable :: wbuf(:), wbuf2(:)
+    character(len=*), parameter :: subname = '(kelm_hist_write_record) '
 
     ! Time / time_bounds: absolute days since the twin case's own epoch
-    ! (0001-01-01 00:00:00, noleap) -- not run-relative, so an kELM h0
-    ! file overlays its ELM twin without a conversion step.
-    start_days = kelm_hist_days_since_epoch(start_year, start_month, start_day, 0)
+    ! (0001-01-01 00:00:00, noleap) -- not run-relative, so a kELM h0 file
+    ! overlays its ELM twin without a conversion step.
+    start_days = kelm_hist_days_since_epoch(hist_start_year, hist_start_month, &
+         hist_start_day, hist_start_tod)
     end_days   = kelm_hist_days_since_epoch(end_year, end_month, end_day, end_tod)
     tval(1)   = end_days
     tb(1,1)   = start_days
     tb(2,1)   = end_days
-    ierr = PIO_put_var(file, vid_time, (/1/), tval(1))
+    ierr = PIO_put_var(hist_file, hv_time, (/hist_nrec/), tval(1))
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var time failed')
-    ierr = PIO_put_var(file, vid_time_bounds, (/1,1/), (/2,1/), tb)
+    ierr = PIO_put_var(hist_file, hv_time_bounds, (/1,hist_nrec/), (/2,1/), tb)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var time_bounds failed')
     ival(1) = end_year*10000 + end_month*100 + end_day
-    ierr = PIO_put_var(file, vid_mcdate, (/1/), ival(1))
+    ierr = PIO_put_var(hist_file, hv_mcdate, (/hist_nrec/), ival(1))
     ival(1) = end_tod
-    ierr = PIO_put_var(file, vid_mcsec, (/1/), ival(1))
+    ierr = PIO_put_var(hist_file, hv_mcsec, (/hist_nrec/), ival(1))
     ! Whole days and seconds since the base date, as ELM's get_curr_time.
     ival(1) = int(end_days - hist_base_days + 1.0e-9_r8)
-    ierr = PIO_put_var(file, vid_mdcur, (/1/), ival(1))
-    ival(1) = nint((end_days - hist_base_days - real(ival(1), r8)) * 86400.0_r8)
-    ierr = PIO_put_var(file, vid_mscur, (/1/), ival(1))
+    ierr = PIO_put_var(hist_file, hv_mdcur, (/hist_nrec/), ival(1))
+    ival(1) = nint((end_days - hist_base_days - real(int(end_days - hist_base_days + &
+         1.0e-9_r8), r8)) * 86400.0_r8)
+    ierr = PIO_put_var(hist_file, hv_mscur, (/hist_nrec/), ival(1))
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_put_var date metadata failed')
 
-    ! Time-constant, decomposed fields -- written into every file (each
-    ! monthly file is self-contained), not once for the whole run.
     allocate(wbuf(n_local))
-    wbuf = real(hist_lon, r4)
-    call PIO_write_darray(file, vid_lon, hist_iodesc, wbuf, ierr)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray lon failed')
-    wbuf = real(hist_lat, r4)
-    call PIO_write_darray(file, vid_lat, hist_iodesc, wbuf, ierr)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray lat failed')
-    wbuf = real(hist_area, r4)
-    call PIO_write_darray(file, vid_area, hist_iodesc, wbuf, ierr)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray area failed')
-
-    call PIO_setframe(file, vid_pctl, 1_PIO_OFFSET_KIND, ierr)
-    allocate(wbuf2(n_local*MAX_LUNIT))
-    wbuf2 = real(reshape(pct_landunit, (/n_local*MAX_LUNIT/)), r4)
-    call PIO_write_darray(file, vid_pctl, levdim_iodesc(ilev_ltype), wbuf2, ierr)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_LANDUNIT failed')
-    deallocate(wbuf2)
-    call PIO_setframe(file, vid_pctp, 1_PIO_OFFSET_KIND, ierr)
-    allocate(wbuf2(n_local*natpft))
-    wbuf2 = real(reshape(pct_nat_pft, (/n_local*natpft/)), r4)
-    call PIO_write_darray(file, vid_pctp, levdim_iodesc(ilev_natpft), wbuf2, ierr)
-    if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: PIO_write_darray PCT_NAT_PFT failed')
-    deallocate(wbuf2)
-
     do ifld = 1, nfields
-       call PIO_setframe(file, vid_field(ifld), 1_PIO_OFFSET_KIND, ierr)
+       call PIO_setframe(hist_file, hv_field(ifld), int(hist_nrec, PIO_OFFSET_KIND), ierr)
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_setframe failed for '//trim(field_name(ifld)))
        if (field_nlev(ifld) > 0) then
           allocate(wbuf2(n_local*field_nlev(ifld)))
           wbuf2 = real(reshape(hist_buf2(ifld)%v, (/n_local*field_nlev(ifld)/)), r4)
-          call PIO_write_darray(file, vid_field(ifld), levdim_iodesc(field_levdim(ifld)), &
+          call PIO_write_darray(hist_file, hv_field(ifld), levdim_iodesc(field_levdim(ifld)), &
                wbuf2, ierr)
           deallocate(wbuf2)
        else
           wbuf = real(hist_buf(:,ifld), r4)
-          call PIO_write_darray(file, vid_field(ifld), hist_iodesc, wbuf, ierr)
+          call PIO_write_darray(hist_file, hv_field(ifld), hist_iodesc, wbuf, ierr)
        end if
        if (ierr /= PIO_NOERR) &
             call shr_sys_abort(subname//'ERROR: PIO_write_darray failed for '//trim(field_name(ifld)))
     end do
     deallocate(wbuf)
-    if (allocated(wbuf2)) deallocate(wbuf2)
-    deallocate(vid_field)
 
-    call PIO_closefile(file)
+    ! Each record is complete on disk before the next interval starts, so a
+    ! run that dies mid-file leaves the records before it readable.
+    call PIO_syncfile(hist_file)
 
     if (masterproc) then
-       write(logunit,*) subname,'wrote ',trim(fname),' (',nfields,' fields, ',hist_nacs,' samples)'
+       write(logunit,*) subname,'wrote record ',hist_nrec,' of ',trim(hist_fname),' (', &
+            nfields,' fields, ',hist_nacs,' samples)'
        call shr_sys_flush(logunit)
     end if
 
-  end subroutine kelm_hist_write_file
+  end subroutine kelm_hist_write_record
+
+  !-----------------------------------------------------------------------
+  subroutine kelm_hist_close_file(logunit)
+    implicit none
+    integer, intent(in) :: logunit
+    if (.not. hist_file_open) return
+    call PIO_closefile(hist_file)
+    hist_file_open = .false.
+    if (masterproc) then
+       write(logunit,*) '(kelm_hist_close_file) closed ',trim(hist_fname),' with ', &
+            hist_nrec,' records'
+       call shr_sys_flush(logunit)
+    end if
+    hist_nrec = 0
+  end subroutine kelm_hist_close_file
 
   !-----------------------------------------------------------------------
   function kelm_hist_days_since_epoch(year, month, day, tod) result(days)
@@ -725,9 +835,10 @@ contains
   !-----------------------------------------------------------------------
   subroutine kelm_hist_final(kelm_state, year, month, day, tod, logunit)
     !
-    ! Release history's resources. A partial trailing month (nacs > 0) is
-    ! dropped, not written: ELM writes a tape only when it fills (here at
-    ! the month boundary), never at the end of a run that stops mid-month.
+    ! Release history's resources. A partial trailing interval (nacs > 0) is
+    ! dropped, not written: ELM writes a record only when its interval
+    ! closes, never at the end of a run that stops mid-interval. A file
+    ! holding fewer than hist_mfilt complete records is closed as it is.
     ! Must run BEFORE kELMDestroy -- kelm_final calls this first, ahead of
     ! tearing the object down.
     !
@@ -740,11 +851,13 @@ contains
     if (.not. hist_init_done) return
 
     if (hist_nacs > 0 .and. masterproc) then
-       write(logunit,*) '(kelm_hist_final) partial month not written (as ELM): ', &
+       write(logunit,*) '(kelm_hist_final) partial interval not written (as ELM): ', &
             hist_nacs,' samples since ',hist_start_year,'-',hist_start_month,'-',hist_start_day
        call shr_sys_flush(logunit)
     end if
     hist_nacs = 0
+
+    call kelm_hist_close_file(logunit)
 
     call PIO_freedecomp(pio_subsystem, hist_iodesc)
     do k = 1, nlevdim

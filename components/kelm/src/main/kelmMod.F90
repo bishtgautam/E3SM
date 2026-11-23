@@ -68,7 +68,7 @@ module kelmMod
                                    kelm_diag_write_maps, kelm_diag_flush
   use kelmRestMod           , only : kelm_rest_read
   use kelmHistMod           , only : kelm_hist_init, kelm_hist_step, &
-                                      kelm_hist_write_if_month_end, &
+                                      kelm_hist_write_if_due, &
                                       kelm_hist_final
   use kelmLakeMod           , only : kelm_lake_init, kelm_lake_push_forcing, &
                                       kelm_lake_clean, lake_built
@@ -241,7 +241,12 @@ module kelmMod
   ! History output. Additions/overrides BEYOND the C++-side default field
   ! list (RegisterHistoryField's default_active) -- empty means just the
   ! defaults. See kelmHistMod.
-  character(len=256), public :: kelm_hist_fincl = ' '
+  character(len=1024), public :: kelm_hist_fincl = ' '
+  ! Only kelm_hist_fincl's fields, and the output frequency and records per
+  ! file (ELM's hist_empty_htapes, hist_nhtfrq, hist_mfilt for tape 1).
+  logical           , public :: kelm_hist_empty_htapes = .false.
+  integer           , public :: kelm_hist_nhtfrq       = 0
+  integer           , public :: kelm_hist_mfilt        = 1
   ! Case name, read from infodata in lnd_init_mct (not read anywhere in
   ! kELM before history needed it for the output filename).
   character(len=256), public :: kelm_caseid = ' '
@@ -316,7 +321,8 @@ contains
                             kelm_co2_ppmv, fsnowoptics, fsnowaging, finidat, &
                             kelm_hist_fincl, kelm_nrevsn, kelm_timer_level, &
                             kelm_kernel_reports, use_top_solar_rad, use_finetop_rad, &
-                            albice, use_modified_infil, run_zero_weight_urban, kelm_hist_off
+                            albice, use_modified_infil, run_zero_weight_urban, kelm_hist_off, &
+                            kelm_hist_empty_htapes, kelm_hist_nhtfrq, kelm_hist_mfilt
 
     ! defaults
     do_kelm   = .true.
@@ -342,6 +348,9 @@ contains
     kelm_do_photosynthesis = .true.
     kelm_co2_ppmv        = 284.7_r8
     kelm_hist_fincl      = ' '
+    kelm_hist_empty_htapes = .false.
+    kelm_hist_nhtfrq     = 0
+    kelm_hist_mfilt      = 1
     kelm_timer_level     = 0
 
     nlfilename = "lnd_in" // trim(inst_suffix)
@@ -398,6 +407,9 @@ contains
     call mpi_bcast (use_modified_infil    , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (run_zero_weight_urban , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
     call mpi_bcast (kelm_hist_off         , 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (kelm_hist_empty_htapes, 1, MPI_LOGICAL, 0, mpicom_lnd, ier)
+    call mpi_bcast (kelm_hist_nhtfrq      , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
+    call mpi_bcast (kelm_hist_mfilt       , 1, MPI_INTEGER, 0, mpicom_lnd, ier)
     if (use_top_solar_rad .and. use_finetop_rad) then
        call shr_sys_abort(subname//' ERROR: use_finetop_rad and use_top_solar_rad '// &
             'cannot both be true (as in ELM)')
@@ -425,6 +437,9 @@ contains
        write(logunit,*) '   fsnowoptics           = ', trim(fsnowoptics)
        write(logunit,*) '   fsnowaging            = ', trim(fsnowaging)
        write(logunit,*) '   kelm_hist_fincl      = ', trim(kelm_hist_fincl)
+       write(logunit,*) '   kelm_hist_empty_htapes = ', kelm_hist_empty_htapes
+       write(logunit,*) '   kelm_hist_nhtfrq     = ', kelm_hist_nhtfrq
+       write(logunit,*) '   kelm_hist_mfilt      = ', kelm_hist_mfilt
        write(logunit,*) '   kelm_timer_level     = ', kelm_timer_level
        call shr_sys_flush(logunit)
     end if
@@ -979,7 +994,8 @@ contains
           call kelm_hist_init(kelm_state, logunit, kelm_caseid, kelm_hist_fincl, &
                                kelm_hist_start_year, kelm_hist_start_month, &
                                kelm_hist_start_day, n_kokkos_col, num_cells_global, &
-                               natural_id_cells_owned, lonc_g, latc_g, areac_g)
+                               natural_id_cells_owned, lonc_g, latc_g, areac_g, &
+                               kelm_hist_nhtfrq, kelm_hist_mfilt, kelm_hist_empty_htapes)
           hist_state_init_done = .true.
        end if
        if (kokkos_state_built .and. any_kernel_active .and. kelm_do_photosynthesis) then
@@ -1087,7 +1103,8 @@ contains
        call kelm_hist_init(kelm_state, logunit, kelm_caseid, kelm_hist_fincl, &
                             kelm_hist_start_year, kelm_hist_start_month, &
                             kelm_hist_start_day, n_kokkos_col, num_cells_global, &
-                            natural_id_cells_owned, lonc_g, latc_g, areac_g)
+                            natural_id_cells_owned, lonc_g, latc_g, areac_g, &
+                            kelm_hist_nhtfrq, kelm_hist_mfilt, kelm_hist_empty_htapes)
        hist_state_init_done = .true.
     end if
 
@@ -1205,7 +1222,7 @@ contains
        if (nstep > 0 .and. present(hist_year) .and. present(hist_month) .and. &
            present(hist_day) .and. present(hist_tod)) then
           call kelm_t_start('elm_drv_io_htapes')
-          call kelm_hist_write_if_month_end(kelm_state, hist_year, hist_month, &
+          call kelm_hist_write_if_due(kelm_state, hist_year, hist_month, &
                                              hist_day, hist_tod, logunit)
           call kelm_t_stop('elm_drv_io_htapes')
        end if

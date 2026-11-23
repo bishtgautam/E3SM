@@ -172,8 +172,7 @@ water sits on the saturated fraction.
        group="kelm_inparm" >
 Default: .false.
 If .true., kELM keeps no history at all: nothing is accumulated each step
-(the hbuf timer) and no history file is written, not even the partial month
-at the end of the run. ELM's counterpart is hist_empty_htapes = .true. with
+(the hbuf timer) and no history file is written. ELM's counterpart is hist_empty_htapes = .true. with
 no hist_fincl. For timing runs.
 </entry>
 
@@ -334,7 +333,7 @@ file as the ELM twin, or the two models are not comparable.
 </entry>
 
 <entry id="kelm_hist_fincl"
-       type="char*256"
+       type="char*1024"
        category="kelm"
        group="kelm_inparm"
        valid_values="" >
@@ -347,6 +346,38 @@ defaults, not "no history."
 
 An unknown name, or a name already active by default, aborts at
 kelm_hist_init rather than being silently ignored.
+With kelm_hist_empty_htapes = .true., this list is the whole field list.
+</entry>
+
+<entry id="kelm_hist_empty_htapes"
+       type="logical"
+       category="kelm"
+       group="kelm_inparm" >
+Default: .false.
+If .true., none of the default history fields is active: only the fields
+listed in kelm_hist_fincl are written. ELM's hist_empty_htapes for tape 1.
+</entry>
+
+<entry id="kelm_hist_nhtfrq"
+       type="integer"
+       category="kelm"
+       group="kelm_inparm" >
+Default: 0
+History output frequency, ELM's hist_nhtfrq for tape 1: 0 writes monthly
+means; -N writes N-hourly means (e.g. -24 for daily), and N must divide 24.
+Positive values (a number of time steps) are not supported and abort.
+</entry>
+
+<entry id="kelm_hist_mfilt"
+       type="integer"
+       category="kelm"
+       group="kelm_inparm" >
+Default: 1
+Number of records (time samples) per history file, ELM's hist_mfilt for
+tape 1. A file is named for the start of its first record's interval:
+CASE.kelm.h0.YYYY-MM.nc for monthly output, CASE.kelm.h0.YYYY-MM-DD-SSSSS.nc
+otherwise. With more than one record per file, the time-constant
+PCT_LANDUNIT and PCT_NAT_PFT are written once, without the time dimension.
 </entry>
 
 </namelist_definition>

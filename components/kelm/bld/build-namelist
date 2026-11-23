@@ -314,6 +314,10 @@ if ($LND_GRID eq "null") {
     add_default($nl, 'use_modified_infil');
     add_default($nl, 'run_zero_weight_urban');
     add_default($nl, 'kelm_hist_off');
+    # kelm_hist_empty_htapes, kelm_hist_nhtfrq and kelm_hist_mfilt are left
+    # out of lnd_in unless user_nl_kelm sets them (their Fortran defaults are
+    # the namelist defaults), so an executable built before they existed
+    # still reads the lnd_in this script writes.
 
     # Placeholder for the unported Photosynthesis; off by default.
     add_default($nl, 'kelm_stomata_closed');
