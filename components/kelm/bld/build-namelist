@@ -326,7 +326,15 @@ if ($LND_GRID eq "null") {
 
     # Photosynthesis inside the CanopyFluxes iteration; on by default.
     add_default($nl, 'kelm_do_photosynthesis');
-    add_default($nl, 'kelm_co2_ppmv');
+    # CO2 follows the case's CCSM_CO2_PPMV, as ELM's co2_ppmv does (its
+    # build-namelist gets -co2_ppmv CCSM_CO2_PPMV): 284.7 for 1850
+    # compsets, 367.0 for 2000 ones. The namelist default is the fallback.
+    my $co2 = $xmlvars{'CCSM_CO2_PPMV'};
+    if (defined $co2 && $co2 ne '' && $co2 > 0) {
+        add_default($nl, 'kelm_co2_ppmv', 'val'=>$co2);
+    } else {
+        add_default($nl, 'kelm_co2_ppmv');
+    }
 
     # Inputs the kernels need, defaulting to ELM's files under DIN_LOC_ROOT.
     add_default($nl, 'fparamfile');

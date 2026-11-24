@@ -309,9 +309,10 @@ resistances are ignored.
        category="kelm"
        group="kelm_inparm"
        valid_values="" >
-Default: 284.7
+Default: the case's CCSM_CO2_PPMV (284.7 if it is unset)
 Atmospheric CO2 concentration [ppmv], used to form the CO2 partial pressure
-the leaf model needs. ELM takes the same number from its own namelist under
+the leaf model needs. build-namelist takes it from CCSM_CO2_PPMV, as ELM's
+does for co2_ppmv, so a 2000 compset gets 367.0 and an 1850 one 284.7. ELM takes the same number from its own namelist under
 co2_type = 'constant'; 284.7 is what the I1850 twins use, so the default
 matches them.
 </entry>
