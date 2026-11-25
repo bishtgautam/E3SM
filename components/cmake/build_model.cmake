@@ -374,6 +374,17 @@ macro(build_model COMP_CLASS COMP_NAME)
         # executable would want a shared pacer target instead.
         set(KELM_PACER_DIR "${PROJECT_SOURCE_DIR}/../share/pacer")
         set(KELM_GPTL_INCLUDE_DIRS "${INSTALL_SHAREDPATH}/include")
+        # kELM picks its memory space from ENABLE_<BACKEND> (see
+        # src/utils/DataTypes.h), whose defaults are OpenMP+Serial. Match them
+        # to the backends EKAT's Kokkos was built with, so a CUDA/HIP/SYCL
+        # build (USE_CUDA etc. in the machine macros) gets device memory.
+        foreach (KELM_BACKEND IN ITEMS CUDA HIP SYCL OPENMP SERIAL)
+          if (Kokkos_ENABLE_${KELM_BACKEND})
+            set(ENABLE_${KELM_BACKEND} ON CACHE BOOL "kELM backend, from Kokkos" FORCE)
+          else()
+            set(ENABLE_${KELM_BACKEND} OFF CACHE BOOL "kELM backend, from Kokkos" FORCE)
+          endif()
+        endforeach()
         add_subdirectory(${KELM_LIB_DIR} kelm-lib)
         # kelm         -> libkelm.a         (C++ kernels + C API)
         # kelm_fortran -> libkelm_fortran.a (iso_c_binding wrappers; supplies
