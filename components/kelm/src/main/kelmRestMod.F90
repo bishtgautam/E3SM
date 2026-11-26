@@ -41,9 +41,27 @@ module kelmRestMod
   ! so the first h0 holds only the branch's own steps and the branch may
   ! change kelm_hist_fincl.
   !
-  ! READING IS STRICT. Every allocated, non-TOPO registry field must be on
-  ! the file with the same global shape, or the run aborts: under "write all
-  ! state" a field that silently fails to restore is a bug, not a tolerance.
+  ! ONLY STATE IS WRITTEN (2026-11-25). Each registry field has a restart
+  ! class (kELM tools/restart_classes.txt): STATE fields and the history
+  ! accumulators are written and read; INIT fields are set at initialisation
+  ! on every run, and SCRATCH fields are recomputed every step, so neither is
+  ! written. Writing every field made the region05 restart 211 GB.
+  !
+  ! READING IS STRICT. Every allocated STATE field must be on the file with
+  ! the same global shape, or the run aborts: a field that silently fails to
+  ! restore is a bug, not a tolerance. Extra variables on the file are
+  ! ignored.
+  !
+  ! TESTING AIDS (environment variables, never set in production):
+  !   KELM_RESTART_WRITE_ALL=1   also write INIT and SCRATCH fields, so one
+  !                              reference run serves many restart trials;
+  !   KELM_RESTART_POISON=report as 1, and before each write print every
+  !                              SCRATCH field still holding poison
+  !   KELM_RESTART_POISON=1      after a read, fill SCRATCH fields with
+  !                              signaling NaN; =trap also traps invalid
+  !                              floating-point operations and names the
+  !                              kernel (kELMRestartPoisonScratch);
+  !   KELM_RESTART_STATE_EXTRA   fnmatch patterns read as STATE (kELM).
   !
   use shr_kind_mod , only : r8 => shr_kind_r8, CL => shr_kind_cl
   use shr_sys_mod  , only : shr_sys_abort, shr_sys_flush
@@ -61,7 +79,9 @@ module kelmRestMod
   use kelm_mod    , only : kELMType, KELM_SUCCESS, &
                             kELMRestartFieldCount, kELMRestartFieldInfo, &
                             kELMRestartFieldGet, kELMRestartFieldSet, &
-                            kELMHistoryGetNacs, kELMHistorySetNacs
+                            kELMHistoryGetNacs, kELMHistorySetNacs, &
+                            kELMRestartFieldClass, kELMRestartPoisonScratch, &
+                            KELM_RESTART_CLASS_STATE
   use pio
   use iso_c_binding, only : c_int, c_double
   implicit none
@@ -149,6 +169,8 @@ contains
     write(fname,'(a,".kelm.r.",i4.4,"-",i2.2,"-",i2.2,"-",i5.5,".nc")') &
          trim(caseid), yr, mon, day, tod
 
+    call report_untouched(elm, logunit, subname)
+
     ! ELM's restart lines (restFileMod.F90) bracket kELM's own summary.
     if (masterproc) then
        write(rdate,'(i4.4,"-",i2.2,"-",i2.2,"-",i5.5)') yr, mon, day, tod
@@ -157,7 +179,7 @@ contains
        call shr_sys_flush(logunit)
     end if
 
-    call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
+    call layout_begin(elm, f, nfld, ncell, ncell_global, .false., .true., subname)
     allocate(vid(nfld))
 
     ierr = PIO_createfile(pio_subsystem, file, io_type, trim(fname), ior(PIO_CLOBBER, io_format))
@@ -315,7 +337,7 @@ contains
     real(c_double), allocatable :: buf(:)
     character(len=*), parameter :: subname = '(kelm_rest_read) '
 
-    call layout_begin(elm, f, nfld, ncell, ncell_global, branch, subname)
+    call layout_begin(elm, f, nfld, ncell, ncell_global, branch, .false., subname)
 
     ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot open '//trim(fname))
@@ -325,7 +347,7 @@ contains
        if (.not. f(i)%active) cycle
        ierr = PIO_inq_varid(file, trim(f(i)%name), varid)
        if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: '//trim(f(i)%name)// &
-            ' is not on '//trim(fname)//' -- a restart must carry all state')
+            ' is not on '//trim(fname)//' -- a restart must carry all STATE fields')
        ierr = PIO_inq_varndims(file, varid, ndims_v)
        ierr = PIO_inq_vardimid(file, varid, dimids(1:ndims_v))
        ierr = PIO_inq_dimlen(file, dimids(1), len1)
@@ -358,6 +380,8 @@ contains
     hd    = read_int(file, 'rst:hist_start_day')
     call PIO_closefile(file)
     call layout_end()
+
+    call poison_scratch(elm, logunit, subname)
 
     if (branch) then
        nacs = 0
@@ -408,7 +432,7 @@ contains
     character(len=*), parameter :: subname = '(kelm_rest_read_lnd2atm) '
 
     tab = 0.0_r8
-    call layout_begin(elm, f, nfld, ncell, ncell_global, .false., subname)
+    call layout_begin(elm, f, nfld, ncell, ncell_global, .false., .false., subname)
     ierr = PIO_openfile(pio_subsystem, file, io_type, trim(fname), PIO_NOWRITE)
     if (ierr /= PIO_NOERR) call shr_sys_abort(subname//'ERROR: cannot open '//trim(fname))
     call PIO_seterrorhandling(file, PIO_BCAST_ERROR)
@@ -433,31 +457,39 @@ contains
   end subroutine kelm_rest_read_lnd2atm
 
   !-----------------------------------------------------------------------
-  subroutine layout_begin(elm, f, nfld, ncell, ncell_global, skip_hist, subname)
+  subroutine layout_begin(elm, f, nfld, ncell, ncell_global, skip_hist, writing, subname)
     !
     ! Query every registry field, agree its layout across ranks, and build
-    ! the global positions of each kind in use. skip_hist leaves the "hist:"
-    ! accumulators inactive (a branch).
+    ! the global positions of each kind in use. Only STATE fields are active,
+    ! or every field when writing with KELM_RESTART_WRITE_ALL. skip_hist
+    ! leaves the "hist:" accumulators inactive (a branch).
     !
     type(kELMType) , intent(in)  :: elm
     type(field_t), allocatable, intent(out) :: f(:)
     integer         , intent(out) :: nfld
     integer         , intent(in)  :: ncell, ncell_global
     logical         , intent(in)  :: skip_hist
+    logical         , intent(in)  :: writing
     character(len=*), intent(in)  :: subname
 
-    integer(c_int) :: cnt, st, a, b, k
+    integer(c_int) :: cnt, st, a, b, k, cls
     integer :: i, ierr, nloc
     integer, allocatable :: n1loc(:), n1sum(:), n2loc(:), n2max(:)
+    logical, allocatable :: restarted(:)
+    logical :: write_all
 
     call kELMRestartFieldCount(elm, cnt, st)
     if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: RestartFieldCount')
     nfld = cnt
-    allocate(f(nfld), n1loc(nfld), n1sum(nfld), n2loc(nfld), n2max(nfld))
+    allocate(f(nfld), n1loc(nfld), n1sum(nfld), n2loc(nfld), n2max(nfld), restarted(nfld))
+    write_all = writing .and. env_on('KELM_RESTART_WRITE_ALL')
     do i = 1, nfld
        call kELMRestartFieldInfo(elm, int(i-1, c_int), f(i)%name, a, b, k, st)
        if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: RestartFieldInfo')
+       call kELMRestartFieldClass(elm, int(i-1, c_int), cls, st)
+       if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: RestartFieldClass')
        f(i)%n1 = a; f(i)%n2 = b; f(i)%kind = k
+       restarted(i) = write_all .or. cls == KELM_RESTART_CLASS_STATE
        n1loc(i) = a; n2loc(i) = b
     end do
 
@@ -468,7 +500,7 @@ contains
 
     do i = 1, nfld
        f(i)%n2g = n2max(i)
-       f(i)%active = n1sum(i) > 0 .and. f(i)%kind /= KIND_TOPO
+       f(i)%active = n1sum(i) > 0 .and. f(i)%kind /= KIND_TOPO .and. restarted(i)
        if (skip_hist .and. f(i)%name(1:5) == 'hist:') f(i)%active = .false.
        if (.not. f(i)%active) cycle
        ! A rank either holds the field for all its entities of that kind or
@@ -486,6 +518,61 @@ contains
     end do
 
   end subroutine layout_begin
+
+  !-----------------------------------------------------------------------
+  logical function env_on(name)
+    ! True when environment variable name is set to anything but "" or "0".
+    character(len=*), intent(in) :: name
+    character(len=16) :: v
+    integer :: n, ist
+    call get_environment_variable(name, v, n, ist)
+    env_on = ist == 0 .and. n > 0 .and. trim(v) /= '0'
+  end function env_on
+
+  !-----------------------------------------------------------------------
+  subroutine poison_scratch(elm, logunit, subname)
+    ! KELM_RESTART_POISON testing aid (see the header): SNaN-fill SCRATCH
+    ! fields after a read; "trap" also traps invalid operations.
+    type(kELMType)  , intent(in) :: elm
+    integer         , intent(in) :: logunit
+    character(len=*), intent(in) :: subname
+    character(len=16) :: v
+    integer :: n, ist
+    integer(c_int) :: cnt, st, trap
+    call get_environment_variable('KELM_RESTART_POISON', v, n, ist)
+    if (ist /= 0 .or. n == 0 .or. trim(v) == '0') return
+    trap = 0
+    if (trim(v) == 'trap') trap = 1
+    call kELMRestartPoisonScratch(elm, trap, cnt, st)
+    if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: RestartPoisonScratch')
+    if (masterproc) then
+       write(logunit,'(a,i0,a,a)') subname//'TESTING: poisoned ', cnt, &
+            ' SCRATCH fields with signaling NaN, KELM_RESTART_POISON=', trim(v)
+       call shr_sys_flush(logunit)
+    end if
+  end subroutine poison_scratch
+
+  !-----------------------------------------------------------------------
+  subroutine report_untouched(elm, logunit, subname)
+    ! KELM_RESTART_POISON=report testing aid: before a write, print each
+    ! SCRATCH field that still holds poison somewhere, i.e. that no kernel
+    ! stored to since the read. Such a field is set only at init (INIT).
+    type(kELMType)  , intent(in) :: elm
+    integer         , intent(in) :: logunit
+    character(len=*), intent(in) :: subname
+    character(len=16) :: v
+    integer :: n, ist
+    integer(c_int) :: cnt, st
+    call get_environment_variable('KELM_RESTART_POISON', v, n, ist)
+    if (ist /= 0 .or. trim(v) /= 'report') return
+    call kELMRestartPoisonScratch(elm, 2_c_int, cnt, st)
+    if (st /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: RestartPoisonScratch')
+    if (masterproc) then
+       write(logunit,'(a,i0,a)') subname//'TESTING: ', cnt, &
+            ' SCRATCH fields still hold poison (KELM_RESTART_POISON=report)'
+       call shr_sys_flush(logunit)
+    end if
+  end subroutine report_untouched
 
   !-----------------------------------------------------------------------
   subroutine layout_end()
