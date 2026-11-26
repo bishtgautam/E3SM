@@ -335,6 +335,7 @@ CONTAINS
     type(ESMF_TimeInterval) :: kelm_step
     type(ESMF_Time) :: hist_time
     logical  :: dosend, doalb_step
+    integer :: npass                 ! kelm_run passes so far in this call
     integer  :: rc, cyr, cmon, cday, ctod, cymd
     integer  :: hist_year, hist_month, hist_day, hist_tod
     character(len=256) :: step_date  ! model date for the per-step log lines
@@ -380,6 +381,7 @@ CONTAINS
     call ESMF_ClockGet(EClock, timeStep=kelm_step, rc=rc)
     call chkrc(rc, 'lnd::lnd_run_mct: ESMF_ClockGet timeStep')
 
+    npass = 0
     dosend = .false.
     do while (.not. dosend)
 
@@ -437,8 +439,18 @@ CONTAINS
        call kelm_run(logunit_lnd, coupling_dt_in_sec, month, day, &
                       nextsw_cday, declinp1, doalb=doalb_step, &
                       hist_year=hist_year, hist_month=hist_month, &
-                      hist_day=hist_day, hist_tod=hist_tod)
+                      hist_day=hist_day, hist_tod=hist_tod, &
+                      repeat_pass=(npass > 0))
        call kelm_t_stop('kelm_run')
+       npass = npass + 1
+
+       ! lnd2atm after every pass, as ELM's elm_drv ends with lnd2atm: on the
+       ! first call's nstep-1 pass, fineTOP's reflected terms then use the
+       ! nstep-0 surface (l2a_lwup, l2a_albd/albi), not the cold-start seed.
+       ! Every later call has one pass, so this is still one pull per call.
+       call kelm_t_start('lc_lnd_export')
+       call kelm_kokkos_pull_lnd2atm(kelm_state)
+       call kelm_t_stop('lc_lnd_export')
 
        if (masterproc .and. kelm_perf_ncells == 0) then
           write(logunit_lnd,*) '   Completed timestep: ',trim(step_date)
@@ -459,7 +471,6 @@ CONTAINS
     end do
 
     call kelm_t_start('lc_lnd_export')
-    call kelm_kokkos_pull_lnd2atm(kelm_state)
     call kelm_lnd_export(l2x_l%rattr)
     call kelm_t_stop('lc_lnd_export')
 

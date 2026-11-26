@@ -717,6 +717,13 @@ contains
        kelm_hist_start_day   = day
 
        call kelm_kokkos_seed_topology(kelm_state, logunit)
+       ! The natural columns' cell index (and cell lat/lon) must be on the
+       ! device before lnd_comp_mct's init lnd2atm pull: Lnd2AtmFinetop
+       ! scatters each column's FIRE and albedo to its cell through it. Left
+       ! to the first kelm_run, the map was all zeros at that pull, every
+       ! column wrote cell 0 at once (last writer wins, so GPU runs were not
+       ! repeatable), and every other cell's l2a_lwup started at 0.
+       call kelm_kokkos_push_latlon(kelm_state, cell_lat, cell_lon, logunit)
        call kelm_kokkos_seed_state(kelm_state, logunit)
        call kelm_kokkos_seed_canopy_hydrology(kelm_state, logunit)
        if (use_top_solar_rad) call kelm_kokkos_push_top_solar_rad(kelm_state, logunit)
@@ -955,7 +962,8 @@ contains
   !-----------------------------------------------------------------------
   subroutine kelm_run(logunit, coupling_dt_in_sec, month, day, &
                        nextsw_cday, declinp1, doalb, &
-                       hist_year, hist_month, hist_day, hist_tod)
+                       hist_year, hist_month, hist_day, hist_tod, &
+                       repeat_pass)
     !
     ! !DESCRIPTION:
     ! Advance kELM one coupling interval.
@@ -976,15 +984,24 @@ contains
     ! and must not change meaning as a side effect of adding history --
     ! see the plan's "Two small changes outside the new module").
     integer, intent(in), optional :: hist_year, hist_month, hist_day, hist_tod
+    ! .true. on a second or later pass within one coupling interval (the
+    ! first call's nstep-1 pass). ELM imports once per interval and adjusts
+    ! its gridcell radiation for terrain in place on every pass, so the
+    ! repeat pass re-adjusts the already-adjusted forcing; kELM keeps the
+    ! device's radiation instead of re-pushing the coupler's to match.
+    logical, intent(in), optional :: repeat_pass
 
     logical :: do_albedo_this_step
     logical :: doalb_in            ! the driver's doalb, independent of config
+    logical :: repeat_in           ! repeat_pass, defaulted
     integer :: ierr_rs
     integer :: kfail
     type(kELMStepInputs) :: step_in
 
     doalb_in = .true.
     if (present(doalb)) doalb_in = doalb
+    repeat_in = .false.
+    if (present(repeat_pass)) repeat_in = repeat_pass
     do_albedo_this_step = kelm_do_albedo .and. doalb_in
 
     ! RESTART READ, on the first step of a continue/branch run. It has to be
@@ -1069,7 +1086,7 @@ contains
     if (kokkos_state_built) then
        call kelm_t_start('kelm_push_forcing')
        call kelm_kokkos_push_forcing(kelm_state, nextsw_cday, declinp1, &
-            cell_lat, cell_lon, logunit)
+            cell_lat, cell_lon, logunit, keep_radiation=repeat_in)
        call kelm_lake_push_forcing(kelm_state)
        call kelm_t_stop('kelm_push_forcing')
     end if

@@ -1378,7 +1378,8 @@ contains
   end subroutine kelm_kokkos_push_latlon
 
 
-  subroutine kelm_kokkos_push_forcing(elm, nextsw_cday, declin, lat, lon, logunit)
+  subroutine kelm_kokkos_push_forcing(elm, nextsw_cday, declin, lat, lon, logunit, &
+                                      keep_radiation)
     !
     ! The per-timestep "atmospheric forcing in" crossing -- one of the two the
     ! plan allows. Everything here genuinely changes every coupling interval;
@@ -1402,6 +1403,11 @@ contains
     real(r8), intent(in) :: declin        ! solar declination [radians]
     real(r8), intent(in) :: lat(:), lon(:) ! per gridcell [degrees]
     integer, intent(in) :: logunit
+    ! .true.: leave the cell's shortwave and longwave as the device has them,
+    ! so fineTOP re-adjusts them in place (ELM's repeat pass on the first
+    ! coupling call; see kelm_run's repeat_pass).
+    logical, intent(in), optional :: keep_radiation
+    logical :: keep_rad
     integer :: g, ncell, ierr
     real(r8), allocatable :: rcell(:), rsol(:,:)
     logical, save :: reported = .false.
@@ -1409,13 +1415,17 @@ contains
     character(len=*), parameter :: subname = '(kelm_kokkos_push_forcing) '
 
     call require_built(subname)
+    keep_rad = .false.
+    ! Only fineTOP adjusts the cell's radiation in place; without it the
+    ! coupler's values are pushed every pass, as before.
+    if (present(keep_radiation)) keep_rad = keep_radiation .and. finetop_on
     ncell = ncells_local()
     allocate(rcell(ncell), rsol(ncell, numrad))
 
     call cell_set_1d(elm, 'cell:forc_t'    , forc_tbot(1:ncell))
     call cell_set_1d(elm, 'cell:forc_pbot' , forc_pbot(1:ncell))
     call cell_set_1d(elm, 'cell:forc_q'    , forc_shum(1:ncell))
-    call cell_set_1d(elm, 'cell:forc_lwrad', forc_lwrad(1:ncell))
+    if (.not. keep_rad) call cell_set_1d(elm, 'cell:forc_lwrad', forc_lwrad(1:ncell))
     call cell_set_1d(elm, 'cell:forc_u'    , forc_u(1:ncell))
     call cell_set_1d(elm, 'cell:forc_v'    , forc_v(1:ncell))
     call cell_set_1d(elm, 'cell:forc_th'   , forc_ptem(1:ncell))
@@ -1431,16 +1441,18 @@ contains
        rcell(g) = forc_snowc(g) + forc_snowl(g)
     end do
     call cell_set_1d(elm, 'cell:forc_snow', rcell)
-    do g = 1, ncell
-       rsol(g,1) = forc_swvdr(g)
-       rsol(g,2) = forc_swndr(g)
-    end do
-    call cell_set_2d(elm, 'cell:forc_solad', rsol)
-    do g = 1, ncell
-       rsol(g,1) = forc_swvdf(g)
-       rsol(g,2) = forc_swndf(g)
-    end do
-    call cell_set_2d(elm, 'cell:forc_solai', rsol)
+    if (.not. keep_rad) then
+       do g = 1, ncell
+          rsol(g,1) = forc_swvdr(g)
+          rsol(g,2) = forc_swndr(g)
+       end do
+       call cell_set_2d(elm, 'cell:forc_solad', rsol)
+       do g = 1, ncell
+          rsol(g,1) = forc_swvdf(g)
+          rsol(g,2) = forc_swndf(g)
+       end do
+       call cell_set_2d(elm, 'cell:forc_solai', rsol)
+    end if
     call cell_set_2d(elm, 'cell:forc_aer', forc_aer(1:ncell, :))
 
     ! ---- static geometry, once ----
