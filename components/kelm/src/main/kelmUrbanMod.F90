@@ -620,6 +620,14 @@ contains
     call surf_set_1d(elm, 'zwt_perched', spread(spval, 1, nc))
     call surf_set_1d(elm, 'frost_table', spread(spval, 1, nc))
     call surf_set_1d(elm, 'h2osfc_thresh', spread(0._r8, 1, nc))
+    ! Albedos: ELM SurfaceAlbedoType InitCold sets every column's albgrd/albgri
+    ! and every patch's albd/albi to 0.2, and runs no UrbanAlbedo before the
+    ! first step, so the startup step's urban reflected solar (fsr) is
+    ! 0.2 x the plane-parallel solar. Left at 0, kELM's startup fsr was 0.
+    call surf_set_2d(elm, 'albgrd', spread(spread(0.2_r8, 1, nc), 2, 2))
+    call surf_set_2d(elm, 'albgri', spread(spread(0.2_r8, 1, nc), 2, 2))
+    call surf_set_2d(elm, 'albd'  , spread(spread(0.2_r8, 1, nc), 2, 2))
+    call surf_set_2d(elm, 'albi'  , spread(spread(0.2_r8, 1, nc), 2, 2))
 
     call kELMUrbanBuildFilters(elm, ierr)
     if (ierr /= KELM_SUCCESS) call shr_sys_abort(subname//'ERROR: kELMUrbanBuildFilters failed')
