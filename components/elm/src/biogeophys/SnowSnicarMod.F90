@@ -1045,7 +1045,7 @@ contains
 
 
                      ! ERROR check: negative absorption
-                     if (flx_abs_lcl(i,bnd_idx) < -0.00001) then
+                     if (flx_abs_lcl(i,bnd_idx) < -0.00001_r8) then
                         trip = 1
                      endif
                   enddo
@@ -2994,7 +2994,7 @@ contains
                     flx_abs_lcl(i,bnd_idx) = F_abs(i)
 
                     ! ERROR check: negative absorption
-                    if (flx_abs_lcl(i,bnd_idx) < -0.00001) then
+                    if (flx_abs_lcl(i,bnd_idx) < -0.00001_r8) then
                       write (iulog,"(a,e13.6,a,i6,a,i6)") "SNICAR ERROR: negative absoption : ", flx_abs_lcl(i,bnd_idx), &
                            " at timestep: ", nstep, " at column: ", c_idx
                       write(iulog,*) "SNICAR_AD STATS: snw_rds(0)= ", snw_rds(c_idx,0)

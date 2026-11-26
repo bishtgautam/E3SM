@@ -3515,7 +3515,7 @@ contains
     logical  :: flag                  ! signal that matrix was not invertible
     logical  :: night                 ! signal to store vegwp within this routine, b/c it is night-time and full suite won't be called
     integer , parameter :: itmax=50   ! exit newton's method if iters>itmax
-    real(r8), parameter :: tolf=1.e-6,toldx=1.e-9 !tolerances for a satisfactory solution
+    real(r8), parameter :: tolf=1.e-6_r8,toldx=1.e-9_r8 !tolerances for a satisfactory solution
     logical  :: havegs                ! signals direction of calculation gs->qflx or qflx->gs
     real(r8) :: soilflux              ! total soil column transpiration [mm/s]
     real(r8), parameter :: tol_lai=.001_r8 ! minimum lai where transpiration is calc'd

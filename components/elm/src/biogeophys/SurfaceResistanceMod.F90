@@ -236,7 +236,7 @@ contains
      real(r8), parameter  :: C = 120._r8       ! K
      real(r8), parameter  :: T0 = 291.25_r8    ! K
      real(r8), parameter  :: mu0 = 18.27e-6_r8 ! Pa s
-     real(r8), parameter  :: prandtl = 0.72    !
+     real(r8), parameter  :: prandtl = 0.72_r8    !
      real(r8)             :: mu, diffh2o, sc
      real(r8)             :: cc                ! unitless scaling factor
 

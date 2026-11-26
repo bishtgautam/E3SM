@@ -775,7 +775,7 @@ contains
 
                !scs: original formulation
                if (jwt(c) == 0) then
-                  qcharge(c) = -ka * (wh_zwt-wh)  /((zwt(c)+1.e-3)*1000._r8)
+                  qcharge(c) = -ka * (wh_zwt-wh)  /((zwt(c)+1.e-3_r8)*1000._r8)
                else
                   !             qcharge(c) = -ka * (wh_zwt-wh)/((zwt(c)-z(c,jwt(c)))*1000._r8)
                   !scs: 1/2, assuming flux is at zwt interface, saturation deeper than zwt
@@ -812,7 +812,7 @@ contains
 
                !scs: original formulation
                if (jwt(c) == 0) then
-                  qcharge(c) = -ka * (wh_zwt-wh)  /((zwt(c)+1.e-3)*1000._r8)
+                  qcharge(c) = -ka * (wh_zwt-wh)  /((zwt(c)+1.e-3_r8)*1000._r8)
                else
                   !             qcharge(c) = -ka * (wh_zwt-wh)/((zwt(c)-z(c,jwt(c)))*1000._r8)
                   !scs: 1/2, assuming flux is at zwt interface, saturation deeper than zwt

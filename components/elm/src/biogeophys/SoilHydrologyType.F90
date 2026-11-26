@@ -441,7 +441,7 @@ contains
        ! get original soil depths to be used in interpolation of sand and clay
        allocate(zsoifl(1:nlevsoifl), zisoifl(0:nlevsoifl), dzsoifl(1:nlevsoifl))
        do j = 1, nlevsoifl
-          zsoifl(j) = 0.025*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
+          zsoifl(j) = 0.025_r8*(exp(0.5_r8*(j-0.5_r8))-1._r8)    !node depths
        enddo
 
        dzsoifl(1) = 0.5_r8*(zsoifl(1)+zsoifl(2))             !thickness b/n two interfaces
@@ -566,7 +566,7 @@ contains
     call ncd_pio_openfile (ncid, locfn, 0)
     call ncd_io(ncid=ncid, varname='pc', flag='read', data=this%pc, dim1name=grlnd, readvar=readvar)
     if (.not. readvar) then
-      this%pc(:) = 0.4
+      this%pc(:) = 0.4_r8
     end if
     call ncd_pio_closefile(ncid)
 
@@ -582,11 +582,11 @@ contains
          if (micro_sigma(c) > 1.e-6_r8 .and. (this%h2osfcflag /= 0)) then
             d = 0.0
             do p = 1,4
-               fd   = 0.5*(1.0_r8+shr_spfn_erf(d/(micro_sigma(c)*sqrt(2.0)))) - this%pc(g)
+               fd   = 0.5_r8*(1.0_r8+shr_spfn_erf(d/(micro_sigma(c)*sqrt(2.0_r8)))) - this%pc(g)
                dfdd = exp(-d**2/(2.0*micro_sigma(c)**2))/(micro_sigma(c)*sqrt(2.0*shr_const_pi))
                d    = d - fd/dfdd
             enddo
-            this%h2osfc_thresh_col(c) = 0.5*d*(1.0_r8+shr_spfn_erf(d/(micro_sigma(c)*sqrt(2.0)))) + &
+            this%h2osfc_thresh_col(c) = 0.5_r8*d*(1.0_r8+shr_spfn_erf(d/(micro_sigma(c)*sqrt(2.0_r8)))) + &
                  micro_sigma(c)/sqrt(2.0*shr_const_pi)*exp(-d**2/(2.0*micro_sigma(c)**2))
             this%h2osfc_thresh_col(c) = 1.e3_r8 * this%h2osfc_thresh_col(c) !convert to mm from meters
          else
@@ -739,7 +739,7 @@ contains
        !calculate other parameters based on teh percentages
        soilhydrology_vars%porosity_col(c, i) = 0.489_r8 - 0.00126_r8*sandvic(i)
        soilhydrology_vars%expt_col(c, i)     = 3._r8+ 2._r8*(2.91_r8 + 0.159_r8*clayvic(i))
-       xksat = 0.0070556 *( 10.**(-0.884+0.0153*sandvic(i)) )
+       xksat = 0.0070556_r8 *( 10._r8**(-0.884_r8+0.0153_r8*sandvic(i)) )
 
        !consider organic matter, M.Huang
        soilhydrology_vars%expt_col(c, i)    = &

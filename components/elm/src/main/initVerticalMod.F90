@@ -74,7 +74,7 @@ contains
     real(r8)              :: slopebeta         ! temporary
     real(r8)              :: slopemax          ! temporary
     integer               :: ier               ! error status
-    real(r8)              :: thick_equal = 0.2
+    real(r8)              :: thick_equal = 0.2_r8
     real(r8) ,pointer     :: lakedepth_in(:,:)   ! read in - lakedepth 
     real(r8), allocatable :: zurb_wall(:,:)    ! wall (layer node depth)
     real(r8), allocatable :: zurb_roof(:,:)    ! roof (layer node depth)

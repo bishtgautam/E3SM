@@ -456,7 +456,7 @@ contains
          c = filter_nolakec(fc)
          if ( (h2osfc(c) > thin_sfclayer) .and. (frac_h2osfc(c) > thin_sfclayer) ) then
             c_h2osfc(c)  = max(thin_sfclayer, cpliq*h2osfc(c)/frac_h2osfc(c)  )
-            dz_h2osfc(c) = max(thin_sfclayer, 1.0e-3*h2osfc(c)/frac_h2osfc(c) )
+            dz_h2osfc(c) = max(thin_sfclayer, 1.0e-3_r8*h2osfc(c)/frac_h2osfc(c) )
          else
             c_h2osfc(c)  = thin_sfclayer
             dz_h2osfc(c) = thin_sfclayer
@@ -1115,7 +1115,7 @@ contains
       ! calculate thermal conductivity of h2osfc
       do fc = 1, num_nolakec
          c = filter_nolakec(fc)
-         zh2osfc=1.0e-3*(0.5*h2osfc(c)) !convert to [m] from [mm]
+         zh2osfc=1.0e-3_r8*(0.5_r8*h2osfc(c)) !convert to [m] from [mm]
          tk_h2osfc(c)= tkwat*thk(c,1)*(z(c,1)+zh2osfc) &
               /(tkwat*z(c,1)+thk(c,1)*zh2osfc)
       enddo

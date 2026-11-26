@@ -1237,35 +1237,35 @@ module VegetationDataType
        l = veg_pp%landunit(p)
 
        if (use_vancouver) then
-          this%t_veg(p)   = 297.56
+          this%t_veg(p)   = 297.56_r8
        else if (use_mexicocity) then
-          this%t_veg(p)   = 289.46
+          this%t_veg(p)   = 289.46_r8
        else
           this%t_veg(p)   = 283._r8
        end if
 
        if (use_vancouver) then
-          this%t_ref2m(p) = 297.56
+          this%t_ref2m(p) = 297.56_r8
        else if (use_mexicocity) then
-          this%t_ref2m(p) = 289.46
+          this%t_ref2m(p) = 289.46_r8
        else
           this%t_ref2m(p) = 283._r8
        end if
 
        if (lun_pp%urbpoi(l)) then
           if (use_vancouver) then
-             this%t_ref2m_u(p) = 297.56
+             this%t_ref2m_u(p) = 297.56_r8
           else if (use_mexicocity) then
-             this%t_ref2m_u(p) = 289.46
+             this%t_ref2m_u(p) = 289.46_r8
           else
              this%t_ref2m_u(p) = 283._r8
           end if
        else
           if (.not. lun_pp%ifspecial(l)) then
              if (use_vancouver) then
-                this%t_ref2m_r(p) = 297.56
+                this%t_ref2m_r(p) = 297.56_r8
              else if (use_mexicocity) then
-                this%t_ref2m_r(p) = 289.46
+                this%t_ref2m_r(p) = 289.46_r8
              else
                 this%t_ref2m_r(p) = 283._r8
              end if

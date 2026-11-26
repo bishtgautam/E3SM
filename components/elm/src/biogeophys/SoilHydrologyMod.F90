@@ -614,7 +614,7 @@ contains
              endif
 
              ! cutoff lower limit
-             if ( qflx_h2osfc_surf(c) < 1.0e-8) qflx_h2osfc_surf(c) = 0._r8
+             if ( qflx_h2osfc_surf(c) < 1.0e-8_r8) qflx_h2osfc_surf(c) = 0._r8
 
              ! use this for non-h2osfc code
              if(h2osfcflag==0) then
@@ -1102,7 +1102,7 @@ contains
              !--  compute possible perched water table *and* groundwater table afterwards
              ! locate perched water table from bottom up starting at frost table
              ! sat_lev is an arbitrary saturation level used to determine perched water table
-             sat_lev=0.9
+             sat_lev=0.9_r8
 
              k_perch=1
              do k=k_frz,1,-1
@@ -1567,7 +1567,7 @@ contains
              !--  compute possible perched water table *and* groundwater table afterwards
              ! locate perched water table from bottom up starting at frost table
              ! sat_lev is an arbitrary saturation level used to determine perched water table
-             sat_lev=0.9
+             sat_lev=0.9_r8
 
              k_perch=1
              do k=k_frz,1,-1
@@ -2479,7 +2479,7 @@ contains
              !--  compute possible perched water table *and* groundwater table afterwards
              ! locate perched water table from bottom up starting at frost table
              ! sat_lev is an arbitrary saturation level used to determine perched water table
-             sat_lev=0.9
+             sat_lev=0.9_r8
 
              k_perch=1
              do k=k_frz,1,-1

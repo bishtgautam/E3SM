@@ -1252,12 +1252,12 @@ contains
                    ! Set road top layer to initial air temperature and interpolate other
                    ! layers down to 20C in bottom layer
                    do j = 1, nlevgrnd
-                      this%t_soisno(c,j) = 297.56 - (j-1) * ((297.56-293.16)/(nlevgrnd-1))
+                      this%t_soisno(c,j) = 297.56_r8 - (j-1) * ((297.56_r8-293.16_r8)/(nlevgrnd-1))
                    end do
                    ! Set wall and roof layers to initial air temperature
                 else if (col_pp%itype(c) == icol_sunwall .or. col_pp%itype(c) == icol_shadewall &
                      .or. col_pp%itype(c) == icol_roof) then
-                   this%t_soisno(c,1:nlevurb) = 297.56
+                   this%t_soisno(c,1:nlevurb) = 297.56_r8
                 else
                    this%t_soisno(c,1:nlevgrnd) = 283._r8
                 end if
@@ -1266,12 +1266,12 @@ contains
                    ! Set road top layer to initial air temperature and interpolate other
                    ! layers down to 22C in bottom layer
                    do j = 1, nlevgrnd
-                      this%t_soisno(c,j) = 289.46 - (j-1) * ((289.46-295.16)/(nlevgrnd-1))
+                      this%t_soisno(c,j) = 289.46_r8 - (j-1) * ((289.46_r8-295.16_r8)/(nlevgrnd-1))
                    end do
                 else if (col_pp%itype(c) == icol_sunwall .or. col_pp%itype(c) == icol_shadewall &
                      .or. col_pp%itype(c) == icol_roof) then
                    ! Set wall and roof layers to initial air temperature
-                   this%t_soisno(c,1:nlevurb) = 289.46
+                   this%t_soisno(c,1:nlevurb) = 289.46_r8
                 else
                    this%t_soisno(c,1:nlevgrnd) = 283._r8
                 end if
@@ -2492,7 +2492,7 @@ contains
           if (.not. present(c12_carbonstate_vars)) then ! initializing a c12 type
              do j = 1, nlevdecomp
                 do k = 1, ndecomp_pools
-                   if (zsoi(j) < 0.3 ) then  !! only initialize upper soil column
+                   if (zsoi(j) < 0.3_r8 ) then  !! only initialize upper soil column
                       this%decomp_cpools_vr(c,j,k) = decomp_cascade_con%initial_stock(k)
                    else
                       this%decomp_cpools_vr(c,j,k) = 0._r8

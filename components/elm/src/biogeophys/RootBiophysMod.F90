@@ -102,7 +102,7 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer :: p, lev, c, nlevbed
-    real    :: totrootfr
+    real(r8) :: totrootfr
     !------------------------------------------------------------------------
 
     !(computing from surface, d is depth in meter):

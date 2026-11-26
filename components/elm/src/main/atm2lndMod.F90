@@ -159,8 +159,8 @@ contains
          call Qsat(tbot_c,pbot_c,es_c,dum1,qs_c,dum2)
 
          qbot_c = qbot_g*(qs_c/qs_g)
-         egcm_c = qbot_c*pbot_c/(0.622+0.378*qbot_c)
-         rhos_c = (pbot_c-0.378*egcm_c) / (rair*tbot_c)
+         egcm_c = qbot_c*pbot_c/(0.622_r8+0.378_r8*qbot_c)
+         rhos_c = (pbot_c-0.378_r8*egcm_c) / (rair*tbot_c)
 
          forc_t_c(c)    = tbot_c
          forc_th_c(c)   = thbot_c

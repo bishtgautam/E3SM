@@ -545,7 +545,7 @@ contains
              snowmelt(c) = qflx_snow_melt(c) * dtime
 
              ! set shape factor for accumulation of snow
-             accum_factor=0.1
+             accum_factor=0.1_r8
 
              if (h2osno(c) > 0.0) then
 
@@ -868,15 +868,15 @@ contains
                     d=0.0
                     sigma=1.0e3_r8 * micro_sigma(c) ! convert to mm
                     do k=1,10
-                       fd = 0.5*d*(1.0_r8+erf(d/(sigma*sqrt(2.0)))) &
+                       fd = 0.5_r8*d*(1.0_r8+erf(d/(sigma*sqrt(2.0_r8)))) &
                             +sigma/sqrt(2.0*shr_const_pi)*exp(-d**2/(2.0*sigma**2)) &
                             -h2osfc(c)
-                       dfdd = 0.5*(1.0_r8+erf(d/(sigma*sqrt(2.0))))
+                       dfdd = 0.5_r8*(1.0_r8+erf(d/(sigma*sqrt(2.0_r8))))
 
                        d = d - fd/dfdd
                     enddo
                     !--  update the submerged areal fraction using the new d value
-                    frac_h2osfc(c) = 0.5*(1.0_r8+erf(d/(sigma*sqrt(2.0))))
+                    frac_h2osfc(c) = 0.5_r8*(1.0_r8+erf(d/(sigma*sqrt(2.0_r8))))
                 endif ! end if polygonal test
              else ! if h2osfc(c) <= min_h2osfc
                 frac_h2osfc(c) = 0._r8
