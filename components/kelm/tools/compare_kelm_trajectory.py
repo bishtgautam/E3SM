@@ -41,10 +41,17 @@ ANCHOR = {
     "t_soisno":       "cantemp_in:t_soisno",
     "h2osoi_liq_soi": "cantemp_in:h2osoi_liq",
     "h2osoi_ice_soi": "cantemp_in:h2osoi_ice",
-    "t_veg":          "canflx_in:t_veg",
+    "t_veg":          "canflx_out:t_veg",
     "btran":          "canflx_in:btran",
     "h2ocan":         "canhydro_in:h2ocan",
 }
+
+# kELM label for a variable not taken from kelm_in:/kelm_out:. t_veg is
+# compared at the canopy-flux output: for a patch with no exposed vegetation
+# ELM resets t_veg to forc_t at the top of CanopyFluxes (CanopyFluxesMod.F90:492),
+# before its canflx_in snapshot, so canflx_in holds this step's air
+# temperature while kelm_in holds the previous step's value.
+KELM_LABEL = {"t_veg": "kelm_cf:t_veg"}
 
 # Sampled at the END of the step (kelm_out:), because ELM records these
 # during the step. Comparing a top-of-step value against them shifts the whole
@@ -77,6 +84,13 @@ PROFILE_NLEVTOT = {"t_soisno"}
 PATCH_FILTER = "canflx_in:filter_nolakeurbanp"
 
 
+def kelm_label(var):
+    """The kELM label holding `var` at the instant its ELM anchor describes."""
+    if var in KELM_LABEL:
+        return KELM_LABEL[var]
+    return f"kelm_out:{var}" if var in END_OF_STEP else f"kelm_in:{var}"
+
+
 def read_bin(path, keep=None):
     """Read an ELMDIAG1 file into {timestep: {label: array}}.
 
@@ -93,25 +107,29 @@ def read_bin(path, keep=None):
     with open(path, "rb") as f:
         if f.read(8) != MAGIC:
             sys.exit(f"{path}: not an ELMDIAG1 file")
-        (label_len,) = struct.unpack("<i", f.read(4))
+        # Byte order: E3SM's Fortran builds on some machines (e.g. gnu on
+        # Perlmutter) write unformatted files big-endian. LABEL_LEN is 64.
+        raw = f.read(4)
+        e = "<" if struct.unpack("<i", raw)[0] == 64 else ">"
+        (label_len,) = struct.unpack(e + "i", raw)
         while True:
             head = f.read(4)
             if len(head) < 4:
                 break
-            (ts,) = struct.unpack("<i", head)
+            (ts,) = struct.unpack(e + "i", head)
             label = to_new(f.read(label_len).decode("ascii", "replace").strip())
-            (ndims,) = struct.unpack("<i", f.read(4))
+            (ndims,) = struct.unpack(e + "i", f.read(4))
             if ndims == 0:
-                val = np.frombuffer(f.read(8), "<f8")
+                val = np.frombuffer(f.read(8), e + "f8")
             elif ndims == 1:
-                (n,) = struct.unpack("<i", f.read(4))
-                val = np.frombuffer(f.read(8 * n), "<f8")
+                (n,) = struct.unpack(e + "i", f.read(4))
+                val = np.frombuffer(f.read(8 * n), e + "f8")
             elif ndims == 2:
-                n1, n2 = struct.unpack("<ii", f.read(8))
-                val = np.frombuffer(f.read(8 * n1 * n2), "<f8").reshape((n1, n2), order="F")
+                n1, n2 = struct.unpack(e + "ii", f.read(8))
+                val = np.frombuffer(f.read(8 * n1 * n2), e + "f8").reshape((n1, n2), order="F")
             elif ndims == -1:
-                (n,) = struct.unpack("<i", f.read(4))
-                val = np.frombuffer(f.read(4 * n), "<i4").astype(float)
+                (n,) = struct.unpack(e + "i", f.read(4))
+                val = np.frombuffer(f.read(4 * n), e + "i4").astype(float)
             else:
                 sys.exit(f"{path}: unknown ndims {ndims}")
             if keep is None or label in keep:
@@ -140,7 +158,7 @@ def main():
     wanted = [v for v in ANCHOR if args.var in (None, v)]
     xx_keep = {"kelmmap:col_of_kcol", "kelmmap:patch_of_kpatch"}
     for v in wanted:
-        xx_keep.add(f"kelm_out:{v}" if v in END_OF_STEP else f"kelm_in:{v}")
+        xx_keep.add(kelm_label(v))
     em_keep = {PATCH_FILTER} | {ANCHOR[v] for v in wanted}
 
     xx = read_bin(args.kelm, xx_keep)
@@ -169,8 +187,16 @@ def main():
             break
     if active_p is not None:
         keep = [k for k, gp in enumerate(pat_map) if gp in set(active_p.tolist())]
+        if not keep and len(pat_map) == len(active_p):
+            # kELM with one patch per cell (use_single_pft) numbers its patches
+            # 1..n, while ELM still carries every PFT slot of the cell; pair
+            # them in order with ELM's active patches (both follow cell order).
+            print("patch map does not name ELM patches; pairing kELM patches "
+                  "with ELM's active patches in order")
+            pat_map = np.asarray(active_p)
+            keep = list(range(len(pat_map)))
         pat_map = pat_map[keep]
-        patch_sel = np.array(keep)
+        patch_sel = np.array(keep, dtype=int)
         print(f"active patches: {len(pat_map)} of {len(maps['kelmmap:patch_of_kpatch'])}"
               f"  (ELM patches {(pat_map + 1).tolist()})\n")
     else:
@@ -189,8 +215,7 @@ def main():
         # "never diverges" overstates what the trace covers.
         nonzero = False
         for ts in shared:
-            prefix = "kelm_out" if var in END_OF_STEP else "kelm_in"
-            a = xx[ts].get(f"{prefix}:{var}")
+            a = xx[ts].get(kelm_label(var))
             b = em[ts].get(anchor)
             if a is None or b is None:
                 continue
