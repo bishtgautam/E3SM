@@ -103,6 +103,12 @@ module kelmHistMod
   ! The open interval's start time of day [s]. Not in the restart file: a
   ! restart resumes it as 0, which is exact for monthly and daily output.
   integer :: hist_start_tod   = 0
+  ! Start of the open interval in days since the epoch when it does not begin
+  ! at hist_start_* (ELM's nstep-0 record on a sub-monthly tape is bounded
+  ! [start - dtime, start], negative at a 0001-01-01 start), used when
+  ! hist_start_override is set.
+  real(r8) :: hist_start_days_override = 0.0_r8
+  logical  :: hist_start_override      = .false.
 
   ! Output frequency and file size, ELM's hist_nhtfrq/hist_mfilt for tape 1:
   ! 0 = monthly; < 0 = every -hist_nhtfrq hours (a divisor of 24).
@@ -471,7 +477,8 @@ contains
   end subroutine kelm_hist_step
 
   !-----------------------------------------------------------------------
-  subroutine kelm_hist_write_if_due(kelm_state, year, month, day, tod, logunit)
+  subroutine kelm_hist_write_if_due(kelm_state, year, month, day, tod, logunit, &
+                                    first_step, step_sec)
     !
     ! (year, month, day, tod) is the END time of the step just taken. An
     ! interval closes at a month boundary (day==1 .and. tod==0) for
@@ -480,17 +487,35 @@ contains
     ! mean is appended to the open file as its next record; the file is
     ! closed once it holds hist_mfilt records.
     !
+    ! first_step (the cold start's nstep-0 pass), as ELM's hist_htapes_wrapup
+    ! (histFileMod.F90:3418-3428): a monthly tape skips it, so nstep 0 joins
+    ! the first month; any other tape closes it as its own one-sample record,
+    ! since mod(0, nhtfrq) = 0, dated at the run start and bounded
+    ! [start - step_sec, start]. The first day then holds 48 samples, not 49.
+    !
     implicit none
     type(kELMType), intent(in) :: kelm_state
     integer         , intent(in) :: year, month, day, tod
     integer         , intent(in) :: logunit
+    logical, intent(in), optional :: first_step
+    integer, intent(in), optional :: step_sec   ! model step [s], with first_step
 
     integer :: ierr
-    logical :: due
+    logical :: due, first
     character(len=*), parameter :: subname = '(kelm_hist_write_if_due) '
 
     if (.not. hist_init_done) return
-    if (hist_nhtfrq == 0) then
+    first = .false.
+    if (present(first_step)) first = first_step
+    if (first) then
+       if (hist_nhtfrq == 0) return
+       due = .true.
+       if (.not. present(step_sec)) call shr_sys_abort(subname// &
+            'ERROR: first_step needs step_sec')
+       hist_start_days_override = kelm_hist_days_since_epoch(year, month, day, tod) &
+                                  - real(step_sec, r8) / 86400.0_r8
+       hist_start_override = .true.
+    else if (hist_nhtfrq == 0) then
        due = (day == 1 .and. tod == 0)
     else
        due = (mod(tod, -hist_nhtfrq*3600) == 0)
@@ -512,7 +537,7 @@ contains
 
     call kelm_hist_pull(kelm_state)
 
-    if (.not. hist_file_open) call kelm_hist_open_file(logunit)
+    if (.not. hist_file_open) call kelm_hist_open_file(logunit, year, month, day, tod)
     hist_nrec = hist_nrec + 1
     call kelm_hist_write_record(year, month, day, tod, logunit)
 
@@ -556,12 +581,14 @@ contains
   end subroutine kelm_hist_pull
 
   !-----------------------------------------------------------------------
-  subroutine kelm_hist_open_file(logunit)
+  subroutine kelm_hist_open_file(logunit, end_year, end_month, end_day, end_tod)
     !
     ! Create the next history file and write what does not change between
     ! its records: dimensions, variable definitions, lon/lat/area and the
-    ! subgrid fractions. Named for its first record's interval start:
-    ! YYYY-MM for monthly files, ELM's YYYY-MM-DD-SSSSS otherwise.
+    ! subgrid fractions. Named as ELM names it: YYYY-MM of the month its
+    ! first record averages for monthly files; otherwise YYYY-MM-DD-SSSSS of
+    ! the time the file is opened, i.e. its first record's END (ELM opens it
+    ! in hist_htapes_wrapup with the current date, histFileMod.F90).
     !
     ! PCT_LANDUNIT/PCT_NAT_PFT are time-constant. A one-record file keeps
     ! ELM's h0 layout (lndgrid, lev, time); a multi-record file stores them
@@ -570,6 +597,7 @@ contains
     !
     implicit none
     integer, intent(in) :: logunit
+    integer, intent(in) :: end_year, end_month, end_day, end_tod
 
     type(var_desc_t)  :: vid_lon, vid_lat, vid_area, vid_pctl, vid_pctp
     integer :: dimid_lndgrid, dimid_time, dimid_histint, dimid_lev(MAX_LEVDIM)
@@ -582,8 +610,8 @@ contains
     if (hist_nhtfrq == 0) then
        write(cdate,'(i4.4,"-",i2.2)') hist_start_year, hist_start_month
     else
-       write(cdate,'(i4.4,"-",i2.2,"-",i2.2,"-",i5.5)') hist_start_year, hist_start_month, &
-            hist_start_day, hist_start_tod
+       write(cdate,'(i4.4,"-",i2.2,"-",i2.2,"-",i5.5)') end_year, end_month, &
+            end_day, end_tod
     end if
     hist_fname = trim(hist_caseid)//'.kelm.h0.'//trim(cdate)//'.nc'
     pct_has_time = (hist_mfilt == 1)
@@ -743,6 +771,10 @@ contains
     ! overlays its ELM twin without a conversion step.
     start_days = kelm_hist_days_since_epoch(hist_start_year, hist_start_month, &
          hist_start_day, hist_start_tod)
+    if (hist_start_override) then
+       start_days = hist_start_days_override
+       hist_start_override = .false.
+    end if
     end_days   = kelm_hist_days_since_epoch(end_year, end_month, end_day, end_tod)
     tval(1)   = end_days
     tb(1,1)   = start_days

@@ -203,6 +203,9 @@ module kelmMod
   character(len=256), public :: kelm_nrevsn = ' '
   character(len=256), private :: rest_read_file = ' '
   logical, private :: rest_read_pending = .false.
+  ! A continue or branch run: ELM's nstep carries on from the restart there,
+  ! so this run has no nstep-0 pass even though kELM's own count restarts.
+  logical, private :: rest_run = .false.
   logical, private :: rest_read_branch  = .false.   ! branch: history starts fresh
   ! Stage 3 boundary check. OFF by default since Stage 4: the probe overwrites
   ! state fields with fingerprints and restores them from the Fortran-side
@@ -1249,15 +1252,18 @@ contains
        call kelm_t_start('hbuf')
        call kelm_hist_step(kelm_state, logunit)
        call kelm_t_stop('hbuf')
-       ! The nstep-0 pass is accumulated (ELM's January mean includes it --
-       ! measured, H2OCAN to 1.3e-7) but never closes a tape: ELM skips the
-       ! write at nstep 0 (histFileMod.F90:3415). Its stamp is the run start,
-       ! day 1 00:00, which would otherwise write a one-sample file.
-       if (nstep > 0 .and. present(hist_year) .and. present(hist_month) .and. &
+       ! The nstep-0 pass is accumulated. On a monthly tape it joins January
+       ! (ELM's January mean includes it -- measured, H2OCAN to 1.3e-7); on a
+       ! sub-monthly tape ELM closes it as a one-sample record dated at the
+       ! run start (histFileMod.F90:3418-3428). kelm_hist_write_if_due does
+       ! both, told by first_step.
+       if (present(hist_year) .and. present(hist_month) .and. &
            present(hist_day) .and. present(hist_tod)) then
           call kelm_t_start('elm_drv_io_htapes')
           call kelm_hist_write_if_due(kelm_state, hist_year, hist_month, &
-                                             hist_day, hist_tod, logunit)
+                                             hist_day, hist_tod, logunit, &
+                                             first_step=(nstep == 0 .and. .not. rest_run), &
+                                             step_sec=coupling_dt_in_sec)
           call kelm_t_stop('elm_drv_io_htapes')
        end if
        call kelm_t_stop('elm_drv_io')
@@ -1400,6 +1406,7 @@ contains
        return
     end select
     rest_read_pending = .true.
+    rest_run = .true.
     nstep_restart = kelm_rest_peek_nstep(rest_read_file)
     if (masterproc) then
        write(logunit,*) subname, trim(start_type), ' run from ', trim(rest_read_file), &
