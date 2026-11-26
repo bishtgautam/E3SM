@@ -449,8 +449,7 @@ contains
     call kELMSetFrostTable(elm, rcol, n_kokkos_col, ierr); call check(ierr, subname, 'FrostTable')
 
     ! Surface-water depth threshold ("fill & spill"): ELM SoilHydrologyType
-    ! InitCold (SoilHydrologyType.F90:581-594), literals kept as ELM has them
-    ! -- sqrt(2.0) is default-real there, and matching it matters at 4e-9.
+    ! InitCold (SoilHydrologyType.F90:581-594), whose constants carry _r8.
     ! pc is ELM's gridcell pc, read from surfdata 'pc' or defaulted to 0.4
     ! (:567-569); no kELM surfdata carries it. Infiltration's frac_infclust
     ! uses the same pc (SoilHydrologyMod.F90:451; the C++ default in
@@ -465,11 +464,11 @@ contains
        if (msig > 1.e-6_r8) then
           dthr = 0.0
           do p = 1, 4
-             fd   = 0.5*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0)))) - pc_thresh
+             fd   = 0.5_r8*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0_r8)))) - pc_thresh
              dfdd = exp(-dthr**2/(2.0*msig**2))/(msig*sqrt(2.0*shr_const_pi))
              dthr = dthr - fd/dfdd
           end do
-          rcol(kc) = 0.5*dthr*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0)))) + &
+          rcol(kc) = 0.5_r8*dthr*(1.0_r8+shr_spfn_erf(dthr/(msig*sqrt(2.0_r8)))) + &
                msig/sqrt(2.0*shr_const_pi)*exp(-dthr**2/(2.0*msig**2))
           rcol(kc) = 1.e3_r8 * rcol(kc)   ! m -> mm
        end if
