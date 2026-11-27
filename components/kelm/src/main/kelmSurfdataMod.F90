@@ -104,7 +104,7 @@ module kelmSurfdataMod
   ! fraction need.
   !--------------------------------------------------------------------------
   real(r8), public, pointer :: topo_std(:)      => null()  ! (ncells) STD_ELEV, m
-  real(r8), public, pointer :: topo_slope(:)    => null()  ! (ncells) SLOPE, degrees
+  real(r8), public, pointer :: topo_slope(:)    => null()  ! (ncells) max(SLOPE, 0.2), degrees
 
   !--------------------------------------------------------------------------
   ! TOP sub-grid topographic solar radiation (ELM: use_top_solar_rad), per
@@ -314,6 +314,10 @@ contains
     ! ---- topography ----
     call read_gc_real1d(ncid, fname, 'STD_ELEV'   , ngrid, cell_ids, topo_std)
     call read_gc_real1d(ncid, fname, 'SLOPE'      , ngrid, cell_ids, topo_slope)
+    ! ELM sets a minimum slope (initVerticalMod: col_pp%topo_slope =
+    ! max(SLOPE, 0.2)), and every ELM use of the slope (drainage, perched
+    ! drainage, h2osfc threshold, micro_sigma) sees the clamped value.
+    topo_slope(:) = max(topo_slope(:), 0.2_r8)
 
     ! ---- TOP solar radiation (ELM: surfrd_get_topo_for_solar_rad) ----
     ! STDEV_ELEV, falling back to STD_ELEV as ELM does; the other four are
